@@ -284,6 +284,8 @@ function buildTimeWindowsFallback(rows, headers, keyCol) {
 
       windows.push({
         route_key: key,
+        transport_number: key,
+        tour_id: key,
         stop_type: explicitType || fallbackType,
         location: location || null,
         window_start: windowStart || null,
@@ -315,6 +317,16 @@ function buildTimeWindowsFromRows(rows) {
     /coca/,
     /ccep/,
     /cola.*(nr|nummer)/,
+  ]);
+  const transportNumberCol = pickColumn(headers, [
+    /transport.*(nr|nummer|number)/,
+    /sendung.*(nr|nummer|number)/,
+    /shipment.*(nr|nummer|number)/,
+  ]);
+  const tourIdCol = pickColumn(headers, [
+    /tour.*(nr|nummer|id)/,
+    /route.*(nr|nummer|id)/,
+    /trip.*(nr|nummer|id)/,
   ]);
   const ladenummerCol = pickColumn(headers, [
     /ladenummer/,
@@ -388,9 +400,17 @@ function buildTimeWindowsFromRows(rows) {
   const windows = [];
   for (const row of rows) {
     const colaNumber = toCellText(row[colaCol]);
+    const transportNumber = toCellText(row[transportNumberCol]);
+    const tourId = toCellText(row[tourIdCol]);
     const loadNumber = toCellText(row[ladenummerCol]);
     const smartId = toCellText(row[bestIdCol]);
-    const key = colaNumber || smartId || loadNumber || toCellText(row[keyCol]);
+    const key =
+      colaNumber ||
+      transportNumber ||
+      tourId ||
+      smartId ||
+      loadNumber ||
+      toCellText(row[keyCol]);
     if (!key) continue;
 
     const genericLocation = toCellText(row[locationCol]);
@@ -405,6 +425,8 @@ function buildTimeWindowsFromRows(rows) {
       windows.push({
         route_key: key,
         cola_number: colaNumber || null,
+        transport_number: transportNumber || smartId || key || null,
+        tour_id: tourId || transportNumber || smartId || key || null,
         load_number: loadNumber || null,
         stop_type: "LOAD",
         location: loadLocation || null,
@@ -419,6 +441,8 @@ function buildTimeWindowsFromRows(rows) {
       windows.push({
         route_key: key,
         cola_number: colaNumber || null,
+        transport_number: transportNumber || smartId || key || null,
+        tour_id: tourId || transportNumber || smartId || key || null,
         load_number: loadNumber || null,
         stop_type: "UNLOAD",
         location: unloadLocation || null,
@@ -434,6 +458,8 @@ function buildTimeWindowsFromRows(rows) {
       windows.push({
         route_key: key,
         cola_number: colaNumber || null,
+        transport_number: transportNumber || smartId || key || null,
+        tour_id: tourId || transportNumber || smartId || key || null,
         load_number: loadNumber || null,
         stop_type: rowType === "LOAD" || rowType === "UNLOAD" ? rowType : "ANY",
         location: genericLocation || null,
