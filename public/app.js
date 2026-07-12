@@ -83,6 +83,7 @@ function renderStops(stops) {
     const departure = compactDateTimeDisplay(stop.departure_display);
     const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
     const window = excelSingleWindowValue(stop);
+    const windowSource = getTimeWindowSource(stop);
     const effective = formatMinutesAsHours(stop.effective_minutes);
     const billable = formatMinutesAsHours(stop.billable_minutes);
     tr.innerHTML = `
@@ -93,6 +94,7 @@ function renderStops(stops) {
       <td>${arrival}</td>
       <td>${departure}</td>
       <td>${window}</td>
+      <td><span class="source-pill ${windowSource.className}">${windowSource.label}</span></td>
       <td>${ruleStart}</td>
       <td>${effective}</td>
       <td>${billable}</td>
@@ -680,6 +682,19 @@ function excelSingleWindowValue(stop) {
   if (/^\d{1,2}:\d{2}$/.test(raw)) return raw;
   const compact = compactDateTimeDisplay(raw);
   return compact || raw;
+}
+
+function getTimeWindowSource(stop) {
+  if (stop?.window_override_applied) {
+    return { label: "Excel", className: "source-excel" };
+  }
+  if (
+    String(stop?.timeslot_begin || "").trim() ||
+    String(stop?.timeslot_end || "").trim()
+  ) {
+    return { label: "Sixfold", className: "source-sixfold" };
+  }
+  return { label: "Keine", className: "source-none" };
 }
 
 function formatMinutesAsHours(minutesValue) {
