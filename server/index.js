@@ -1109,7 +1109,6 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
     const filteredByDuration = recalculated.filter(
       (s) => Number(s.effective_minutes || 0) <= MAX_EFFECTIVE_MINUTES,
     );
-    const visibleStops = filteredByDuration;
     const calculated = filteredByDuration.filter(
       (s) => Number(s.billable_minutes || 0) > 0,
     );
@@ -1150,7 +1149,6 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
         amount_display: formatEuro(summary.amount),
         units: summary.units,
         billed_positions: calculated.length,
-        visible_positions: visibleStops.length,
         recalculated_positions: recalculated.length,
         time_window_rows: timeWindows.length,
         time_window_matches: windowMatches,
@@ -1160,7 +1158,7 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
         excluded_from_total_positions: excludedFromTotal.length,
         excluded_from_total_amount: excludedSummary.amount,
       },
-      stops: visibleStops,
+      stops: calculated,
       note: null,
     });
   } catch (error) {
