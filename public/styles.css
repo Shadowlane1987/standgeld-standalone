@@ -336,6 +336,10 @@ tbody tr:hover {
   z-index: 40;
 }
 
+.modal[hidden] {
+  display: none;
+}
+
 .modal-card {
   width: min(920px, 96vw);
   background: #fffcf6;
