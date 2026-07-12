@@ -655,7 +655,8 @@ async function run() {
     el.resultMeta.textContent =
       `Neu berechnet: ${data.summary?.recalculated_positions || 0} | ` +
       `Zeitfenster-Matches: ${data.summary?.time_window_matches || 0}/${data.summary?.time_window_rows || 0} | ` +
-      `>14h entfernt: ${data.summary?.removed_long_stand_positions || 0}`;
+      `>14h entfernt: ${data.summary?.removed_long_stand_positions || 0} | ` +
+      `>=${data.summary?.excluded_from_total_threshold_eur || 450} EUR nicht in Summe: ${data.summary?.excluded_from_total_positions || 0}`;
 
     el.rows.innerHTML = "";
     for (const stop of data.stops || []) {

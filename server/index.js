@@ -12,6 +12,7 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 const MAX_EFFECTIVE_MINUTES = 14 * 60;
+const EXCLUDE_FROM_TOTAL_AMOUNT_EUR = 450;
 
 function toDate(value) {
   const text = String(value || "").trim();
@@ -505,13 +506,28 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
       (s) => Number(s.billable_minutes || 0) > 0,
     );
 
-    const summary = calculated.reduce(
+    const excludedFromTotal = calculated.filter(
+      (s) => Number(s.amount_eur || 0) >= EXCLUDE_FROM_TOTAL_AMOUNT_EUR,
+    );
+    const countedForTotal = calculated.filter(
+      (s) => Number(s.amount_eur || 0) < EXCLUDE_FROM_TOTAL_AMOUNT_EUR,
+    );
+
+    const summary = countedForTotal.reduce(
       (acc, item) => {
         acc.amount += Number(item.amount_eur || 0);
         acc.units += Number(item.billed_units || 0);
         return acc;
       },
       { amount: 0, units: 0 },
+    );
+
+    const excludedSummary = excludedFromTotal.reduce(
+      (acc, item) => {
+        acc.amount += Number(item.amount_eur || 0);
+        return acc;
+      },
+      { amount: 0 },
     );
 
     const windowMatches = filteredByDuration.filter(
@@ -531,6 +547,9 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
         time_window_matches: windowMatches,
         removed_long_stand_positions: removedLongStand.length,
         max_effective_hours: 14,
+        excluded_from_total_threshold_eur: EXCLUDE_FROM_TOTAL_AMOUNT_EUR,
+        excluded_from_total_positions: excludedFromTotal.length,
+        excluded_from_total_amount: excludedSummary.amount,
       },
       stops: calculated,
       note: null,
