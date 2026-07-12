@@ -968,8 +968,34 @@ function applyTimeWindowOverride(stop, windows) {
 
 function calculateWithSafeOverride(stop, rules, windows) {
   const base = calcStop(stop, rules);
+  const stopType = canonicalStopType(stop?.type);
+  const isUnloadStop = stopType === "unload";
 
-  // Prioritaet: Sixfold-Zeitfenster vor Excel.
+  // Prioritaet: Lade-Stellen behalten Sixfold, Entlade-Stellen nutzen Excel.
+  if (isUnloadStop) {
+    const overriddenStop = applyTimeWindowOverride(stop, windows);
+    if (overriddenStop !== stop) {
+      return calcStop(overriddenStop, rules);
+    }
+
+    const hasSixfoldWindow =
+      toDate(stop?.timeslot_begin) || toDate(stop?.timeslot_end);
+    if (hasSixfoldWindow) {
+      return {
+        ...base,
+        window_override_applied: false,
+        matched_window_key: null,
+      };
+    }
+
+    return {
+      ...base,
+      window_override_applied: false,
+      matched_window_key: null,
+    };
+  }
+
+  // Prioritaet fuer Lade-Stellen: Sixfold-Zeitfenster vor Excel.
   const hasSixfoldWindow =
     toDate(stop?.timeslot_begin) || toDate(stop?.timeslot_end);
   if (hasSixfoldWindow) {
