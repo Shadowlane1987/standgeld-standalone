@@ -32,163 +32,455 @@ const el = {
 
 let importedTimeWindows = [];
 const URL_STORAGE_KEY = "standgeld.sixfoldUrl";
-const SESSION_TOKEN_STORAGE_KEY = "standgeld.sessionToken";
-
-function setStatus(text, type = "info") {
-  el.status.textContent = text;
-  el.status.style.color =
-    type === "error" ? "#b91c1c" : type === "success" ? "#166534" : "#73675a";
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
-function normalizeHeader(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
+function toCellText(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, "0");
+    const d = String(value.getDate()).padStart(2, "0");
+    const hh = String(value.getHours()).padStart(2, "0");
+    const mm = String(value.getMinutes()).padStart(2, "0");
+    return `${y}-${m}-${d} ${hh}:${mm}`;
+  }
+  return String(value ?? "").trim();
 }
 
-function normalizeLoose(value) {
-  return normalizeHeader(value).replace(/[^a-z0-9]/g, "");
-}
-
-function getCellValue(row, keySet) {
-  const aliases = Array.from(keySet || []).map((value) => normalizeLoose(value));
-  for (const [key, value] of Object.entries(row || {})) {
-    const normalizedKey = normalizeLoose(key);
-    if (
-      aliases.some(
-        (alias) =>
-          normalizedKey === alias ||
-          normalizedKey.includes(alias) ||
-          alias.includes(normalizedKey),
-      )
-    ) {
-      return value;
+function pickColumn(headerList, patterns) {
+  for (const header of headerList) {
+    const normalized = normalizeHeader(header);
+    if (patterns.some((regex) => regex.test(normalized))) {
+      return header;
     }
   }
   return "";
 }
 
-function looksLikeTimeValue(value) {
+function isTimeLike(value) {
   const text = String(value || "").trim();
   if (!text) return false;
   if (/^\d{1,2}:\d{2}$/.test(text)) return true;
   if (/^\d{1,2}\.\d{2}$/.test(text)) return true;
   if (/^0[\.,]\d+$/.test(text)) return true;
+  if (/^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(text)) return true;
   return false;
 }
 
-function extractTimeCandidates(row) {
-  return Object.values(row || {})
-    .map((value) => String(value || "").trim())
-    .filter((value) => looksLikeTimeValue(value));
+function excelFractionToHm(value) {
+  const raw = String(value || "")
+    .trim()
+    .replace(",", ".");
+  if (!/^0\.\d+$/.test(raw)) return "";
+
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0 || numeric >= 1) return "";
+
+  const totalMinutes = Math.round(numeric * 24 * 60);
+  const hh = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+  const mm = String(totalMinutes % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
-function parseExcelTimeWindows(rows) {
-  const keyMap = {
-    stopType: new Set(["typ", "stop type", "stopp typ", "stoptyp"]),
-    location: new Set([
-      "ort",
-      "location",
-      "buchungsort",
-      "booking location",
-      "ladestelle",
-      "entladestelle",
-    ]),
-    loadLocation: new Set(["ladestelle", "lade stelle", "loading place"]),
-    unloadLocation: new Set([
-      "entladestelle",
-      "entlade stelle",
-      "unloading place",
-    ]),
-    cola: new Set(["cola", "cola nummer", "cola-nummer"]),
-    load: new Set([
-      "ladenummer",
-      "ladenummerr",
-      "ladenumm",
-      "load number",
-      "load",
-      "ladenr",
-    ]),
-    routeKey: new Set([
-      "route",
-      "tour",
-      "route key",
-      "tour key",
-      "tournummer",
-      "tournummer",
-      "tour nr",
-      "tournr",
-    ]),
-    transport: new Set(["transport", "transportnummer", "transport number"]),
-    tourId: new Set(["tour id", "tourid", "trip id"]),
-    windowStart: new Set([
-      "zeitfenster start",
-      "window start",
-      "startzeit",
-      "ladezeit",
-      "ankunftszeit",
-      "fenster von",
-      "von",
-      "start",
-      "time from",
-    ]),
-    windowEnd: new Set([
-      "zeitfenster ende",
-      "window end",
-      "endzeit",
-      "entladezeit",
-      "abfahrtszeit",
-      "fenster bis",
-      "bis",
-      "ende",
-      "time to",
-    ]),
+function normalizeSingleTimeToken(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{1,2}\.\d{2}$/.test(text)) return text.replace(".", ":");
+  const frac = excelFractionToHm(text);
+  if (frac) return frac;
+  if (/^\d{1,2}:\d{2}$/.test(text)) return text;
+  return "";
+}
+
+function normalizeTimeValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return { start: "", end: "" };
+
+  const rangeMatch = text.match(
+    /^(\d{1,2}(?::|\.)\d{2}|0[\.,]\d+)\s*-\s*(\d{1,2}(?::|\.)\d{2}|0[\.,]\d+)$/,
+  );
+  if (rangeMatch) {
+    const start = normalizeSingleTimeToken(String(rangeMatch[1] || ""));
+    const end = normalizeSingleTimeToken(String(rangeMatch[2] || ""));
+    return { start, end };
+  }
+
+  const single = normalizeSingleTimeToken(text);
+  return { start: single, end: "" };
+}
+
+function looksLikeKey(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (isTimeLike(text)) return false;
+  if (/^\d{4,}$/.test(text)) return true;
+  if (/^[A-Za-z0-9_-]{4,}$/.test(text)) return true;
+  return false;
+}
+
+function chooseFallbackKeyColumn(headers, rows) {
+  let bestHeader = "";
+  let bestScore = -1;
+
+  headers.forEach((header, index) => {
+    const values = rows.map((row) => toCellText(row[header])).filter(Boolean);
+    if (!values.length) return;
+
+    const valid = values.filter((value) => looksLikeKey(value));
+    const unique = new Set(valid);
+    const duplicates = Math.max(0, valid.length - unique.size);
+    let score = valid.length * 2 + duplicates;
+
+    if (index >= Math.floor(headers.length / 2)) score += 1;
+    if (/nummer|nr|tour|route|transport|trip/i.test(normalizeHeader(header))) {
+      score += 3;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestHeader = header;
+    }
+  });
+
+  return bestScore >= 3 ? bestHeader : "";
+}
+
+function chooseBestIdColumn(headers, rows) {
+  const candidates = headers.filter((header) => {
+    const h = normalizeHeader(header);
+    return /(cola|transport|tour|ladenumm|nummer|nr|route|trip)/.test(h);
+  });
+  if (!candidates.length) return "";
+
+  let best = "";
+  let bestScore = -1;
+
+  for (const header of candidates) {
+    const values = rows.map((row) => toCellText(row[header])).filter(Boolean);
+    if (!values.length) continue;
+
+    const last7Hits = values.filter((value) =>
+      /\d{7}$/.test(value.replace(/\D/g, "")),
+    ).length;
+    const numericHits = values.filter((value) =>
+      /^\d{6,10}$/.test(value.replace(/\D/g, "")),
+    ).length;
+    const uniqueCount = new Set(values).size;
+    const duplicateBonus = Math.max(0, values.length - uniqueCount);
+    const headerBonus = /(cola|transport|tour|ladenumm)/.test(
+      normalizeHeader(header),
+    )
+      ? 3
+      : 0;
+
+    const score =
+      last7Hits * 4 + numericHits * 2 + duplicateBonus + headerBonus;
+    if (score > bestScore) {
+      best = header;
+      bestScore = score;
+    }
+  }
+
+  return best;
+}
+
+function chooseFallbackTimeColumns(headers, rows) {
+  const scored = headers
+    .map((header, index) => {
+      const count = rows
+        .map((row) => toCellText(row[header]))
+        .filter((value) => isTimeLike(value)).length;
+      return { header, index, count };
+    })
+    .filter((entry) => entry.count > 0)
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.index - b.index;
+    });
+
+  return scored.slice(0, 2).map((entry) => entry.header);
+}
+
+function inferTypeFromRow(row) {
+  const values = Object.values(row || {})
+    .map((value) => normalizeHeader(toCellText(value)))
+    .filter(Boolean)
+    .join(" ");
+  if (/entlad|ablad|unload/.test(values)) return "UNLOAD";
+  if (/belad|ladung|load/.test(values)) return "LOAD";
+  return "";
+}
+
+function buildLocationFallback(headers, row, excludedHeaders) {
+  const excluded = new Set(excludedHeaders.filter(Boolean));
+  const textCells = headers
+    .filter((header) => !excluded.has(header))
+    .map((header) => toCellText(row[header]))
+    .filter((text) => {
+      if (!text) return false;
+      if (isTimeLike(text)) return false;
+      if (looksLikeKey(text)) return false;
+      return /[A-Za-zAeOeUeaeoeue]/.test(text);
+    });
+
+  return textCells.slice(0, 2).join(" - ");
+}
+
+function buildTimeWindowsFallback(rows, headers, keyCol) {
+  const timeCols = chooseFallbackTimeColumns(headers, rows);
+  if (!keyCol || timeCols.length < 1) return [];
+
+  const groupedRows = new Map();
+  for (const row of rows) {
+    const key = toCellText(row[keyCol]);
+    if (!looksLikeKey(key)) continue;
+    if (!groupedRows.has(key)) groupedRows.set(key, []);
+    groupedRows.get(key).push(row);
+  }
+
+  const windows = [];
+  for (const [key, groupRows] of groupedRows.entries()) {
+    groupRows.forEach((row, index) => {
+      const first = normalizeTimeValue(toCellText(row[timeCols[0]]));
+      const second = timeCols[1]
+        ? normalizeTimeValue(toCellText(row[timeCols[1]]))
+        : { start: "", end: "" };
+
+      const windowStart = first.start || second.start || "";
+      const windowEnd = second.start || first.end || second.end || "";
+      if (!windowStart && !windowEnd) return;
+
+      const explicitType = inferTypeFromRow(row);
+      const fallbackType =
+        groupRows.length >= 2
+          ? index === 0
+            ? "LOAD"
+            : index === 1
+              ? "UNLOAD"
+              : "ANY"
+          : "ANY";
+
+      const location = buildLocationFallback(headers, row, [keyCol, ...timeCols]);
+
+      windows.push({
+        route_key: key,
+        stop_type: explicitType || fallbackType,
+        location: location || null,
+        window_start: windowStart || null,
+        window_end: windowEnd || null,
+      });
+    });
+  }
+
+  return windows;
+}
+
+function buildTimeWindowsFromRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return { windows: [], message: "Datei hat keine Zeilen." };
+  }
+
+  const headers = Object.keys(rows[0] || {});
+  const keyCol = pickColumn(headers, [
+    /tour/,
+    /transport/,
+    /sendung/,
+    /route/,
+    /trip/,
+    /nummer/,
+    /\bnr\b/,
+  ]);
+  const colaCol = pickColumn(headers, [
+    /cola/,
+    /coca/,
+    /ccep/,
+    /cola.*(nr|nummer)/,
+  ]);
+  const ladenummerCol = pickColumn(headers, [
+    /ladenummer/,
+    /lade.*(nr|nummer)/,
+    /loading.*(nr|number)/,
+  ]);
+  const bestIdCol = chooseBestIdColumn(headers, rows);
+
+  const loadLocationCol = pickColumn(headers, [
+    /ladestelle/,
+    /ladeort/,
+    /beladestelle/,
+    /beladeort/,
+  ]);
+  const unloadLocationCol = pickColumn(headers, [
+    /entladestelle/,
+    /entladeort/,
+    /abladestelle/,
+    /abladeort/,
+    /ziel/,
+  ]);
+  const typeCol = pickColumn(headers, [
+    /typ/,
+    /type/,
+    /ladung/,
+    /entladung/,
+    /stop/,
+  ]);
+  const locationCol = pickColumn(headers, [
+    /ort/,
+    /location/,
+    /ziel/,
+    /kunde/,
+    /standort/,
+    /rampe/,
+    /gate/,
+  ]);
+
+  const loadStartCol = pickColumn(headers, [
+    /^ladezeit$/,
+    /lade.*(von|start|beginn)/,
+    /belad.*(von|start|beginn)/,
+  ]);
+  const loadEndCol = pickColumn(headers, [
+    /^ladezeit bis$/,
+    /lade.*(bis|ende)/,
+    /belad.*(bis|ende)/,
+  ]);
+  const unloadStartCol = pickColumn(headers, [
+    /^entladezeit$/,
+    /entlad.*(von|start|beginn)/,
+    /ablad.*(von|start|beginn)/,
+  ]);
+  const unloadEndCol = pickColumn(headers, [
+    /^entladezeit bis$/,
+    /entlad.*(bis|ende)/,
+    /ablad.*(bis|ende)/,
+  ]);
+
+  const genericStartCol = pickColumn(headers, [
+    /zeitfenster.*(von|start|beginn)/,
+    /\bstart\b/,
+    /\bbeginn\b/,
+  ]);
+  const genericEndCol = pickColumn(headers, [
+    /zeitfenster.*(bis|ende)/,
+    /\bbis\b/,
+    /\bende\b/,
+  ]);
+
+  const windows = [];
+  for (const row of rows) {
+    const colaNumber = toCellText(row[colaCol]);
+    const loadNumber = toCellText(row[ladenummerCol]);
+    const smartId = toCellText(row[bestIdCol]);
+    const key = colaNumber || smartId || loadNumber || toCellText(row[keyCol]);
+    if (!key) continue;
+
+    const genericLocation = toCellText(row[locationCol]);
+    const loadLocation = toCellText(row[loadLocationCol]) || genericLocation;
+    const unloadLocation =
+      toCellText(row[unloadLocationCol]) || genericLocation;
+    const rowType = toCellText(row[typeCol]).toUpperCase();
+
+    const loadStart = toCellText(row[loadStartCol]);
+    const loadEnd = toCellText(row[loadEndCol]);
+    if (loadStart || loadEnd) {
+      windows.push({
+        route_key: key,
+        cola_number: colaNumber || null,
+        load_number: loadNumber || null,
+        stop_type: "LOAD",
+        location: loadLocation || null,
+        window_start: loadStart || null,
+        window_end: loadEnd || null,
+      });
+    }
+
+    const unloadStart = toCellText(row[unloadStartCol]);
+    const unloadEnd = toCellText(row[unloadEndCol]);
+    if (unloadStart || unloadEnd) {
+      windows.push({
+        route_key: key,
+        cola_number: colaNumber || null,
+        load_number: loadNumber || null,
+        stop_type: "UNLOAD",
+        location: unloadLocation || null,
+        window_start: unloadStart || null,
+        window_end: unloadEnd || null,
+      });
+    }
+
+    const genericStart = toCellText(row[genericStartCol]);
+    const genericEnd = toCellText(row[genericEndCol]);
+    const hasSpecific = loadStart || loadEnd || unloadStart || unloadEnd;
+    if (!hasSpecific && (genericStart || genericEnd)) {
+      windows.push({
+        route_key: key,
+        cola_number: colaNumber || null,
+        load_number: loadNumber || null,
+        stop_type: rowType === "LOAD" || rowType === "UNLOAD" ? rowType : "ANY",
+        location: genericLocation || null,
+        window_start: genericStart || null,
+        window_end: genericEnd || null,
+      });
+    }
+  }
+
+  if (!windows.length) {
+    const fallbackKeyCol = keyCol || chooseFallbackKeyColumn(headers, rows);
+    const fallbackWindows = buildTimeWindowsFallback(
+      rows,
+      headers,
+      fallbackKeyCol,
+    );
+    return {
+      windows: fallbackWindows,
+      message: fallbackWindows.length
+        ? `Fallback aktiv. ID-Spalte: ${fallbackKeyCol || "unbekannt"}`
+        : "Keine ID-/Zeitspalten erkannt.",
+    };
+  }
+
+  return {
+    windows,
+    message:
+      keyCol || bestIdCol
+        ? `ID-Spalte erkannt: ${colaCol || bestIdCol || keyCol}${ladenummerCol ? ` (Ladenummer: ${ladenummerCol})` : ""}`
+        : "Keine ID-Spalte erkannt.",
   };
+}
 
-  return rows
-    .map((row) => {
-      const stopTypeRaw = String(getCellValue(row, keyMap.stopType) || "")
-        .trim()
-        .toLowerCase();
-      const stopType =
-        stopTypeRaw.includes("un") || stopTypeRaw.includes("ent")
-          ? "unload"
-          : stopTypeRaw.includes("loa") || stopTypeRaw.includes("bel")
-            ? "load"
-            : "any";
+async function importTimeWindowsFromExcel() {
+  const file = el.timeWindowFile.files?.[0] || null;
+  if (!file) throw new Error("Bitte zuerst eine Excel-Datei auswaehlen.");
 
-      let windowStart = String(getCellValue(row, keyMap.windowStart) || "").trim();
-      let windowEnd = String(getCellValue(row, keyMap.windowEnd) || "").trim();
+  if (!window.XLSX) {
+    throw new Error("Excel-Bibliothek konnte nicht geladen werden.");
+  }
 
-      if (!windowStart && !windowEnd) {
-        const timeCandidates = extractTimeCandidates(row);
-        windowStart = timeCandidates[0] || "";
-        windowEnd = timeCandidates[1] || "";
-      }
+  const buffer = await file.arrayBuffer();
+  const workbook = window.XLSX.read(buffer, { type: "array", cellDates: true });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) throw new Error("Excel-Datei enthaelt kein Tabellenblatt.");
 
-      if (
-        !String(windowStart || "").trim() &&
-        !String(windowEnd || "").trim()
-      ) {
-        return null;
-      }
+  const sheet = workbook.Sheets[firstSheetName];
+  const rows = window.XLSX.utils.sheet_to_json(sheet, {
+    defval: "",
+    raw: false,
+  });
 
-      const loadLocation = String(getCellValue(row, keyMap.loadLocation) || "").trim();
-      const unloadLocation = String(getCellValue(row, keyMap.unloadLocation) || "").trim();
-      const locationBase = String(getCellValue(row, keyMap.location) || "").trim();
-      const location = locationBase || [loadLocation, unloadLocation].filter(Boolean).join(" -> ");
+  const parsed = buildTimeWindowsFromRows(rows);
+  if (!parsed.windows.length) {
+    importedTimeWindows = [];
+    el.timeWindowMeta.textContent = "Keine Zeitfenster importiert.";
+    throw new Error("Excel eingelesen, aber keine nutzbaren Zeitfenster gefunden.");
+  }
 
-      return {
-        stop_type: stopType,
-        location,
-        cola_number: String(getCellValue(row, keyMap.cola) || "").trim(),
-        load_number: String(getCellValue(row, keyMap.load) || "").trim(),
-        route_key: String(getCellValue(row, keyMap.routeKey) || "").trim(),
-        transport_number: String(
-          getCellValue(row, keyMap.transport) || "",
-        ).trim(),
-        tour_id: String(getCellValue(row, keyMap.tourId) || "").trim(),
+  importedTimeWindows = parsed.windows;
+  el.timeWindowMeta.textContent = `Zeitfenster importiert: ${parsed.windows.length} Zeilen.`;
+  return parsed;
         window_start: String(windowStart || "").trim(),
         window_end: String(windowEnd || "").trim(),
       };
@@ -408,8 +700,8 @@ async function run() {
 el.importTimeWindowBtn.addEventListener("click", async () => {
   try {
     setStatus("Lese Excel...");
-    await importTimeWindowsFromExcel();
-    setStatus("Zeitfenster erfolgreich importiert.", "success");
+    const parsed = await importTimeWindowsFromExcel();
+    setStatus(`Excel-Import erfolgreich. ${parsed.message}`, "success");
   } catch (error) {
     setStatus(error.message || "Fehler beim Excel-Import.", "error");
   }
