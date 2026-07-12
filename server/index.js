@@ -67,7 +67,7 @@ function extractFleetTimelineContextFromUrl(urlValue) {
   try {
     const parsedUrl = new URL(String(urlValue || "").trim());
     const match = parsedUrl.pathname.match(
-      /\/companies\/(\d+)\/fleet\/(\d+)\/timeline/i,
+      /\/companies\/(\d+)\/fleet\/([^/]+)\/timeline/i,
     );
     if (!match) return null;
     return {
@@ -127,6 +127,11 @@ async function fetchFleetTimelineStops(url, options = {}) {
   const context = extractFleetTimelineContextFromUrl(url);
   if (!context?.companyId || !context?.vehicleGroupId) {
     throw new Error("Fleet-Timeline-Kontext konnte nicht gelesen werden.");
+  }
+  if (String(context.vehicleGroupId).toLowerCase() === "all") {
+    throw new Error(
+      "Der Link mit /fleet/all/timeline kann hier nicht direkt ausgewertet werden. Bitte eine konkrete Fleet-Gruppe mit numerischer ID verwenden (z.B. /fleet/1588/timeline).",
+    );
   }
 
   const headers = { "Content-Type": "application/json" };
@@ -446,7 +451,10 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
 
     let stops = Array.isArray(req.body?.stops) ? req.body.stops : [];
 
-    if (!stops.length && /\/companies\/\d+\/fleet\/\d+\/timeline/i.test(url)) {
+    if (
+      !stops.length &&
+      /\/companies\/\d+\/fleet\/[^/]+\/timeline/i.test(url)
+    ) {
       if (!sessionCookie && !authToken) {
         return res.status(400).json({
           error:
