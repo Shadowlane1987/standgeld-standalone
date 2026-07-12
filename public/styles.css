@@ -1,0 +1,142 @@
+:root {
+  --bg: #f7f3ec;
+  --card: #fffdf8;
+  --text: #1f1a15;
+  --muted: #73675a;
+  --line: rgba(31, 26, 21, 0.14);
+  --accent: #0f766e;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #efe8dd, var(--bg));
+}
+
+.layout {
+  width: min(1500px, 98vw);
+  margin: 16px auto;
+  display: grid;
+  gap: 14px;
+}
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.hero h1 {
+  margin: 0 0 4px;
+}
+.hero p {
+  margin: 0;
+  color: var(--muted);
+}
+
+label {
+  display: block;
+  color: var(--muted);
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+input,
+textarea,
+select,
+button {
+  width: 100%;
+  font: inherit;
+}
+
+input,
+textarea,
+select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.grid-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.actions-row {
+  margin-top: 6px;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 16px;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  color: var(--text);
+  background: #e7dfd2;
+}
+
+.status {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 360px);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th,
+td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+@media (max-width: 900px) {
+  .grid,
+  .summary {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-2,
+  .grid-4,
+  .grid-5 {
+    grid-template-columns: 1fr;
+  }
+}

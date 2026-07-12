@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Standgeld Standalone</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel hero">
+        <h1>Standgeld Standalone</h1>
+        <p>
+          Eigenständige App ohne Watchdog-Kopplung mit Sixfold- und
+          Excel-Abgleich.
+        </p>
+      </section>
+
+      <section class="panel">
+        <label>Sixfold URL</label>
+        <input
+          id="url"
+          type="url"
+          placeholder="https://app.sixfold.com/companies/.../fleet/.../timeline"
+        />
+
+        <div class="grid grid-4">
+          <label
+            >Auswertung
+            <select id="periodMode">
+              <option value="day">Tag</option>
+              <option value="week">Woche</option>
+            </select>
+          </label>
+          <label
+            >Bezugsdatum
+            <input id="referenceDate" type="date" />
+          </label>
+          <label
+            >Transportnummer (optional)
+            <input
+              id="transportNumber"
+              type="text"
+              placeholder="z.B. 002394201"
+            />
+          </label>
+          <label
+            >Tour-ID (optional)
+            <input id="tourId" type="text" placeholder="z.B. F1260020505" />
+          </label>
+        </div>
+
+        <label>SessionToken (schnell)</label>
+        <input
+          id="sessionToken"
+          type="text"
+          placeholder="Nur den Wert aus sessionToken=..."
+        />
+
+        <label>Session-Cookie (optional)</label>
+        <textarea
+          id="sessionCookie"
+          rows="2"
+          placeholder="sessionToken=...; other_cookie=..."
+        ></textarea>
+
+        <label>Auth-Token (optional)</label>
+        <input
+          id="authToken"
+          type="text"
+          placeholder="Bearer-Token ohne Prefix"
+        />
+
+        <label>Excel Zeitfenster (optional)</label>
+        <input id="timeWindowFile" type="file" accept=".xlsx,.xls,.csv" />
+
+        <div class="grid grid-2 actions-row">
+          <button id="importTimeWindowBtn" type="button">
+            Zeitfenster aus Excel übernehmen
+          </button>
+          <button id="clearTimeWindowBtn" type="button" class="btn-secondary">
+            Zeitfenster löschen
+          </button>
+        </div>
+        <p id="timeWindowMeta" class="status">Keine Zeitfenster importiert.</p>
+
+        <div class="grid grid-5">
+          <label
+            >Frei (Min)
+            <input id="freeMinutes" type="number" value="120" min="0" />
+          </label>
+          <label
+            >Takt (Min)
+            <input id="unitMinutes" type="number" value="30" min="1" />
+          </label>
+          <label
+            >Preis je Takt (€)
+            <input
+              id="unitPrice"
+              type="number"
+              value="30"
+              min="0"
+              step="0.01"
+            />
+          </label>
+          <label
+            >Schwellwert (€)
+            <input
+              id="thresholdEur"
+              type="number"
+              value="30"
+              min="0"
+              step="0.01"
+            />
+          </label>
+          <label
+            >Deckel je Stop (€)
+            <input id="capEur" type="number" value="650" min="0" step="0.01" />
+          </label>
+        </div>
+
+        <label>Stops JSON (optional, für lokale Tests)</label>
+        <textarea
+          id="stopsJson"
+          rows="8"
+          placeholder='[{"transport_number":"002394201","type":"UNLOAD","booking_location":"DE_BAR_Bargteheide","arrival_time":"2026-07-07T00:01:00.000Z","departure_time":"2026-07-07T07:26:00.000Z","timeslot_begin":"2026-07-07T08:30:00.000Z"}]'
+        ></textarea>
+
+        <button id="runBtn">Berechnen</button>
+        <p id="status" class="status">Bereit.</p>
+      </section>
+
+      <section class="panel" id="resultPanel" hidden>
+        <h2>Ergebnis</h2>
+        <div class="summary">
+          <div><strong>Gesamtbetrag:</strong> <span id="amount">-</span></div>
+          <div><strong>Positionen:</strong> <span id="positions">-</span></div>
+          <div><strong>Takte:</strong> <span id="units">-</span></div>
+        </div>
+        <p id="resultMeta" class="status"></p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Transport</th>
+                <th>LKW</th>
+                <th>Typ</th>
+                <th>Ort</th>
+                <th>Ankunft</th>
+                <th>Abfahrt</th>
+                <th>Zeitfenster</th>
+                <th>Regelstart</th>
+                <th>Effektiv</th>
+                <th>Abrechenbar</th>
+                <th>Takte</th>
+                <th>Betrag</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
