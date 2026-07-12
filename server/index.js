@@ -786,22 +786,29 @@ function applyTimeWindowOverride(stop, windows) {
 
 function calculateWithSafeOverride(stop, rules, windows) {
   const base = calcStop(stop, rules);
-  const overriddenStop = applyTimeWindowOverride(stop, windows);
-  const overridden = calcStop(overriddenStop, rules);
 
-  const baseBillable = Number(base.billable_minutes || 0);
-  const overrideBillable = Number(overridden.billable_minutes || 0);
-
-  if (overrideBillable <= baseBillable) {
-    return overridden;
+  // Prioritaet: Sixfold-Zeitfenster vor Excel.
+  const hasSixfoldWindow =
+    toDate(stop?.timeslot_begin) || toDate(stop?.timeslot_end);
+  if (hasSixfoldWindow) {
+    return {
+      ...base,
+      window_override_applied: false,
+      matched_window_key: null,
+    };
   }
 
-  return {
-    ...base,
-    window_override_applied: false,
-    matched_window_key: null,
-    override_rejected_increase: true,
-  };
+  const overriddenStop = applyTimeWindowOverride(stop, windows);
+  if (overriddenStop === stop) {
+    return {
+      ...base,
+      window_override_applied: false,
+      matched_window_key: null,
+    };
+  }
+
+  const overridden = calcStop(overriddenStop, rules);
+  return overridden;
 }
 
 function calcStop(stop, rules) {
