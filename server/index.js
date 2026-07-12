@@ -120,6 +120,8 @@ function normalizeFleetStops(tour) {
     departure_time: stop?.departure_time || null,
     transport_number: tour?.shipper_transport_number || null,
     tour_id: tour?.tour_id || null,
+    tour_status: tour?.status || null,
+    working_stop_id: tour?.working_stop_id || null,
     plate: tour?.plate || null,
   }));
 }
