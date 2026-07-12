@@ -563,6 +563,14 @@ function compactWindowDisplay(startValue, endValue) {
   return `${start} - ${end}`;
 }
 
+function compactSingleWindowValue(startValue, endValue) {
+  const start = compactDateTimeDisplay(startValue);
+  const end = compactDateTimeDisplay(endValue);
+  if (start !== "-") return start;
+  if (end !== "-") return end;
+  return "-";
+}
+
 function formatMinutesAsHours(minutesValue) {
   const totalMinutes = Math.max(0, Number(minutesValue || 0));
   const hours = Math.floor(totalMinutes / 60);
@@ -573,7 +581,7 @@ function formatMinutesAsHours(minutesValue) {
 function buildSurchargeDescription(stop) {
   const arrival = stop.arrival_display || "-";
   const departure = stop.departure_display || "-";
-  const windowText = compactWindowDisplay(
+  const windowText = compactSingleWindowValue(
     stop.slot_begin_display,
     stop.slot_end_display,
   );
@@ -651,7 +659,7 @@ async function run() {
       const arrival = compactDateTimeDisplay(stop.arrival_display);
       const departure = compactDateTimeDisplay(stop.departure_display);
       const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
-      const window = compactWindowDisplay(
+      const window = compactSingleWindowValue(
         stop.slot_begin_display,
         stop.slot_end_display,
       );
