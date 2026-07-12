@@ -257,6 +257,28 @@ async function fetchFleetTimelineStops(url, options = {}) {
     });
   }
 
+  async function fetchVehicleGroupIds() {
+    const query = `
+      query FleetGroupIds($companyId: String!) {
+        viewer {
+          company(company_id: $companyId) {
+            companyVehicleGroups {
+              companyVehicleGroupId
+            }
+          }
+        }
+      }
+    `;
+
+    const data = await runGraphql(query, {
+      companyId: context.companyId,
+    });
+
+    return (data?.viewer?.company?.companyVehicleGroups || [])
+      .map((group) => String(group?.companyVehicleGroupId || "").trim())
+      .filter(Boolean);
+  }
+
   async function fetchTourPlateMapByVehicleGroups() {
     const query = `
       query FleetAllPlateMap(
@@ -415,6 +437,27 @@ async function fetchFleetTimelineStops(url, options = {}) {
   async function fetchAllFleetTimelineStops() {
     const errors = [];
     let plateMap = new Map();
+
+    try {
+      const groupIds = await fetchVehicleGroupIds();
+      const groupTours = [];
+
+      for (const groupId of groupIds) {
+        try {
+          const groupResult = await fetchByVehicleGroupId(groupId);
+          groupTours.push(...(groupResult?.tours || []));
+        } catch (error) {
+          errors.push(`groupId(${groupId}): ${error.message}`);
+        }
+      }
+
+      const dedupedTours = dedupeToursById(filterToursByWindow(groupTours));
+      if (dedupedTours.length) {
+        return mapFleetResultFromTours(dedupedTours);
+      }
+    } catch (error) {
+      errors.push(`groupIdList: ${error.message}`);
+    }
 
     try {
       const plateMapResult = await fetchTourPlateMapByVehicleGroups();
