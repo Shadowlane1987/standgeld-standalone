@@ -47,25 +47,87 @@ function normalizeHeader(value) {
     .replace(/\s+/g, " ");
 }
 
+function normalizeLoose(value) {
+  return normalizeHeader(value).replace(/[^a-z0-9]/g, "");
+}
+
 function getCellValue(row, keySet) {
+  const aliases = Array.from(keySet || []).map((value) => normalizeLoose(value));
   for (const [key, value] of Object.entries(row || {})) {
-    if (keySet.has(normalizeHeader(key))) return value;
+    const normalizedKey = normalizeLoose(key);
+    if (
+      aliases.some(
+        (alias) =>
+          normalizedKey === alias ||
+          normalizedKey.includes(alias) ||
+          alias.includes(normalizedKey),
+      )
+    ) {
+      return value;
+    }
   }
   return "";
+}
+
+function looksLikeTimeValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (/^\d{1,2}:\d{2}$/.test(text)) return true;
+  if (/^\d{1,2}\.\d{2}$/.test(text)) return true;
+  if (/^0[\.,]\d+$/.test(text)) return true;
+  return false;
+}
+
+function extractTimeCandidates(row) {
+  return Object.values(row || {})
+    .map((value) => String(value || "").trim())
+    .filter((value) => looksLikeTimeValue(value));
 }
 
 function parseExcelTimeWindows(rows) {
   const keyMap = {
     stopType: new Set(["typ", "stop type", "stopp typ", "stoptyp"]),
-    location: new Set(["ort", "location", "buchungsort", "booking location"]),
+    location: new Set([
+      "ort",
+      "location",
+      "buchungsort",
+      "booking location",
+      "ladestelle",
+      "entladestelle",
+    ]),
+    loadLocation: new Set(["ladestelle", "lade stelle", "loading place"]),
+    unloadLocation: new Set([
+      "entladestelle",
+      "entlade stelle",
+      "unloading place",
+    ]),
     cola: new Set(["cola", "cola nummer", "cola-nummer"]),
-    load: new Set(["ladenummer", "load number", "load", "ladenr"]),
-    routeKey: new Set(["route", "tour", "route key", "tour key"]),
+    load: new Set([
+      "ladenummer",
+      "ladenummerr",
+      "ladenumm",
+      "load number",
+      "load",
+      "ladenr",
+    ]),
+    routeKey: new Set([
+      "route",
+      "tour",
+      "route key",
+      "tour key",
+      "tournummer",
+      "tournummer",
+      "tour nr",
+      "tournr",
+    ]),
     transport: new Set(["transport", "transportnummer", "transport number"]),
     tourId: new Set(["tour id", "tourid", "trip id"]),
     windowStart: new Set([
       "zeitfenster start",
       "window start",
+      "startzeit",
+      "ladezeit",
+      "ankunftszeit",
       "fenster von",
       "von",
       "start",
@@ -74,6 +136,9 @@ function parseExcelTimeWindows(rows) {
     windowEnd: new Set([
       "zeitfenster ende",
       "window end",
+      "endzeit",
+      "entladezeit",
+      "abfahrtszeit",
       "fenster bis",
       "bis",
       "ende",
@@ -93,8 +158,15 @@ function parseExcelTimeWindows(rows) {
             ? "load"
             : "any";
 
-      const windowStart = getCellValue(row, keyMap.windowStart);
-      const windowEnd = getCellValue(row, keyMap.windowEnd);
+      let windowStart = String(getCellValue(row, keyMap.windowStart) || "").trim();
+      let windowEnd = String(getCellValue(row, keyMap.windowEnd) || "").trim();
+
+      if (!windowStart && !windowEnd) {
+        const timeCandidates = extractTimeCandidates(row);
+        windowStart = timeCandidates[0] || "";
+        windowEnd = timeCandidates[1] || "";
+      }
+
       if (
         !String(windowStart || "").trim() &&
         !String(windowEnd || "").trim()
@@ -102,9 +174,14 @@ function parseExcelTimeWindows(rows) {
         return null;
       }
 
+      const loadLocation = String(getCellValue(row, keyMap.loadLocation) || "").trim();
+      const unloadLocation = String(getCellValue(row, keyMap.unloadLocation) || "").trim();
+      const locationBase = String(getCellValue(row, keyMap.location) || "").trim();
+      const location = locationBase || [loadLocation, unloadLocation].filter(Boolean).join(" -> ");
+
       return {
         stop_type: stopType,
-        location: String(getCellValue(row, keyMap.location) || "").trim(),
+        location,
         cola_number: String(getCellValue(row, keyMap.cola) || "").trim(),
         load_number: String(getCellValue(row, keyMap.load) || "").trim(),
         route_key: String(getCellValue(row, keyMap.routeKey) || "").trim(),

@@ -267,7 +267,8 @@ function resolveWindowDateTime(value, anchorDate) {
 function matchTimeWindow(windowRow, stop) {
   const rowType = canonicalStopType(windowRow?.stop_type);
   const stopType = canonicalStopType(stop?.type);
-  if (!rowType || rowType === "any" || rowType !== stopType) return -1;
+  if (!rowType) return -1;
+  if (rowType !== "any" && rowType !== stopType) return -1;
 
   const stopKeys = [stop.transport_number, stop.tour_id]
     .map((value) => last7Digits(value))
