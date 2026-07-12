@@ -22,6 +22,12 @@ const el = {
   units: document.getElementById("units"),
   resultMeta: document.getElementById("resultMeta"),
   rows: document.getElementById("rows"),
+  surchargeModal: document.getElementById("surchargeModal"),
+  surchargeTitle: document.getElementById("surchargeTitle"),
+  surchargeText: document.getElementById("surchargeText"),
+  copySurchargeBtn: document.getElementById("copySurchargeBtn"),
+  closeSurchargeModalBtn: document.getElementById("closeSurchargeModalBtn"),
+  closeSurchargeModalBtn2: document.getElementById("closeSurchargeModalBtn2"),
 };
 
 let importedTimeWindows = [];
@@ -203,6 +209,57 @@ function formatMinutesAsHours(minutesValue) {
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
+function mapStopTypeToPlace(typeValue) {
+  const type = String(typeValue || "").toLowerCase();
+  if (type.includes("load") || type.includes("belad")) return "Ladestelle";
+  if (type.includes("unload") || type.includes("entlad"))
+    return "Entladestelle";
+  return "Stelle";
+}
+
+function buildSurchargeDescription(stop) {
+  const transport = stop.transport_number || stop.tour_id || "-";
+  const plate = stop.plate || "-";
+  const placeLabel = mapStopTypeToPlace(stop.type);
+  const place = stop.booking_location || stop.address || "-";
+  const arrival = stop.arrival_display || "-";
+  const departure = stop.departure_display || "-";
+  const windowText = compactWindowDisplay(
+    stop.slot_begin_display,
+    stop.slot_end_display,
+  );
+  const effective = formatMinutesAsHours(stop.effective_minutes);
+  const billable = formatMinutesAsHours(stop.billable_minutes);
+  const units = Number(stop.billed_units || 0);
+  const amount = Number(stop.amount_eur || 0).toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+  });
+
+  return [
+    "Standzeitnachweis fuer Zuschlag:",
+    `Transport: ${transport}`,
+    `Kennzeichen: ${plate}`,
+    `${placeLabel}: ${place}`,
+    `Ankunft: ${arrival}`,
+    `Zeitfenster ${placeLabel}: ${windowText}`,
+    `Abfahrt: ${departure}`,
+    `Effektive Standzeit: ${effective}`,
+    `Abzurechnen: ${billable} (${units} Takte, ${amount})`,
+  ].join("\n");
+}
+
+function openSurchargeModal(stop) {
+  const transport = stop.transport_number || stop.tour_id || "-";
+  el.surchargeTitle.textContent = `Zuschlagstext fuer Sendung ${transport}`;
+  el.surchargeText.value = buildSurchargeDescription(stop);
+  el.surchargeModal.hidden = false;
+}
+
+function closeSurchargeModal() {
+  el.surchargeModal.hidden = true;
+}
+
 async function run() {
   const resolvedUrl = String(el.url.value || "").trim();
   const resolvedSessionToken = String(el.sessionToken.value || "").trim();
@@ -250,6 +307,8 @@ async function run() {
     el.rows.innerHTML = "";
     for (const stop of data.stops || []) {
       const tr = document.createElement("tr");
+      tr.className = "result-row";
+      tr.tabIndex = 0;
       const arrival = compactDateTimeDisplay(stop.arrival_display);
       const departure = compactDateTimeDisplay(stop.departure_display);
       const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
@@ -273,6 +332,13 @@ async function run() {
         <td>${stop.billed_units || 0}</td>
         <td>${Number(stop.amount_eur || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</td>
       `;
+      tr.addEventListener("click", () => openSurchargeModal(stop));
+      tr.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openSurchargeModal(stop);
+        }
+      });
       el.rows.appendChild(tr);
     }
 
@@ -297,6 +363,24 @@ el.importTimeWindowBtn.addEventListener("click", async () => {
 el.clearTimeWindowBtn.addEventListener("click", () => {
   clearTimeWindows();
   setStatus("Zeitfenster zurückgesetzt.", "success");
+});
+
+el.copySurchargeBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(String(el.surchargeText.value || ""));
+    setStatus("Zuschlagstext kopiert.", "success");
+  } catch (_error) {
+    setStatus("Kopieren nicht möglich. Bitte Text manuell kopieren.", "error");
+  }
+});
+
+el.closeSurchargeModalBtn.addEventListener("click", closeSurchargeModal);
+el.closeSurchargeModalBtn2.addEventListener("click", closeSurchargeModal);
+
+el.surchargeModal.addEventListener("click", (event) => {
+  if (event.target === el.surchargeModal) {
+    closeSurchargeModal();
+  }
 });
 
 el.url.addEventListener("change", () => {

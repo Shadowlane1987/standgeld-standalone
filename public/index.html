@@ -137,8 +137,40 @@
             <tbody id="rows"></tbody>
           </table>
         </div>
+        <p class="status">
+          Tipp: Auf eine Sendungszeile klicken, um den Zuschlagstext zu oeffnen.
+        </p>
       </section>
     </main>
+
+    <div id="surchargeModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3 id="surchargeTitle">Zuschlagstext</h3>
+          <button
+            id="closeSurchargeModalBtn"
+            type="button"
+            class="btn-secondary modal-close"
+          >
+            Schliessen
+          </button>
+        </div>
+        <p class="status">
+          Text kann direkt in Transporeon bei Zuschlaege eingefuegt werden.
+        </p>
+        <textarea id="surchargeText" rows="10"></textarea>
+        <div class="grid grid-2 actions-row">
+          <button id="copySurchargeBtn" type="button">Text kopieren</button>
+          <button
+            id="closeSurchargeModalBtn2"
+            type="button"
+            class="btn-secondary"
+          >
+            Fertig
+          </button>
+        </div>
+      </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="/app.js"></script>
