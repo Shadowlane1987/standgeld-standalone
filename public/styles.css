@@ -38,7 +38,7 @@ body {
 }
 
 .layout {
-  width: min(1520px, 96vw);
+  width: min(1880px, 99vw);
   margin: 22px auto 26px;
   display: grid;
   gap: 18px;
@@ -223,7 +223,7 @@ button:active {
 
 .table-wrap {
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fff;
@@ -233,8 +233,8 @@ button:active {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 0;
-  table-layout: fixed;
+  min-width: 1560px;
+  table-layout: auto;
 }
 
 thead th {
@@ -253,21 +253,21 @@ td {
   padding: 8px 7px;
   border-bottom: 1px solid rgba(31, 35, 32, 0.08);
   text-align: left;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
   font-size: 0.92rem;
   line-height: 1.22;
 }
 
 th:nth-child(1),
 td:nth-child(1) {
-  width: 13%;
+  width: 14%;
 }
 
 th:nth-child(2),
 td:nth-child(2) {
-  width: 6%;
+  width: 7%;
 }
 
 th:nth-child(3),
@@ -277,12 +277,12 @@ td:nth-child(3) {
 
 th:nth-child(4),
 td:nth-child(4) {
-  width: 11%;
+  width: 8%;
 }
 
 th:nth-child(5),
 td:nth-child(5) {
-  width: 8%;
+  width: 14%;
 }
 
 th:nth-child(6),
@@ -292,37 +292,42 @@ td:nth-child(6) {
 
 th:nth-child(7),
 td:nth-child(7) {
-  width: 13%;
+  width: 8%;
 }
 
 th:nth-child(8),
 td:nth-child(8) {
-  width: 7%;
+  width: 9%;
 }
 
 th:nth-child(9),
 td:nth-child(9) {
-  width: 8%;
+  width: 7%;
 }
 
 th:nth-child(10),
 td:nth-child(10) {
-  width: 5%;
+  width: 8%;
 }
 
 th:nth-child(11),
 td:nth-child(11) {
-  width: 6%;
+  width: 5%;
 }
 
 th:nth-child(12),
 td:nth-child(12) {
-  width: 4%;
+  width: 6%;
 }
 
 th:nth-child(13),
 td:nth-child(13) {
-  width: 7%;
+  width: 4%;
+}
+
+th:nth-child(14),
+td:nth-child(14) {
+  width: 6%;
 }
 
 .source-pill {
@@ -350,6 +355,43 @@ td:nth-child(13) {
 .source-none {
   background: rgba(115, 103, 90, 0.16);
   color: #595249;
+}
+
+.tracking-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tracking-done {
+  background: rgba(22, 101, 52, 0.14);
+  color: #166534;
+}
+
+.tracking-active {
+  background: rgba(15, 95, 79, 0.14);
+  color: #0f5f4f;
+}
+
+.tracking-open {
+  background: rgba(166, 95, 27, 0.16);
+  color: #8a4f16;
+}
+
+.tracking-aborted {
+  background: rgba(185, 28, 28, 0.14);
+  color: #b91c1c;
+}
+
+.tracking-unknown {
+  background: rgba(71, 85, 105, 0.14);
+  color: #334155;
 }
 
 tbody tr:nth-child(2n) {

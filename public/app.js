@@ -84,12 +84,14 @@ function renderStops(stops) {
     const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
     const window = resolveWindowDisplay(stop);
     const windowSource = getTimeWindowSource(stop);
+    const tracking = getTrackingState(stop);
     const effective = formatMinutesAsHours(stop.effective_minutes);
     const billable = formatMinutesAsHours(stop.billable_minutes);
     tr.innerHTML = `
       <td>${stop.transport_number || stop.tour_id || "-"}</td>
       <td>${stop.plate || "-"}</td>
       <td>${stop.type || "-"}</td>
+      <td><span class="tracking-pill ${tracking.className}">${tracking.label}</span></td>
       <td>${stop.booking_location || stop.address || "-"}</td>
       <td>${arrival}</td>
       <td>${departure}</td>
@@ -704,6 +706,36 @@ function getTimeWindowSource(stop) {
     return { label: "Sixfold", className: "source-sixfold" };
   }
   return { label: "Keine", className: "source-none" };
+}
+
+function getTrackingState(stop) {
+  const stopStatus = String(stop?.status || "")
+    .trim()
+    .toLowerCase();
+  const tourStatus = String(stop?.tour_status || "")
+    .trim()
+    .toLowerCase();
+  const combined = `${tourStatus} ${stopStatus}`;
+
+  if (/(cancel|abort|abbruch|failed|error)/.test(combined)) {
+    return { label: "Abgebrochen", className: "tracking-aborted" };
+  }
+  if (/(departed|delivered|finished|completed|visited|done)/.test(combined)) {
+    return { label: "Durchgelaufen", className: "tracking-done" };
+  }
+  if (
+    /(arrived|loading|unloading|in_transit|ongoing|active|en_route)/.test(
+      combined,
+    )
+  ) {
+    return { label: "Aktiv", className: "tracking-active" };
+  }
+  if (
+    /(planned|unvisited|created|pending|unassigned|unallocated)/.test(combined)
+  ) {
+    return { label: "Offen", className: "tracking-open" };
+  }
+  return { label: "Unklar", className: "tracking-unknown" };
 }
 
 function formatMinutesAsHours(minutesValue) {
