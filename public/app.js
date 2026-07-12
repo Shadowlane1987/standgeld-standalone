@@ -220,7 +220,6 @@ function buildSurchargeDescription(stop) {
   const billable = formatMinutesAsHours(stop.billable_minutes);
 
   return [
-    "Standzeitnachweis:",
     `Ankunft: ${arrival}`,
     `Zeitfenster: ${windowText}`,
     `Abfahrt: ${departure}`,
