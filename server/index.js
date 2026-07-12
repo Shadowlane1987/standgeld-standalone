@@ -187,6 +187,29 @@ async function fetchFleetTimelineStops(url, options = {}) {
     }
   }
 
+  async function runGraphqlAllowPartial(query, variables) {
+    try {
+      const response = await axios.post(
+        `${context.origin}/graphql`,
+        { query, variables },
+        { timeout: 25000, headers },
+      );
+      return {
+        data: response?.data?.data || null,
+        errors: Array.isArray(response?.data?.errors)
+          ? response.data.errors
+          : [],
+      };
+    } catch (error) {
+      const gqlError =
+        error?.response?.data?.errors?.[0]?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Unbekannter GraphQL Fehler";
+      throw new Error(gqlError);
+    }
+  }
+
   function collectToursFromVehicleEdges(edges) {
     const tours = [];
     (edges || []).forEach((edge) => {
@@ -234,7 +257,69 @@ async function fetchFleetTimelineStops(url, options = {}) {
     });
   }
 
-  async function fetchAllFleetTimelineToursByCompanyRole(role) {
+  async function fetchTourPlateMapByVehicleGroups() {
+    const query = `
+      query FleetAllPlateMap(
+        $companyId: String!
+        $fromTime: DateTime!
+        $toTime: DateTime!
+      ) {
+        viewer {
+          company(company_id: $companyId) {
+            companyVehicleGroups {
+              vehiclesConnection {
+                vehicles(first: 250) {
+                  edges {
+                    node {
+                      license_plate_number
+                      tours(fromTime: $fromTime, toTime: $toTime) {
+                        tour_id
+                        shipper_transport_number
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const plateByKey = new Map();
+    const result = await runGraphqlAllowPartial(query, {
+      companyId: context.companyId,
+      fromTime: options.fromTime,
+      toTime: options.toTime,
+    });
+
+    const groups = result?.data?.viewer?.company?.companyVehicleGroups || [];
+    groups.forEach((group) => {
+      const vehicleEdges = group?.vehiclesConnection?.vehicles?.edges || [];
+      vehicleEdges.forEach((edge) => {
+        const vehicle = edge?.node || null;
+        const plate = String(vehicle?.license_plate_number || "").trim();
+        if (!plate) return;
+        (vehicle?.tours || []).forEach((tour) => {
+          const tourId = String(tour?.tour_id || "").trim();
+          const transport = String(tour?.shipper_transport_number || "").trim();
+          if (tourId && !plateByKey.has(`tour:${tourId}`)) {
+            plateByKey.set(`tour:${tourId}`, plate);
+          }
+          if (transport && !plateByKey.has(`transport:${transport}`)) {
+            plateByKey.set(`transport:${transport}`, plate);
+          }
+        });
+      });
+    });
+
+    return {
+      map: plateByKey,
+      hadPartialErrors: (result?.errors || []).length > 0,
+    };
+  }
+
+  async function fetchAllFleetTimelineToursByCompanyRole(role, plateMap) {
     const query = `
       query FleetAllViaCompanyTours(
         $companyId: String!
@@ -312,21 +397,52 @@ async function fetchFleetTimelineStops(url, options = {}) {
       pageCount += 1;
     }
 
-    return dedupeToursById(filterToursByWindow(tours));
+    const enrichedTours = tours.map((tour) => {
+      const tourId = String(tour?.tour_id || "").trim();
+      const transport = String(tour?.shipper_transport_number || "").trim();
+      const plateFromMap =
+        (tourId ? plateMap?.get(`tour:${tourId}`) : "") ||
+        (transport ? plateMap?.get(`transport:${transport}`) : "");
+      return {
+        ...tour,
+        plate: String(tour?.plate || plateFromMap || "").trim() || null,
+      };
+    });
+
+    return dedupeToursById(filterToursByWindow(enrichedTours));
   }
 
   async function fetchAllFleetTimelineStops() {
     const errors = [];
+    let plateMap = new Map();
 
     try {
-      const tours = await fetchAllFleetTimelineToursByCompanyRole("CARRIER");
+      const plateMapResult = await fetchTourPlateMapByVehicleGroups();
+      plateMap = plateMapResult.map;
+      if (plateMapResult.hadPartialErrors) {
+        errors.push(
+          "plateMap: Teilantwort mit Resolver-Fehlern, nutze verfuegbare Kennzeichen",
+        );
+      }
+    } catch (error) {
+      errors.push(`plateMap: ${error.message}`);
+    }
+
+    try {
+      const tours = await fetchAllFleetTimelineToursByCompanyRole(
+        "CARRIER",
+        plateMap,
+      );
       if (tours.length) return mapFleetResultFromTours(tours);
     } catch (error) {
       errors.push(`companyToursCarrier: ${error.message}`);
     }
 
     try {
-      const tours = await fetchAllFleetTimelineToursByCompanyRole("SHIPPER");
+      const tours = await fetchAllFleetTimelineToursByCompanyRole(
+        "SHIPPER",
+        plateMap,
+      );
       if (tours.length) return mapFleetResultFromTours(tours);
     } catch (error) {
       errors.push(`companyToursShipper: ${error.message}`);
