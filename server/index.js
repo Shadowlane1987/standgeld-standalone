@@ -237,13 +237,31 @@ async function fetchFleetTimelineStops(url, options = {}) {
   }
 
   function dedupeToursById(tours) {
-    const seen = new Set();
-    return (Array.isArray(tours) ? tours : []).filter((tour) => {
-      const key = `${String(tour?.tour_id || "")}|${String(tour?.shipper_transport_number || "")}|${String(tour?.plate || "")}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+    const byKey = new Map();
+    (Array.isArray(tours) ? tours : []).forEach((tour, index) => {
+      const tourId = String(tour?.tour_id || "").trim();
+      const transport = String(tour?.shipper_transport_number || "").trim();
+      const key =
+        tourId || transport ? `${tourId}|${transport}` : `idx:${index}`;
+
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, tour);
+        return;
+      }
+
+      byKey.set(key, {
+        ...existing,
+        ...tour,
+        plate: String(existing?.plate || tour?.plate || "").trim() || null,
+        stops:
+          Array.isArray(existing?.stops) && existing.stops.length
+            ? existing.stops
+            : tour?.stops,
+      });
     });
+
+    return Array.from(byKey.values());
   }
 
   function filterToursByWindow(tours) {
@@ -437,6 +455,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
   async function fetchAllFleetTimelineStops() {
     const errors = [];
     let plateMap = new Map();
+    const collectedTours = [];
 
     try {
       const groupIds = await fetchVehicleGroupIds();
@@ -451,10 +470,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
         }
       }
 
-      const dedupedTours = dedupeToursById(filterToursByWindow(groupTours));
-      if (dedupedTours.length) {
-        return mapFleetResultFromTours(dedupedTours);
-      }
+      collectedTours.push(...groupTours);
     } catch (error) {
       errors.push(`groupIdList: ${error.message}`);
     }
@@ -476,7 +492,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
         "CARRIER",
         plateMap,
       );
-      if (tours.length) return mapFleetResultFromTours(tours);
+      collectedTours.push(...tours);
     } catch (error) {
       errors.push(`companyToursCarrier: ${error.message}`);
     }
@@ -486,9 +502,14 @@ async function fetchFleetTimelineStops(url, options = {}) {
         "SHIPPER",
         plateMap,
       );
-      if (tours.length) return mapFleetResultFromTours(tours);
+      collectedTours.push(...tours);
     } catch (error) {
       errors.push(`companyToursShipper: ${error.message}`);
+    }
+
+    const mergedTours = dedupeToursById(filterToursByWindow(collectedTours));
+    if (mergedTours.length) {
+      return mapFleetResultFromTours(mergedTours);
     }
 
     const allVehiclesQuery = `
