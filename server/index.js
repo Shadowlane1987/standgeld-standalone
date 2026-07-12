@@ -147,8 +147,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
         Array.isArray(response?.data?.errors) &&
         response.data.errors.length
       ) {
-        const firstError =
-          response.data.errors[0]?.message || "GraphQL Fehler";
+        const firstError = response.data.errors[0]?.message || "GraphQL Fehler";
         throw new Error(firstError);
       }
       return response?.data?.data || null;
@@ -256,7 +255,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
       // fallback below
     }
 
-    const groupsQuery = `
+    const groupsQueryConnection = `
       query FleetAllViaGroups(
         $companyId: String!
         $fromTime: DateTime!
@@ -318,22 +317,96 @@ async function fetchFleetTimelineStops(url, options = {}) {
       }
     `;
 
-    const groupsData = await runGraphql(groupsQuery, {
-      companyId: context.companyId,
-      fromTime: options.fromTime,
-      toTime: options.toTime,
-    });
+    let tours = [];
+    try {
+      const groupsData = await runGraphql(groupsQueryConnection, {
+        companyId: context.companyId,
+        fromTime: options.fromTime,
+        toTime: options.toTime,
+      });
 
-    const groupEdges =
-      groupsData?.viewer?.company?.companyVehicleGroupsConnection
-        ?.companyVehicleGroups?.edges || [];
+      const groupEdges =
+        groupsData?.viewer?.company?.companyVehicleGroupsConnection
+          ?.companyVehicleGroups?.edges || [];
 
-    const tours = [];
-    groupEdges.forEach((groupEdge) => {
-      const vehicleEdges =
-        groupEdge?.node?.vehiclesConnection?.vehicles?.edges || [];
-      tours.push(...collectToursFromVehicleEdges(vehicleEdges));
-    });
+      groupEdges.forEach((groupEdge) => {
+        const vehicleEdges =
+          groupEdge?.node?.vehiclesConnection?.vehicles?.edges || [];
+        tours.push(...collectToursFromVehicleEdges(vehicleEdges));
+      });
+    } catch (_error) {
+      // Fallback below: some tenants expose companyVehicleGroups without Connection wrapper.
+    }
+
+    if (!tours.length) {
+      const groupsQueryList = `
+        query FleetAllViaGroupsList(
+          $companyId: String!
+          $fromTime: DateTime!
+          $toTime: DateTime!
+        ) {
+          viewer {
+            company(company_id: $companyId) {
+              companyVehicleGroups {
+                companyVehicleGroupId
+                vehiclesConnection {
+                  vehicles(first: 250) {
+                    edges {
+                      node {
+                        license_plate_number
+                        tours(fromTime: $fromTime, toTime: $toTime) {
+                          tour_id
+                          shipper_transport_number
+                          status
+                          working_stop_id
+                          stops {
+                            stop_id
+                            type
+                            status
+                            arrival_time
+                            departure_time
+                            estimated_arrival
+                            deadline
+                            timeslot {
+                              begin
+                              end
+                              timezone
+                            }
+                            location {
+                              name
+                              bookingLocationName
+                              gate
+                              address {
+                                full_address
+                              }
+                              customerProvidedAddress {
+                                full_address
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const groupsListData = await runGraphql(groupsQueryList, {
+        companyId: context.companyId,
+        fromTime: options.fromTime,
+        toTime: options.toTime,
+      });
+
+      const groups = groupsListData?.viewer?.company?.companyVehicleGroups || [];
+      groups.forEach((group) => {
+        const vehicleEdges = group?.vehiclesConnection?.vehicles?.edges || [];
+        tours.push(...collectToursFromVehicleEdges(vehicleEdges));
+      });
+    }
 
     if (!tours.length) {
       throw new Error(
