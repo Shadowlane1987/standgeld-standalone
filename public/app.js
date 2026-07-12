@@ -20,6 +20,7 @@ const el = {
   amount: document.getElementById("amount"),
   positions: document.getElementById("positions"),
   units: document.getElementById("units"),
+  dateSort: document.getElementById("dateSort"),
   resultMeta: document.getElementById("resultMeta"),
   rows: document.getElementById("rows"),
   surchargeModal: document.getElementById("surchargeModal"),
@@ -31,8 +32,83 @@ const el = {
 };
 
 let importedTimeWindows = [];
+let latestStops = [];
 const URL_STORAGE_KEY = "standgeld.sixfoldUrl";
 const SESSION_TOKEN_STORAGE_KEY = "standgeld.sessionToken";
+
+function toTimestamp(value) {
+  const date = new Date(String(value || "").trim());
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function sortStopsByDate(stops, sortMode) {
+  const items = Array.isArray(stops) ? [...stops] : [];
+  const normalizedSortMode = String(sortMode || "arrival-asc").trim();
+  const fieldMap = {
+    "arrival-asc": "arrival_time",
+    "arrival-desc": "arrival_time",
+    "departure-asc": "departure_time",
+    "departure-desc": "departure_time",
+    "rule-start-asc": "rule_start_display",
+    "rule-start-desc": "rule_start_display",
+  };
+  const sourceField = fieldMap[normalizedSortMode] || "arrival_time";
+  const normalizedDirection = normalizedSortMode.endsWith("desc") ? -1 : 1;
+
+  items.sort((left, right) => {
+    const leftTime = toTimestamp(left?.[sourceField]);
+    const rightTime = toTimestamp(right?.[sourceField]);
+
+    if (leftTime == null && rightTime == null) return 0;
+    if (leftTime == null) return 1;
+    if (rightTime == null) return -1;
+    if (leftTime === rightTime) return 0;
+    return leftTime < rightTime
+      ? -1 * normalizedDirection
+      : 1 * normalizedDirection;
+  });
+
+  return items;
+}
+
+function renderStops(stops) {
+  const sortedStops = sortStopsByDate(stops, el.dateSort.value);
+  el.rows.innerHTML = "";
+
+  for (const stop of sortedStops) {
+    const tr = document.createElement("tr");
+    tr.className = "result-row";
+    tr.tabIndex = 0;
+    const arrival = compactDateTimeDisplay(stop.arrival_display);
+    const departure = compactDateTimeDisplay(stop.departure_display);
+    const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
+    const window = excelSingleWindowValue(stop);
+    const effective = formatMinutesAsHours(stop.effective_minutes);
+    const billable = formatMinutesAsHours(stop.billable_minutes);
+    tr.innerHTML = `
+      <td>${stop.transport_number || stop.tour_id || "-"}</td>
+      <td>${stop.plate || "-"}</td>
+      <td>${stop.type || "-"}</td>
+      <td>${stop.booking_location || stop.address || "-"}</td>
+      <td>${arrival}</td>
+      <td>${departure}</td>
+      <td>${window}</td>
+      <td>${ruleStart}</td>
+      <td>${effective}</td>
+      <td>${billable}</td>
+      <td>${stop.billed_units || 0}</td>
+      <td>${Number(stop.amount_eur || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</td>
+    `;
+    tr.addEventListener("click", () => openSurchargeModal(stop));
+    tr.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openSurchargeModal(stop);
+      }
+    });
+    el.rows.appendChild(tr);
+  }
+}
 
 function setStatus(text, type = "info") {
   el.status.textContent = text;
@@ -684,40 +760,8 @@ async function run() {
       `>14h entfernt: ${data.summary?.removed_long_stand_positions || 0} | ` +
       `>=${data.summary?.excluded_from_total_threshold_eur || 450} EUR nicht in Summe: ${data.summary?.excluded_from_total_positions || 0}`;
 
-    el.rows.innerHTML = "";
-    for (const stop of data.stops || []) {
-      const tr = document.createElement("tr");
-      tr.className = "result-row";
-      tr.tabIndex = 0;
-      const arrival = compactDateTimeDisplay(stop.arrival_display);
-      const departure = compactDateTimeDisplay(stop.departure_display);
-      const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
-      const window = excelSingleWindowValue(stop);
-      const effective = formatMinutesAsHours(stop.effective_minutes);
-      const billable = formatMinutesAsHours(stop.billable_minutes);
-      tr.innerHTML = `
-        <td>${stop.transport_number || stop.tour_id || "-"}</td>
-        <td>${stop.plate || "-"}</td>
-        <td>${stop.type || "-"}</td>
-        <td>${stop.booking_location || stop.address || "-"}</td>
-        <td>${arrival}</td>
-        <td>${departure}</td>
-        <td>${window}</td>
-        <td>${ruleStart}</td>
-        <td>${effective}</td>
-        <td>${billable}</td>
-        <td>${stop.billed_units || 0}</td>
-        <td>${Number(stop.amount_eur || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</td>
-      `;
-      tr.addEventListener("click", () => openSurchargeModal(stop));
-      tr.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          openSurchargeModal(stop);
-        }
-      });
-      el.rows.appendChild(tr);
-    }
+    latestStops = Array.isArray(data.stops) ? data.stops : [];
+    renderStops(latestStops);
 
     setStatus("Berechnung erfolgreich.", "success");
   } catch (error) {
@@ -740,6 +784,10 @@ el.importTimeWindowBtn.addEventListener("click", async () => {
 el.clearTimeWindowBtn.addEventListener("click", () => {
   clearTimeWindows();
   setStatus("Zeitfenster zurückgesetzt.", "success");
+});
+
+el.dateSort.addEventListener("change", () => {
+  renderStops(latestStops);
 });
 
 el.copySurchargeBtn.addEventListener("click", async () => {

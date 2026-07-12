@@ -210,6 +210,17 @@ button:active {
   color: #1f3025;
 }
 
+.result-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 4px 0 10px;
+}
+
+.result-toolbar label {
+  width: min(320px, 100%);
+  margin-bottom: 0;
+}
+
 .table-wrap {
   overflow-y: auto;
   overflow-x: hidden;
