@@ -196,6 +196,13 @@ function compactWindowDisplay(startValue, endValue) {
   return `${start} - ${end}`;
 }
 
+function formatMinutesAsHours(minutesValue) {
+  const totalMinutes = Math.max(0, Number(minutesValue || 0));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+}
+
 async function run() {
   const resolvedUrl = String(el.url.value || "").trim();
   const resolvedSessionToken = String(el.sessionToken.value || "").trim();
@@ -250,6 +257,8 @@ async function run() {
         stop.slot_begin_display,
         stop.slot_end_display,
       );
+      const effective = formatMinutesAsHours(stop.effective_minutes);
+      const billable = formatMinutesAsHours(stop.billable_minutes);
       tr.innerHTML = `
         <td>${stop.transport_number || stop.tour_id || "-"}</td>
         <td>${stop.plate || "-"}</td>
@@ -259,8 +268,8 @@ async function run() {
         <td>${departure}</td>
         <td>${window}</td>
         <td>${ruleStart}</td>
-        <td>${stop.effective_minutes || 0} min</td>
-        <td>${stop.billable_minutes || 0} min</td>
+        <td>${effective}</td>
+        <td>${billable}</td>
         <td>${stop.billed_units || 0}</td>
         <td>${Number(stop.amount_eur || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</td>
       `;
