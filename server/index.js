@@ -137,16 +137,29 @@ async function fetchFleetTimelineStops(url, options = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   async function runGraphql(query, variables) {
-    const response = await axios.post(
-      `${context.origin}/graphql`,
-      { query, variables },
-      { timeout: 25000, headers },
-    );
-    if (Array.isArray(response?.data?.errors) && response.data.errors.length) {
-      const firstError = response.data.errors[0]?.message || "GraphQL Fehler";
-      throw new Error(firstError);
+    try {
+      const response = await axios.post(
+        `${context.origin}/graphql`,
+        { query, variables },
+        { timeout: 25000, headers },
+      );
+      if (
+        Array.isArray(response?.data?.errors) &&
+        response.data.errors.length
+      ) {
+        const firstError =
+          response.data.errors[0]?.message || "GraphQL Fehler";
+        throw new Error(firstError);
+      }
+      return response?.data?.data || null;
+    } catch (error) {
+      const gqlError =
+        error?.response?.data?.errors?.[0]?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Unbekannter GraphQL Fehler";
+      throw new Error(gqlError);
     }
-    return response?.data?.data || null;
   }
 
   function collectToursFromVehicleEdges(edges) {
@@ -338,11 +351,6 @@ async function fetchFleetTimelineStops(url, options = {}) {
       stops: tours.flatMap((tour) => normalizeFleetStops(tour)),
     };
   }
-
-  if (String(context.vehicleGroupId).toLowerCase() === "all") {
-    return fetchAllFleetTimelineStops();
-  }
-
   const fleetQuery = `
     query FleetGroupStandgeldBatch(
       $companyId: String!
@@ -399,28 +407,52 @@ async function fetchFleetTimelineStops(url, options = {}) {
     }
   `;
 
-  const data = await runGraphql(fleetQuery, {
-    companyId: context.companyId,
-    vehicleGroupId: context.vehicleGroupId,
-    fromTime: options.fromTime,
-    toTime: options.toTime,
-  });
+  async function fetchByVehicleGroupId(vehicleGroupId) {
+    const data = await runGraphql(fleetQuery, {
+      companyId: context.companyId,
+      vehicleGroupId,
+      fromTime: options.fromTime,
+      toTime: options.toTime,
+    });
 
-  const edges =
-    data?.viewer?.company?.companyVehicleGroup?.vehiclesConnection?.vehicles
-      ?.edges || [];
+    const edges =
+      data?.viewer?.company?.companyVehicleGroup?.vehiclesConnection?.vehicles
+        ?.edges || [];
 
-  const tours = collectToursFromVehicleEdges(edges);
+    const tours = collectToursFromVehicleEdges(edges);
+    return {
+      source: {
+        url,
+        company_id: context.companyId,
+        vehicle_group_id: vehicleGroupId,
+      },
+      tours,
+      stops: tours.flatMap((tour) => normalizeFleetStops(tour)),
+    };
+  }
 
-  return {
-    source: {
-      url,
-      company_id: context.companyId,
-      vehicle_group_id: context.vehicleGroupId,
-    },
-    tours,
-    stops: tours.flatMap((tour) => normalizeFleetStops(tour)),
-  };
+  if (String(context.vehicleGroupId).toLowerCase() === "all") {
+    const errors = [];
+
+    try {
+      const byAllGroup = await fetchByVehicleGroupId("all");
+      if (byAllGroup.tours.length) return byAllGroup;
+    } catch (error) {
+      errors.push(`companyVehicleGroup(all): ${error.message}`);
+    }
+
+    try {
+      return await fetchAllFleetTimelineStops();
+    } catch (error) {
+      errors.push(`all-vehicles fallback: ${error.message}`);
+    }
+
+    throw new Error(
+      `fleet/all konnte nicht geladen werden. ${errors.join(" | ")}`,
+    );
+  }
+
+  return fetchByVehicleGroupId(context.vehicleGroupId);
 }
 
 function parseTimeToken(value) {
