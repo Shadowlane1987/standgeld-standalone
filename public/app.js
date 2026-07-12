@@ -136,6 +136,23 @@ function clearTimeWindows() {
   el.timeWindowMeta.textContent = "Keine Zeitfenster importiert.";
 }
 
+function compactDateTimeDisplay(value) {
+  const text = String(value || "-").trim();
+  if (!text || text === "-") return "-";
+  const match = text.match(/^(\d{2})\.(\d{2})\.(\d{4}),\s*(\d{2}:\d{2})$/);
+  if (!match) return text;
+  return `${match[1]}.${match[2]} ${match[4]}`;
+}
+
+function compactWindowDisplay(startValue, endValue) {
+  const start = compactDateTimeDisplay(startValue);
+  const end = compactDateTimeDisplay(endValue);
+  if (start === "-" && end === "-") return "-";
+  if (end === "-") return start;
+  if (start === "-") return end;
+  return `${start} - ${end}`;
+}
+
 async function run() {
   const body = {
     url: String(el.url.value || "").trim(),
@@ -178,15 +195,22 @@ async function run() {
     el.rows.innerHTML = "";
     for (const stop of data.stops || []) {
       const tr = document.createElement("tr");
+      const arrival = compactDateTimeDisplay(stop.arrival_display);
+      const departure = compactDateTimeDisplay(stop.departure_display);
+      const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
+      const window = compactWindowDisplay(
+        stop.slot_begin_display,
+        stop.slot_end_display,
+      );
       tr.innerHTML = `
         <td>${stop.transport_number || stop.tour_id || "-"}</td>
         <td>${stop.plate || "-"}</td>
         <td>${stop.type || "-"}</td>
         <td>${stop.booking_location || stop.address || "-"}</td>
-        <td>${stop.arrival_display || "-"}</td>
-        <td>${stop.departure_display || "-"}</td>
-        <td>${stop.slot_begin_display || "-"} - ${stop.slot_end_display || "-"}</td>
-        <td>${stop.rule_start_display || "-"}</td>
+        <td>${arrival}</td>
+        <td>${departure}</td>
+        <td>${window}</td>
+        <td>${ruleStart}</td>
         <td>${stop.effective_minutes || 0} min</td>
         <td>${stop.billable_minutes || 0} min</td>
         <td>${stop.billed_units || 0}</td>
