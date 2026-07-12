@@ -685,7 +685,7 @@ function excelSingleWindowValue(stop) {
 }
 
 function resolveWindowDisplay(stop) {
-  const fromSlots = compactWindowDisplay(
+  const fromSlots = compactSingleWindowValue(
     stop?.slot_begin_display,
     stop?.slot_end_display,
   );
