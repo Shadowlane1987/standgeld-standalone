@@ -25,6 +25,7 @@ const el = {
 };
 
 let importedTimeWindows = [];
+const URL_STORAGE_KEY = "standgeld.sixfoldUrl";
 
 function setStatus(text, type = "info") {
   el.status.textContent = text;
@@ -136,6 +137,25 @@ function clearTimeWindows() {
   el.timeWindowMeta.textContent = "Keine Zeitfenster importiert.";
 }
 
+function loadPersistedUrl() {
+  try {
+    const savedUrl = localStorage.getItem(URL_STORAGE_KEY);
+    if (savedUrl && !String(el.url.value || "").trim()) {
+      el.url.value = savedUrl;
+    }
+  } catch (_error) {
+    // localStorage kann in manchen Browser-Kontexten blockiert sein.
+  }
+}
+
+function persistUrl(urlValue) {
+  try {
+    localStorage.setItem(URL_STORAGE_KEY, String(urlValue || "").trim());
+  } catch (_error) {
+    // Fallback: Wenn Speichern fehlschlaegt, laeuft die App normal weiter.
+  }
+}
+
 function compactDateTimeDisplay(value) {
   const text = String(value || "-").trim();
   if (!text || text === "-") return "-";
@@ -154,8 +174,11 @@ function compactWindowDisplay(startValue, endValue) {
 }
 
 async function run() {
+  const resolvedUrl = String(el.url.value || "").trim();
+  persistUrl(resolvedUrl);
+
   const body = {
-    url: String(el.url.value || "").trim(),
+    url: resolvedUrl,
     period: String(el.periodMode.value || "day").trim(),
     referenceDate: String(el.referenceDate.value || "").trim(),
     transportNumber: String(el.transportNumber.value || "").trim(),
@@ -241,5 +264,11 @@ el.clearTimeWindowBtn.addEventListener("click", () => {
   clearTimeWindows();
   setStatus("Zeitfenster zurückgesetzt.", "success");
 });
+
+el.url.addEventListener("change", () => {
+  persistUrl(el.url.value);
+});
+
+loadPersistedUrl();
 
 el.runBtn.addEventListener("click", run);
