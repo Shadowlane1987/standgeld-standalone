@@ -26,6 +26,7 @@ const el = {
 
 let importedTimeWindows = [];
 const URL_STORAGE_KEY = "standgeld.sixfoldUrl";
+const SESSION_TOKEN_STORAGE_KEY = "standgeld.sessionToken";
 
 function setStatus(text, type = "info") {
   el.status.textContent = text;
@@ -148,9 +149,31 @@ function loadPersistedUrl() {
   }
 }
 
+function loadPersistedSessionToken() {
+  try {
+    const savedToken = localStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
+    if (savedToken && !String(el.sessionToken.value || "").trim()) {
+      el.sessionToken.value = savedToken;
+    }
+  } catch (_error) {
+    // localStorage kann in manchen Browser-Kontexten blockiert sein.
+  }
+}
+
 function persistUrl(urlValue) {
   try {
     localStorage.setItem(URL_STORAGE_KEY, String(urlValue || "").trim());
+  } catch (_error) {
+    // Fallback: Wenn Speichern fehlschlaegt, laeuft die App normal weiter.
+  }
+}
+
+function persistSessionToken(tokenValue) {
+  try {
+    localStorage.setItem(
+      SESSION_TOKEN_STORAGE_KEY,
+      String(tokenValue || "").trim(),
+    );
   } catch (_error) {
     // Fallback: Wenn Speichern fehlschlaegt, laeuft die App normal weiter.
   }
@@ -175,7 +198,9 @@ function compactWindowDisplay(startValue, endValue) {
 
 async function run() {
   const resolvedUrl = String(el.url.value || "").trim();
+  const resolvedSessionToken = String(el.sessionToken.value || "").trim();
   persistUrl(resolvedUrl);
+  persistSessionToken(resolvedSessionToken);
 
   const body = {
     url: resolvedUrl,
@@ -183,7 +208,7 @@ async function run() {
     referenceDate: String(el.referenceDate.value || "").trim(),
     transportNumber: String(el.transportNumber.value || "").trim(),
     tourId: String(el.tourId.value || "").trim(),
-    sessionToken: String(el.sessionToken.value || "").trim(),
+    sessionToken: resolvedSessionToken,
     rules: {
       freeMinutes: Number(el.freeMinutes.value || 120),
       intervalMinutes: Number(el.unitMinutes.value || 30),
@@ -269,6 +294,11 @@ el.url.addEventListener("change", () => {
   persistUrl(el.url.value);
 });
 
+el.sessionToken.addEventListener("change", () => {
+  persistSessionToken(el.sessionToken.value);
+});
+
 loadPersistedUrl();
+loadPersistedSessionToken();
 
 el.runBtn.addEventListener("click", run);
