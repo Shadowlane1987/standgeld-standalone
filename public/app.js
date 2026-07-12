@@ -14,7 +14,6 @@ const el = {
   unitPrice: document.getElementById("unitPrice"),
   thresholdEur: document.getElementById("thresholdEur"),
   capEur: document.getElementById("capEur"),
-  stopsJson: document.getElementById("stopsJson"),
   runBtn: document.getElementById("runBtn"),
   status: document.getElementById("status"),
   resultPanel: document.getElementById("resultPanel"),
@@ -45,15 +44,6 @@ function getCellValue(row, keySet) {
     if (keySet.has(normalizeHeader(key))) return value;
   }
   return "";
-}
-
-function parseStopsJson() {
-  const raw = String(el.stopsJson.value || "").trim();
-  if (!raw) return [];
-  const parsed = JSON.parse(raw);
-  if (!Array.isArray(parsed))
-    throw new Error("Stops JSON muss ein Array sein.");
-  return parsed;
 }
 
 function parseExcelTimeWindows(rows) {
@@ -147,14 +137,6 @@ function clearTimeWindows() {
 }
 
 async function run() {
-  let stops = [];
-  try {
-    stops = parseStopsJson();
-  } catch (error) {
-    setStatus(`Ungültiges JSON: ${error.message}`, "error");
-    return;
-  }
-
   const body = {
     url: String(el.url.value || "").trim(),
     period: String(el.periodMode.value || "day").trim(),
@@ -170,7 +152,6 @@ async function run() {
       capEur: Number(el.capEur.value || 650),
     },
     timeWindows: importedTimeWindows,
-    stops,
   };
 
   el.runBtn.disabled = true;
