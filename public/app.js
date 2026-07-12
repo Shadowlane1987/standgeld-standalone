@@ -571,6 +571,15 @@ function compactSingleWindowValue(startValue, endValue) {
   return "-";
 }
 
+function excelSingleWindowValue(stop) {
+  const raw = String(stop?.excel_window_display || "").trim();
+  if (!raw) return "-";
+  if (/^\d{1,2}\.\d{2}$/.test(raw)) return raw.replace(".", ":");
+  if (/^\d{1,2}:\d{2}$/.test(raw)) return raw;
+  const compact = compactDateTimeDisplay(raw);
+  return compact || raw;
+}
+
 function formatMinutesAsHours(minutesValue) {
   const totalMinutes = Math.max(0, Number(minutesValue || 0));
   const hours = Math.floor(totalMinutes / 60);
@@ -581,10 +590,7 @@ function formatMinutesAsHours(minutesValue) {
 function buildSurchargeDescription(stop) {
   const arrival = stop.arrival_display || "-";
   const departure = stop.departure_display || "-";
-  const windowText = compactSingleWindowValue(
-    stop.slot_begin_display,
-    stop.slot_end_display,
-  );
+  const windowText = excelSingleWindowValue(stop);
   const effective = formatMinutesAsHours(stop.effective_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
 
@@ -659,10 +665,7 @@ async function run() {
       const arrival = compactDateTimeDisplay(stop.arrival_display);
       const departure = compactDateTimeDisplay(stop.departure_display);
       const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
-      const window = compactSingleWindowValue(
-        stop.slot_begin_display,
-        stop.slot_end_display,
-      );
+      const window = excelSingleWindowValue(stop);
       const effective = formatMinutesAsHours(stop.effective_minutes);
       const billable = formatMinutesAsHours(stop.billable_minutes);
       tr.innerHTML = `

@@ -326,6 +326,9 @@ function applyTimeWindowOverride(stop, windows) {
     timeslot_begin: start ? start.toISOString() : stop.timeslot_begin || null,
     timeslot_end: end ? end.toISOString() : stop.timeslot_end || null,
     window_override_applied: true,
+    excel_window_start_raw: best.window_start || null,
+    excel_window_end_raw: best.window_end || null,
+    excel_window_display: best.window_start || best.window_end || null,
     matched_window_key:
       best.cola_number ||
       best.load_number ||
