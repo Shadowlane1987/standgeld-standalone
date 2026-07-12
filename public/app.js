@@ -82,7 +82,7 @@ function renderStops(stops) {
     const arrival = compactDateTimeDisplay(stop.arrival_display);
     const departure = compactDateTimeDisplay(stop.departure_display);
     const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
-    const window = excelSingleWindowValue(stop);
+    const window = resolveWindowDisplay(stop);
     const windowSource = getTimeWindowSource(stop);
     const effective = formatMinutesAsHours(stop.effective_minutes);
     const billable = formatMinutesAsHours(stop.billable_minutes);
@@ -684,6 +684,15 @@ function excelSingleWindowValue(stop) {
   return compact || raw;
 }
 
+function resolveWindowDisplay(stop) {
+  const fromSlots = compactWindowDisplay(
+    stop?.slot_begin_display,
+    stop?.slot_end_display,
+  );
+  if (fromSlots !== "-") return fromSlots;
+  return excelSingleWindowValue(stop);
+}
+
 function getTimeWindowSource(stop) {
   if (stop?.window_override_applied) {
     return { label: "Excel", className: "source-excel" };
@@ -707,7 +716,7 @@ function formatMinutesAsHours(minutesValue) {
 function buildSurchargeDescription(stop) {
   const arrival = stop.arrival_display || "-";
   const departure = stop.departure_display || "-";
-  const windowText = excelSingleWindowValue(stop);
+  const windowText = resolveWindowDisplay(stop);
   const effective = formatMinutesAsHours(stop.effective_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
 
