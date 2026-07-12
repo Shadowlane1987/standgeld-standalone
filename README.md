@@ -20,6 +20,21 @@ Danach ist die App unter http://localhost:3100 erreichbar.
 - Ergebnis-Tabelle mit Standzeitberechnung
 - Platzhalterfelder für Sixfold-URL und Session-Daten
 
+## Deploy auf Render
+
+1. Dieses Repository nach GitHub pushen.
+2. In Render auf `New +` -> `Blueprint` klicken.
+3. Das Repository `standgeld-standalone` auswaehlen.
+4. Render liest automatisch `render.yaml` und erstellt den Web Service.
+5. Nach dem Deploy die URL oeffnen und `/api/health` pruefen.
+
+Falls du statt Blueprint den Web-Service manuell anlegen willst:
+
+- Runtime: `Node`
+- Build Command: `npm install`
+- Start Command: `npm start`
+- Health Check Path: `/api/health`
+
 ## API Payload (Beispiel)
 
 ```json
