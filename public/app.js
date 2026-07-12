@@ -5,8 +5,6 @@ const el = {
   transportNumber: document.getElementById("transportNumber"),
   tourId: document.getElementById("tourId"),
   sessionToken: document.getElementById("sessionToken"),
-  sessionCookie: document.getElementById("sessionCookie"),
-  authToken: document.getElementById("authToken"),
   timeWindowFile: document.getElementById("timeWindowFile"),
   importTimeWindowBtn: document.getElementById("importTimeWindowBtn"),
   clearTimeWindowBtn: document.getElementById("clearTimeWindowBtn"),
@@ -164,8 +162,6 @@ async function run() {
     transportNumber: String(el.transportNumber.value || "").trim(),
     tourId: String(el.tourId.value || "").trim(),
     sessionToken: String(el.sessionToken.value || "").trim(),
-    sessionCookie: String(el.sessionCookie.value || "").trim(),
-    authToken: String(el.authToken.value || "").trim(),
     rules: {
       freeMinutes: Number(el.freeMinutes.value || 120),
       intervalMinutes: Number(el.unitMinutes.value || 30),
