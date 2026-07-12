@@ -209,19 +209,7 @@ function formatMinutesAsHours(minutesValue) {
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
-function mapStopTypeToPlace(typeValue) {
-  const type = String(typeValue || "").toLowerCase();
-  if (type.includes("load") || type.includes("belad")) return "Ladestelle";
-  if (type.includes("unload") || type.includes("entlad"))
-    return "Entladestelle";
-  return "Stelle";
-}
-
 function buildSurchargeDescription(stop) {
-  const transport = stop.transport_number || stop.tour_id || "-";
-  const plate = stop.plate || "-";
-  const placeLabel = mapStopTypeToPlace(stop.type);
-  const place = stop.booking_location || stop.address || "-";
   const arrival = stop.arrival_display || "-";
   const departure = stop.departure_display || "-";
   const windowText = compactWindowDisplay(
@@ -230,28 +218,19 @@ function buildSurchargeDescription(stop) {
   );
   const effective = formatMinutesAsHours(stop.effective_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
-  const units = Number(stop.billed_units || 0);
-  const amount = Number(stop.amount_eur || 0).toLocaleString("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  });
 
   return [
-    "Standzeitnachweis fuer Zuschlag:",
-    `Transport: ${transport}`,
-    `Kennzeichen: ${plate}`,
-    `${placeLabel}: ${place}`,
+    "Standzeitnachweis:",
     `Ankunft: ${arrival}`,
-    `Zeitfenster ${placeLabel}: ${windowText}`,
+    `Zeitfenster: ${windowText}`,
     `Abfahrt: ${departure}`,
     `Effektive Standzeit: ${effective}`,
-    `Abzurechnen: ${billable} (${units} Takte, ${amount})`,
+    `Abzurechnende Standzeit: ${billable}`,
   ].join("\n");
 }
 
 function openSurchargeModal(stop) {
-  const transport = stop.transport_number || stop.tour_id || "-";
-  el.surchargeTitle.textContent = `Zuschlagstext fuer Sendung ${transport}`;
+  el.surchargeTitle.textContent = "Zuschlagstext";
   el.surchargeText.value = buildSurchargeDescription(stop);
   el.surchargeModal.hidden = false;
 }
