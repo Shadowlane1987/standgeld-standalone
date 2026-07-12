@@ -217,141 +217,140 @@ async function fetchFleetTimelineStops(url, options = {}) {
       }
     `;
 
-    const allVehiclesData = await runGraphql(allVehiclesQuery, {
-      companyId: context.companyId,
-      fromTime: options.fromTime,
-      toTime: options.toTime,
-    });
+    try {
+      const allVehiclesData = await runGraphql(allVehiclesQuery, {
+        companyId: context.companyId,
+        fromTime: options.fromTime,
+        toTime: options.toTime,
+      });
 
-    const directEdges =
-      allVehiclesData?.viewer?.company?.vehiclesConnection?.vehicles?.edges ||
-      [];
-    if (directEdges.length) {
-      const tours = collectToursFromVehicleEdges(directEdges);
-      return {
-        source: {
-          url,
-          company_id: context.companyId,
-                      try {
-                        const allVehiclesData = await runGraphql(allVehiclesQuery, {
-                          companyId: context.companyId,
-                          fromTime: options.fromTime,
-                          toTime: options.toTime,
-                        });
+      const directEdges =
+        allVehiclesData?.viewer?.company?.vehiclesConnection?.vehicles?.edges ||
+        [];
+      if (directEdges.length) {
+        const tours = collectToursFromVehicleEdges(directEdges);
+        return {
+          source: {
+            url,
+            company_id: context.companyId,
+            vehicle_group_id: "all",
+          },
+          tours,
+          stops: tours.flatMap((tour) => normalizeFleetStops(tour)),
+        };
+      }
+    } catch (_error) {
+      // fallback below
+    }
 
-                        const directEdges =
-                          allVehiclesData?.viewer?.company?.vehiclesConnection?.vehicles?.edges ||
-                          [];
-                        if (directEdges.length) {
-                          const tours = collectToursFromVehicleEdges(directEdges);
-                          return {
-                            source: {
-                              url,
-                              company_id: context.companyId,
-                              vehicle_group_id: "all",
-                            },
-                            tours,
-                            stops: tours.flatMap((tour) => normalizeFleetStops(tour)),
-                          };
-                        }
-                      } catch (_error) {
-                        // fallback below
-                      }
-
-                      const groupsQuery = `
-                        query FleetAllViaGroups(
-                          $companyId: String!
-                          $fromTime: DateTime!
-                          $toTime: DateTime!
-                        ) {
-                          viewer {
-                            company(company_id: $companyId) {
-                              companyVehicleGroupsConnection {
-                                companyVehicleGroups(first: 100) {
-                                  edges {
-                                    node {
-                                      companyVehicleGroupId
-                                      vehiclesConnection {
-                                        vehicles(first: 250) {
-                                          edges {
-                                            node {
-                                              license_plate_number
-                                              tours(fromTime: $fromTime, toTime: $toTime) {
-                                                tour_id
-                                                shipper_transport_number
-                                                status
-                                                working_stop_id
-                                                stops {
-                                                  stop_id
-                                                  type
-                                                  status
-                                                  arrival_time
-                                                  departure_time
-                                                  estimated_arrival
-                                                  deadline
-                                                  timeslot {
-                                                    begin
-                                                    end
-                                                    timezone
-                                                  }
-                                                  location {
-                                                    name
-                                                    bookingLocationName
-                                                    gate
-                                                    address {
-                                                      full_address
-                                                    }
-                                                    customerProvidedAddress {
-                                                      full_address
-                                                    }
-                                                  }
-                                                }
-                                              }
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
+    const groupsQuery = `
+      query FleetAllViaGroups(
+        $companyId: String!
+        $fromTime: DateTime!
+        $toTime: DateTime!
+      ) {
+        viewer {
+          company(company_id: $companyId) {
+            companyVehicleGroupsConnection {
+              companyVehicleGroups(first: 100) {
+                edges {
+                  node {
+                    companyVehicleGroupId
+                    vehiclesConnection {
+                      vehicles(first: 250) {
+                        edges {
+                          node {
+                            license_plate_number
+                            tours(fromTime: $fromTime, toTime: $toTime) {
+                              tour_id
+                              shipper_transport_number
+                              status
+                              working_stop_id
+                              stops {
+                                stop_id
+                                type
+                                status
+                                arrival_time
+                                departure_time
+                                estimated_arrival
+                                deadline
+                                timeslot {
+                                  begin
+                                  end
+                                  timezone
+                                }
+                                location {
+                                  name
+                                  bookingLocationName
+                                  gate
+                                  address {
+                                    full_address
+                                  }
+                                  customerProvidedAddress {
+                                    full_address
                                   }
                                 }
                               }
                             }
                           }
                         }
-                      `;
-
-                      const groupsData = await runGraphql(groupsQuery, {
-                        companyId: context.companyId,
-                        fromTime: options.fromTime,
-                        toTime: options.toTime,
-                      });
-
-                      const groupEdges =
-                        groupsData?.viewer?.company?.companyVehicleGroupsConnection
-                          ?.companyVehicleGroups?.edges || [];
-
-                      const tours = [];
-                      groupEdges.forEach((groupEdge) => {
-                        const vehicleEdges =
-                          groupEdge?.node?.vehiclesConnection?.vehicles?.edges || [];
-                        tours.push(...collectToursFromVehicleEdges(vehicleEdges));
-                      });
-
-                      if (!tours.length) {
-                        throw new Error(
-                          "fleet/all konnte nicht ausgewertet werden: keine Fahrzeuge oder Touren im Zeitraum gefunden.",
-                        );
                       }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
 
-                      return {
-                        source: {
-                          url,
-                          company_id: context.companyId,
-                          vehicle_group_id: "all",
-                        },
-                        tours,
-                        stops: tours.flatMap((tour) => normalizeFleetStops(tour)),
-                      };
+    const groupsData = await runGraphql(groupsQuery, {
+      companyId: context.companyId,
+      fromTime: options.fromTime,
+      toTime: options.toTime,
+    });
+
+    const groupEdges =
+      groupsData?.viewer?.company?.companyVehicleGroupsConnection
+        ?.companyVehicleGroups?.edges || [];
+
+    const tours = [];
+    groupEdges.forEach((groupEdge) => {
+      const vehicleEdges =
+        groupEdge?.node?.vehiclesConnection?.vehicles?.edges || [];
+      tours.push(...collectToursFromVehicleEdges(vehicleEdges));
+    });
+
+    if (!tours.length) {
+      throw new Error(
+        "fleet/all konnte nicht ausgewertet werden: keine Fahrzeuge oder Touren im Zeitraum gefunden.",
+      );
+    }
+
+    return {
+      source: {
+        url,
+        company_id: context.companyId,
+        vehicle_group_id: "all",
+      },
+      tours,
+      stops: tours.flatMap((tour) => normalizeFleetStops(tour)),
+    };
+  }
+
+  if (String(context.vehicleGroupId).toLowerCase() === "all") {
+    return fetchAllFleetTimelineStops();
+  }
+
+  const fleetQuery = `
+    query FleetGroupStandgeldBatch(
+      $companyId: String!
+      $vehicleGroupId: String!
+      $fromTime: DateTime!
+      $toTime: DateTime!
+    ) {
+      viewer {
         company(company_id: $companyId) {
           companyVehicleGroup(companyVehicleGroupId: $vehicleGroupId) {
             vehiclesConnection {
