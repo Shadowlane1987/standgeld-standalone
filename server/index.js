@@ -509,7 +509,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
       errors.push(`companyToursShipper: ${error.message}`);
     }
 
-    const mergedTours = dedupeToursById(filterToursByWindow(collectedTours));
+    const mergedTours = filterToursByWindow(dedupeToursById(collectedTours));
     if (mergedTours.length) {
       return mapFleetResultFromTours(mergedTours);
     }
