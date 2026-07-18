@@ -116,6 +116,7 @@ function normalizeFleetStops(tour) {
       null,
     timeslot_begin: stop?.timeslot?.begin || null,
     timeslot_end: stop?.timeslot?.end || null,
+    timeslot_timezone: stop?.timeslot?.timezone || null,
     arrival_time: stop?.arrival_time || null,
     departure_time: stop?.departure_time || null,
     transport_number: tour?.shipper_transport_number || null,

@@ -4,3 +4,12 @@ node_modules/
 .env.*.local
 npm-debug.log*
 .DS_Store
+
+# Rohdatenhaltung (immutable, nicht ins Repo)
+data/
+
+# Netzwerk-Captures (enthalten Session-Cookies + personenbezogene Daten!)
+*.har
+
+# Playwright-Browserprofil (enthaelt Login-Session/Cookies!)
+.pw-profile/
