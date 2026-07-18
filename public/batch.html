@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Standgeld · Alle Transporte</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel hero">
+        <h1>Standgeld · Alle Transporte</h1>
+        <p class="status">
+          Batch-Abrechnung aus dem Transporeon-Export (Zeitfenster + Standgeld
+          je Stopp). <a href="/">Zur Einzelberechnung</a>
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="grid grid-5">
+          <label
+            >Frei (Min)
+            <input id="freeMinutes" type="number" value="120" min="0" />
+          </label>
+          <label
+            >Takt (Min)
+            <input id="blockMinutes" type="number" value="30" min="1" />
+          </label>
+          <label
+            >Preis je Takt (€)
+            <input
+              id="blockRateEur"
+              type="number"
+              value="30"
+              min="0"
+              step="0.01"
+            />
+          </label>
+          <label
+            >Auslöser (Min)
+            <input id="triggerMinutes" type="number" value="10" min="0" />
+          </label>
+          <label
+            >&nbsp;
+            <button id="loadBtn" type="button">Alle Transporte laden</button>
+          </label>
+        </div>
+        <p id="status" class="status">Bereit.</p>
+      </section>
+
+      <section class="panel" id="resultPanel" hidden>
+        <h2>Ergebnis</h2>
+        <div class="summary">
+          <div>
+            <strong>Transporte:</strong> <span id="transportCount">-</span>
+          </div>
+          <div><strong>Positionen:</strong> <span id="stopCount">-</span></div>
+          <div>
+            <strong>Abrechenbar:</strong> <span id="chargeableCount">-</span>
+          </div>
+          <div><strong>Prüffälle:</strong> <span id="reviewCount">-</span></div>
+          <div><strong>Gesamtbetrag:</strong> <span id="totalFee">-</span></div>
+        </div>
+
+        <div class="result-toolbar">
+          <label>
+            Filter
+            <select id="filterMode">
+              <option value="all">Alle anzeigen</option>
+              <option value="chargeable">Nur abrechenbar</option>
+              <option value="review">Nur Prüffälle</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Transport</th>
+                <th>Typ</th>
+                <th>Zeitfenster</th>
+                <th>Ankunft</th>
+                <th>Abfahrt</th>
+                <th>Zählbeginn</th>
+                <th>Standzeit</th>
+                <th>Über frei</th>
+                <th>Takte</th>
+                <th>Betrag</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/batch.js"></script>
+  </body>
+</html>

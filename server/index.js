@@ -1,7 +1,11 @@
+const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const axios = require("axios");
 const dotenv = require("dotenv");
+
+const { loadTransporeonExport } = require("./tools/readTransporeonExport");
+const { billFromExport } = require("./normalize/exportBilling");
 
 dotenv.config();
 
@@ -1067,6 +1071,51 @@ function calcStop(stop, rules) {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: "standgeld-standalone" });
+});
+
+// Batch-Abrechnung aller Transporte aus dem Transporeon-Excel-Export.
+// Liefert Zeitfenster + Standgeld je Stopp (Laden/Entladen) fuer ALLE Transporte.
+const EXPORT_XLSX_PATH = path.join(
+  process.cwd(),
+  "data",
+  "captures",
+  "transporeon_export.xlsx",
+);
+
+app.get("/api/billing/export", (req, res) => {
+  try {
+    const filePath = req.query.file ? String(req.query.file) : EXPORT_XLSX_PATH;
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        error: `Export-Datei nicht gefunden: ${filePath}`,
+      });
+    }
+
+    const config = {};
+    if (req.query.freeMinutes)
+      config.freeMinutes = Number(req.query.freeMinutes);
+    if (req.query.blockMinutes)
+      config.blockMinutes = Number(req.query.blockMinutes);
+    if (req.query.blockRateEur)
+      config.blockRateEur = Number(req.query.blockRateEur);
+    if (req.query.triggerMinutes)
+      config.triggerMinutes = Number(req.query.triggerMinutes);
+
+    const transports = loadTransporeonExport(filePath);
+    const result = billFromExport(transports, { config });
+
+    res.json({
+      file: filePath,
+      generated_at: new Date().toISOString(),
+      summary: {
+        ...result.summary,
+        total_fee_display: formatEuro(result.summary.total_fee_eur),
+      },
+      stops: result.stops,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Unbekannter Fehler" });
+  }
 });
 
 app.post("/api/sixfold/standgeld", async (req, res) => {
