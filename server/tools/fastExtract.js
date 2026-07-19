@@ -25,7 +25,10 @@ const readline = require("node:readline");
 const { chromium } = require("playwright");
 
 const { parseVisibilityResponse } = require("../normalize/gwtVisibility");
-const { parseTransportList } = require("../normalize/gwtTransportList");
+const {
+  parseTransportList,
+  mergeTransportLists,
+} = require("../normalize/gwtTransportList");
 const { computeStandgeldFromEvents } = require("../normalize/pipeline");
 const { parseBookingsResponse } = require("../normalize/bookings");
 const { bookingsToWindowMap } = require("../normalize/transporeonWindows");
@@ -41,7 +44,6 @@ const START_URL =
   "https://login.transporeon.com/?locale=de&return=AssignedTransportsCarrier";
 
 const DISPATCH_RE = /\/taweb\/ta\/dispatch(\?|$)/;
-const REFRESH_BUTTON = ".toolbarButton_refresh";
 const EXPORT_BUTTON = "#exportToExcel, .toolbarButton_exportToExcel";
 const EXPORTER_RE = /\/taweb\/exporter(\?|$)/;
 const NUMBER_CELL = 'td[class*="gxColumn-number"] div.taMJE';
@@ -107,6 +109,39 @@ async function findListFrame(context) {
 }
 
 /**
+ * Scrollt das gerenderte Transport-Grid vollstaendig durch, damit jede
+ * Pagination-Seite ihre LoadPagedTransportListItemsAction-Antwort feuert (die
+ * Zeilen sind virtualisiert; nur sichtbare Seiten werden geladen). Best-effort:
+ * findet den scrollbaren Container mit der groessten Scrollhoehe und scrollt in
+ * Schritten bis ans Ende. Die Antworten werden ueber den response-Handler in
+ * listResponses gesammelt.
+ *
+ * @param {import('playwright').Frame} frame
+ * @returns {Promise<void>}
+ */
+async function scrollListToLoadAllPages(frame) {
+  try {
+    await frame.evaluate(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const grid = Array.from(document.querySelectorAll("div"))
+        .filter((d) => d.scrollHeight > d.clientHeight + 40)
+        .sort((a, b) => b.scrollHeight - a.scrollHeight)[0];
+      if (!grid) return;
+      let lastTop = -1;
+      for (let i = 0; i < 60; i++) {
+        grid.scrollTop = grid.scrollHeight;
+        await sleep(350);
+        if (grid.scrollTop === lastTop) break; // ganz unten, nichts Neues
+        lastTop = grid.scrollTop;
+      }
+      grid.scrollTop = 0;
+    });
+  } catch {
+    /* best effort -- ohne Scroll bleiben die bereits erfassten Seiten */
+  }
+}
+
+/**
  * Loest den Transporeon-EIGENEN Excel-Export aus ("Nach Excel exportieren") und
  * liefert die geparsten Transporte. Weil der Button-Submit als Datei-Download in
  * ein iframe geht (bricht in Playwright ab), wird die abgefangene Export-Anfrage
@@ -157,8 +192,17 @@ async function downloadExport(page, frame) {
   }, postData);
   if (!out || !out.ok) return null;
 
+  // Frische XLSX als Datei sichern (Master-Quelle: enthaelt Transportnummer,
+  // Zeitfenster und -- falls konfiguriert -- die transportId-Spalte).
+  const xlsxBuf = Buffer.from(out.b64, "base64");
+  try {
+    fs.writeFileSync(path.join(OUT_DIR, "transporeon_export.xlsx"), xlsxBuf);
+  } catch {
+    /* Speichern ist optional. */
+  }
+
   const XLSX = require("xlsx");
-  const wb = XLSX.read(Buffer.from(out.b64, "base64"), { type: "buffer" });
+  const wb = XLSX.read(xlsxBuf, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, {
     header: 1,
@@ -263,6 +307,10 @@ async function main() {
   // Live-Erfassung der Wire-Templates (Strong-Name/Endpoint/Account) + Fenster.
   const captured = { list: null, visibility: null };
   const transporeonWindows = new Map();
+  // ALLE Listen-Antworten (je Pagination-Seite eine) sammeln. Die reiche
+  // Antwort (mit Transportnummern) feuert oft schon beim initialen Laden --
+  // deshalb NIE verwerfen, sondern akkumulieren und spaeter mergen.
+  const listResponses = [];
 
   context.on("response", async (response) => {
     const url = response.url();
@@ -281,11 +329,13 @@ async function main() {
     try {
       const req = response.request();
       const reqBody = req.postData() || "";
+      const text = await response.text();
       if (reqBody.includes("LoadPagedTransportListItemsAction")) {
-        captured.list = { url, reqBody, text: await response.text() };
+        captured.list = { url, reqBody, text };
+        listResponses.push(text);
       } else if (reqBody.includes("LoadTransportVisibilityAction")) {
         if (!captured.visibility) {
-          captured.visibility = { url, reqBody, text: await response.text() };
+          captured.visibility = { url, reqBody, text };
         }
       }
     } catch {
@@ -317,36 +367,76 @@ async function main() {
     }
     const { page: listPage, frame } = found;
 
-    // 1) Frische Listen-Antwort erzwingen (Refresh) -> captured.list.
-    captured.list = null;
-    await frame
-      .evaluate((sel) => {
-        const b = document.querySelector(sel);
-        if (b)
-          for (const type of ["mousedown", "mouseup", "click"])
-            b.dispatchEvent(
-              new MouseEvent(type, { bubbles: true, cancelable: true }),
-            );
-      }, REFRESH_BUTTON)
-      .catch(() => {});
-    for (let i = 0; i < 30 && !captured.list; i++) await sleep(300);
-    if (!captured.list) {
-      console.log("Konnte die Transportliste nicht abrufen (Refresh).");
+    // 1) Pro Seite: Transportliste ins Grid scrollen (die virtualisierten
+    //    LoadPagedTransportListItemsAction-Antworten werden global in
+    //    listResponses gesammelt) UND den Excel-Export laden (Zeitfenster).
+    //    Transporeon zeigt max. 500 Zeilen je Seite; fuer die vollstaendige
+    //    Liste blaettert der Nutzer im Browser auf die naechste Seite und
+    //    drueckt Enter. So kommen Liste (fuer GPS) UND Fenster jeder Seite mit.
+    const seenTnWindows = new Set();
+    for (let pageNo = 1; ; pageNo++) {
+      // a) Aktuelle Seite komplett einscrollen -> Listen-Antworten fangen.
+      await scrollListToLoadAllPages(frame);
+      for (let i = 0; i < 4; i++) await sleep(300);
+
+      // b) Export der aktuellen Seite -> Fenster mergen.
+      try {
+        const exported = await downloadExport(listPage, frame);
+        if (exported && exported.length) {
+          const winMap = exportToWindowMap(exported);
+          for (const [key, value] of winMap) transporeonWindows.set(key, value);
+          let neu = 0;
+          for (const row of exported) {
+            const tn = row.transport_number || row.transportNumber;
+            if (tn && !seenTnWindows.has(tn)) {
+              seenTnWindows.add(tn);
+              neu++;
+            }
+          }
+          console.log(
+            `Seite ${pageNo}: Export ${exported.length} Transporte ` +
+              `(${neu} neu), ${transporeonWindows.size} Fenster gesamt.`,
+          );
+        } else {
+          console.log(
+            `Seite ${pageNo}: Export nichts erhalten ` +
+              `(nutze Booking/Excel-Fallback).`,
+          );
+        }
+      } catch (err) {
+        console.log("Export fehlgeschlagen:", String(err && err.message));
+      }
+
+      const more = await waitForEnter(
+        "Weitere Seite? Im Browser auf die naechste Seite blaettern + " +
+          "Enter | 'w' = weiter zur Berechnung ... ",
+      );
+      if (more.toLowerCase() === "w") break;
+    }
+
+    if (!listResponses.length) {
+      console.log(
+        "Keine Listen-Antwort erfasst. Bitte 'Zugewiesene Transporte' " +
+          "oeffnen/aktualisieren und erneut Enter.",
+      );
       continue;
     }
 
-    // 2) Transportnummer -> transportId aus der Listen-Antwort.
+    // 2) Transportnummer -> transportId aus ALLEN erfassten Seiten mergen.
     //    WICHTIG (Nutzerregel): KEIN Transport darf untergehen. Transporte ohne
     //    transportId werden NICHT verworfen, sondern als Prueffall gefuehrt.
-    let allRows;
-    try {
-      allRows = parseTransportList(captured.list.text);
-    } catch (err) {
-      console.log("Listen-Antwort nicht lesbar:", String(err && err.message));
-      continue;
-    }
+    const allRows = mergeTransportLists(listResponses);
     if (!allRows.length) {
-      console.log("Keine Transporte in der Liste gefunden.");
+      // Letzte Roh-Antwort zur Analyse sichern.
+      fs.writeFileSync(
+        path.join(OUT_DIR, "list_response_debug.txt"),
+        listResponses[listResponses.length - 1] || "",
+        "utf8",
+      );
+      console.log(
+        "Keine Transporte erkannt (Antwort ohne Transportnummern). " +
+          "Letzte Roh-Antwort: data/captures/list_response_debug.txt",
+      );
       continue;
     }
     const rowsNoId = allRows.filter((r) => !r.transportIdB64);
@@ -360,25 +450,6 @@ async function main() {
           : "") +
         `. Rufe ${rows.length} per Sichtbarkeit ab.`,
     );
-
-    // 2b) Zeitfenster fuer ALLE Transporte aus dem Transporeon-Export holen
-    //     (zuverlaessige Quelle, volles Datum, Lade- UND Entladefenster).
-    try {
-      const exported = await downloadExport(listPage, frame);
-      if (exported && exported.length) {
-        const winMap = exportToWindowMap(exported);
-        for (const [key, value] of winMap) transporeonWindows.set(key, value);
-        console.log(
-          `Export-Fenster geladen: ${exported.length} Transporte, ${winMap.size} Fenster.`,
-        );
-      } else {
-        console.log(
-          "Export-Fenster nicht verfuegbar (nutze Booking/Excel-Fallback).",
-        );
-      }
-    } catch (err) {
-      console.log("Export fehlgeschlagen:", String(err && err.message));
-    }
 
     // 3) Visibility-Template sicherstellen: einen Transport oeffnen.
     if (!captured.visibility) {

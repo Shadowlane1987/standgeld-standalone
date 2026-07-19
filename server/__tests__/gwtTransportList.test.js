@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const {
   unescapeGwtString,
   parseTransportList,
+  mergeTransportLists,
 } = require("../normalize/gwtTransportList");
 
 test("unescapeGwtString entschaerft \\xNN und \\/", () => {
@@ -37,4 +38,25 @@ test("parseTransportList: nur die naechste Long unterhalb der Nummer zaehlt", ()
   const rows = parseTransportList(fixture);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].transportIdB64, "3WkKs");
+});
+
+test("mergeTransportLists dedupliziert Seiten und bevorzugt Eintrag mit transportId", () => {
+  // Seite 1: eine magere Antwort ohne verwertbare Nummern (traegt nichts bei).
+  const lean = "//OK[0,0,0," + '["irgendwas"],0,7]';
+  // Seite 2: AA + BB mit transportId.
+  const page2 =
+    "//OK['3WkKq',2,'3WkKs',1," +
+    '["AA_20260101_0000000001","BB_20260101_0000000002"],0,7]';
+  // Seite 3: BB erneut (Duplikat) + CC neu.
+  const page3 =
+    "//OK['3WkKq',2,'3R774',1," +
+    '["CC_20260101_0000000003","BB_20260101_0000000002"],0,7]';
+
+  const merged = mergeTransportLists([lean, page2, page3]);
+  const byTn = Object.fromEntries(merged.map((r) => [r.transportNumber, r]));
+
+  assert.equal(merged.length, 3);
+  assert.equal(byTn["AA_20260101_0000000001"].transportId, "928662188");
+  assert.ok(byTn["BB_20260101_0000000002"].transportIdB64);
+  assert.ok(byTn["CC_20260101_0000000003"]);
 });

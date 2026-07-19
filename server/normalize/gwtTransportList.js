@@ -132,8 +132,39 @@ function parseTransportList(text) {
   return result;
 }
 
+/**
+ * Merged mehrere Listen-Antworten (Pagination: je Seite eine eigene
+ * LoadPagedTransportListItemsAction-Antwort) zu EINEM deduplizierten Mapping.
+ * Antworten ohne Transportnummern (magere Zwischenantworten) tragen nichts bei.
+ * Bei Duplikaten gewinnt der Eintrag MIT transportId (Nutzerregel: kein
+ * Transport darf untergehen, unvollstaendige nur als Prueffall).
+ *
+ * @param {string[]} texts - rohe //OK-Response-Bodies
+ * @returns {Array<{ transportNumber: string, transportIdB64: string,
+ *   transportId: string|null }>}
+ */
+function mergeTransportLists(texts) {
+  const byTn = new Map();
+  for (const text of texts || []) {
+    let rows;
+    try {
+      rows = parseTransportList(text);
+    } catch {
+      continue;
+    }
+    for (const r of rows) {
+      const prev = byTn.get(r.transportNumber);
+      if (!prev || (!prev.transportIdB64 && r.transportIdB64)) {
+        byTn.set(r.transportNumber, r);
+      }
+    }
+  }
+  return Array.from(byTn.values());
+}
+
 module.exports = {
   unescapeGwtString,
   splitListResponse,
   parseTransportList,
+  mergeTransportLists,
 };
