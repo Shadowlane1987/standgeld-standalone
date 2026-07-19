@@ -13,6 +13,9 @@
  * 5. Fensterzeit = erste Zeit des Slots (z.B. 06:00-06:15 -> 06:00). Die Auswahl
  *    der Fensterquelle (Transporeon-Slot bzw. Excel bei fehlendem Entladefenster)
  *    erfolgt UPSTREAM; hier wird nur window_start konsumiert.
+ * 6. Obergrenze: pro Stopp werden NIE mehr als 650 EUR abgerechnet (maxFeeEur).
+ *    Die ungedeckelten Bloecke bleiben zur Nachvollziehbarkeit sichtbar; fee_capped
+ *    markiert, dass gedeckelt wurde.
  *
  * Reine, unit-testbare Funktion (kein I/O). Es wird nichts erfunden: fehlen
  * Ankunft, Abfahrt oder Fenster, ist der Fall NICHT berechenbar (Prueffall).
@@ -23,6 +26,7 @@ const DEFAULT_CONFIG = Object.freeze({
   triggerMinutes: 10, // erst ab 10 min ueber Freizeit
   blockMinutes: 30, // Taktung: angefangene 30 min
   blockRateEur: 30, // 30 EUR je angefangenem Block
+  maxFeeEur: 650, // Obergrenze: mehr als 650 EUR wird nie abgerechnet
 });
 
 const REASON = Object.freeze({
@@ -70,6 +74,7 @@ function computeStandgeld(input = {}, config = {}) {
     free_minutes: cfg.freeMinutes,
     block_minutes: cfg.blockMinutes,
     block_rate_eur: cfg.blockRateEur,
+    max_fee_eur: cfg.maxFeeEur,
   };
 
   // Ohne vollstaendige Zeiten nicht berechenbar -> Prueffall.
@@ -82,6 +87,7 @@ function computeStandgeld(input = {}, config = {}) {
       minutes_over_free: null,
       billable_blocks: 0,
       fee_eur: 0,
+      fee_capped: false,
       chargeable: false,
       reason: REASON.MISSING_DATA,
       needs_review: true,
@@ -117,6 +123,13 @@ function computeStandgeld(input = {}, config = {}) {
     reason = REASON.CHARGEABLE;
   }
 
+  // Regel 6: Obergrenze - nie mehr als maxFeeEur abrechnen.
+  let feeCapped = false;
+  if (cfg.maxFeeEur != null && feeEur > cfg.maxFeeEur) {
+    feeEur = cfg.maxFeeEur;
+    feeCapped = true;
+  }
+
   return Object.freeze({
     ...base,
     arrived_late: arrivedLate,
@@ -125,6 +138,7 @@ function computeStandgeld(input = {}, config = {}) {
     minutes_over_free: Math.max(0, rawOverrun),
     billable_blocks: blocks,
     fee_eur: feeEur,
+    fee_capped: feeCapped,
     chargeable,
     reason,
     // Prueffall, wenn die Zeitbasis nicht belegbar war (aus dem Stopp uebernommen).

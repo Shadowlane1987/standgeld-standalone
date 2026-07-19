@@ -124,3 +124,25 @@ test("konfigurierbare Freizeit/Satz", () => {
   assert.equal(r.billable_blocks, 2);
   assert.equal(r.fee_eur, 50);
 });
+
+test("Obergrenze 650 EUR wird nie ueberschritten", () => {
+  // 25 h 10 gezaehlt -> weit ueber 650 EUR ungedeckelt.
+  const r = computeStandgeld(
+    stop({ departure_time: "2026-07-17T07:10:00.000Z" }),
+  );
+  assert.equal(r.fee_capped, true);
+  assert.equal(r.fee_eur, 650);
+  assert.equal(r.max_fee_eur, 650);
+  // Bloecke bleiben ungedeckelt sichtbar (Nachvollziehbarkeit).
+  assert.ok(r.billable_blocks * r.block_rate_eur > 650);
+});
+
+test("knapp unter der Obergrenze bleibt ungedeckelt", () => {
+  // Genau 650 EUR (nicht darueber) -> nicht gedeckelt.
+  const r = computeStandgeld(
+    stop({ departure_time: "2026-07-16T06:00:00.000Z" }),
+    { maxFeeEur: 650, freeMinutes: 0, triggerMinutes: 0 },
+  );
+  assert.equal(r.fee_eur, 0);
+  assert.equal(r.fee_capped, false);
+});
