@@ -16,6 +16,10 @@
  * 6. Obergrenze: pro Stopp werden NIE mehr als 650 EUR abgerechnet (maxFeeEur).
  *    Die ungedeckelten Bloecke bleiben zur Nachvollziehbarkeit sichtbar; fee_capped
  *    markiert, dass gedeckelt wurde.
+ * 7. Plausibilitaet: eine Standzeit ueber maxPlausibleMinutes (24 h) ist fast immer
+ *    ein Datenfehler (z.B. falsch gematchte Ankunft/Abfahrt an verschiedenen Tagen).
+ *    Solche Faelle werden NICHT automatisch abgerechnet, sondern als Prueffall
+ *    gefuehrt (lieber Prueffall als Falschabrechnung).
  *
  * Reine, unit-testbare Funktion (kein I/O). Es wird nichts erfunden: fehlen
  * Ankunft, Abfahrt oder Fenster, ist der Fall NICHT berechenbar (Prueffall).
@@ -27,6 +31,7 @@ const DEFAULT_CONFIG = Object.freeze({
   blockMinutes: 30, // Taktung: angefangene 30 min
   blockRateEur: 30, // 30 EUR je angefangenem Block
   maxFeeEur: 650, // Obergrenze: mehr als 650 EUR wird nie abgerechnet
+  maxPlausibleMinutes: 1440, // > 24 h Standzeit = unplausibel -> Prueffall
 });
 
 const REASON = Object.freeze({
@@ -34,6 +39,7 @@ const REASON = Object.freeze({
   WITHIN_FREE: "within_free_time",
   BELOW_TRIGGER: "below_trigger",
   CHARGEABLE: "chargeable",
+  IMPLAUSIBLE_DURATION: "implausible_duration",
 });
 
 function toEpoch(isoString) {
@@ -103,6 +109,26 @@ function computeStandgeld(input = {}, config = {}) {
 
   let countedMinutes = Math.round((departure - countStartMs) / 60000);
   if (countedMinutes < 0) countedMinutes = 0;
+
+  // Regel 7: unplausibel lange Standzeit (> 24 h) nicht automatisch abrechnen.
+  if (
+    cfg.maxPlausibleMinutes != null &&
+    countedMinutes > cfg.maxPlausibleMinutes
+  ) {
+    return Object.freeze({
+      ...base,
+      arrived_late: arrivedLate,
+      count_start: countStart,
+      counted_standing_minutes: countedMinutes,
+      minutes_over_free: Math.max(0, countedMinutes - cfg.freeMinutes),
+      billable_blocks: 0,
+      fee_eur: 0,
+      fee_capped: false,
+      chargeable: false,
+      reason: REASON.IMPLAUSIBLE_DURATION,
+      needs_review: true,
+    });
+  }
 
   const rawOverrun = countedMinutes - cfg.freeMinutes;
 

@@ -20,6 +20,15 @@
  * Fehlt die "Zweite Buchung", hat der Transport nur einen (Lade-)Stopp.
  */
 
+const { EVENT_CATEGORY, normalizeEventRow } = require("./events");
+
+// Der Export traegt die Transporeon-eigenen Ist-Zeiten ("TP XP"-Standortmeldung)
+// in lokaler Wanduhrzeit (Europe/Berlin). Diese Konstanten machen die
+// abgeleiteten Events fuer die Gegenpruefung (crossCheck) eindeutig als
+// TP-XP-Quelle erkennbar -- die GPS-Bewertung bleibt Sache der Visibility.
+const EXPORT_SOURCE = "TP XP Service Account";
+const EXPORT_TIMEZONE = "Europe/Berlin";
+
 // Header-Erkennung ueber Teilstrings (robust gegen Zusatz-Suffixe/Sprache-Reste).
 const COLUMN_MATCHERS = Object.freeze({
   transport_number: (h) => h === "transportnr." || h.startsWith("transportnr"),
@@ -167,9 +176,89 @@ function exportToWindowMap(transports) {
   return map;
 }
 
+/**
+ * Wandelt die geparsten Export-Transporte in normalisierte Rohevents (TP-XP)
+ * fuer die Gegenpruefung. Damit stehen die Transporeon-eigenen Ist-Ankunft/
+ * Abfahrt fuer BEIDE Stopps als belastbare Zeitquelle bereit -- vor allem am
+ * ENTLADEORT, wo die VisibilityHubUser-Meldung oft nur automatisch (0/0, ohne
+ * echtes GPS) gesetzt ist.
+ *
+ * WICHTIG (Fachlogik): Es wird nichts erfunden und keine Gebuehr berechnet.
+ * Die Events sind gleichwertig zu den TP-XP-Events aus der Wire-Antwort:
+ * crossCheck bevorzugt weiterhin GPS-verifizierte VisibilityHubUser-Zeiten und
+ * nutzt die Export-Zeit nur, wo kein belegtes GPS vorliegt (dann Prueffall).
+ *
+ * @param {Array<object>} transports - aus parseTransporeonExport()
+ * @param {{ importRunId?: string, importedAt?: string }} [ctx]
+ * @returns {Array<object>} normalisierte, unveraenderliche Rohevents
+ */
+function exportToEvents(transports, ctx = {}) {
+  const events = [];
+  let order = 0;
+
+  const push = (transportNumber, category, qualifier, localTime) => {
+    if (!localTime) return;
+    events.push(
+      normalizeEventRow(
+        {
+          transport_number: transportNumber,
+          event_category: category,
+          status_qualifier: qualifier,
+          event_name: qualifier,
+          event_time: localTime,
+          timezone: EXPORT_TIMEZONE,
+          source: EXPORT_SOURCE,
+          origin: "EXPORT",
+        },
+        {
+          importRunId: ctx.importRunId,
+          importedAt: ctx.importedAt,
+          orderIndex: order++,
+        },
+      ),
+    );
+  };
+
+  for (const t of transports || []) {
+    if (!t || !t.transport_number) continue;
+    const tn = t.transport_number;
+    if (t.loading) {
+      push(
+        tn,
+        EVENT_CATEGORY.LOAD_ARRIVAL,
+        "status.loading.arrival",
+        t.loading.arrival_local,
+      );
+      push(
+        tn,
+        EVENT_CATEGORY.LOAD_DEPARTURE,
+        "status.loading.departure",
+        t.loading.departure_local,
+      );
+    }
+    if (t.unloading) {
+      push(
+        tn,
+        EVENT_CATEGORY.UNLOAD_ARRIVAL,
+        "status.unloading.arrival",
+        t.unloading.arrival_local,
+      );
+      push(
+        tn,
+        EVENT_CATEGORY.UNLOAD_DEPARTURE,
+        "status.unloading.departure",
+        t.unloading.departure_local,
+      );
+    }
+  }
+
+  return events;
+}
+
 module.exports = {
   cleanDateTime,
   locateHeader,
   parseTransporeonExport,
   exportToWindowMap,
+  exportToEvents,
 };

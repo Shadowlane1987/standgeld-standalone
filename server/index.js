@@ -15,7 +15,6 @@ const PORT = Number(process.env.PORT || 3100);
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-const MAX_EFFECTIVE_MINUTES = 14 * 60;
 const EXCLUDE_FROM_TOTAL_AMOUNT_EUR = 450;
 
 function toDate(value) {
@@ -1200,12 +1199,9 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
       calculateWithSafeOverride(stop, rules, timeWindows),
     );
 
-    const removedLongStand = recalculated.filter(
-      (s) => Number(s.effective_minutes || 0) > MAX_EFFECTIVE_MINUTES,
-    );
-    const filteredByDuration = recalculated.filter(
-      (s) => Number(s.effective_minutes || 0) <= MAX_EFFECTIVE_MINUTES,
-    );
+    // 14h-Filter entfernt: lange Standzeiten werden nicht mehr automatisch verworfen.
+    const removedLongStand = [];
+    const filteredByDuration = recalculated;
     const calculated = filteredByDuration.filter(
       (s) => Number(s.billable_minutes || 0) > 0,
     );
@@ -1250,7 +1246,7 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
         time_window_rows: timeWindows.length,
         time_window_matches: windowMatches,
         removed_long_stand_positions: removedLongStand.length,
-        max_effective_hours: 14,
+        max_effective_hours: null,
         excluded_from_total_threshold_eur: EXCLUDE_FROM_TOTAL_AMOUNT_EUR,
         excluded_from_total_positions: excludedFromTotal.length,
         excluded_from_total_amount: excludedSummary.amount,

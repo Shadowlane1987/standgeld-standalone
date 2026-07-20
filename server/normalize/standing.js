@@ -40,6 +40,85 @@ function minutesBetween(fromIso, toIso) {
 }
 
 /**
+ * Waehlt fuer einen Stopp ein KONSISTENTES Quellenpaar (Ankunft + Abfahrt aus
+ * derselben Messquelle). Das verhindert die haeufigste Fehlerquelle: Ankunft
+ * aus TP-XP (Tag A) mit einer aus einem anderen Vorgang stammenden GPS-Abfahrt
+ * (Tag C) zu kombinieren -> mehrtaegige Phantom-Standzeit.
+ *
+ * Prioritaet:
+ *   1. Echtes GPS an BEIDEN Enden (verifizierte VisibilityHubUser-Koordinaten).
+ *   2. TP-XP an BEIDEN Enden (saubere gepaarte Export-Ist-Zeiten).
+ *   3. Gemischt/unvollstaendig -> massgebliche Zeit je Phase, aber Prueffall.
+ *
+ * @param {object|null} arrivalPhase
+ * @param {object|null} departurePhase
+ * @returns {{ source: string, arrivalTime: string|null, arrivalLocal: string|null,
+ *   departureTime: string|null, departureLocal: string|null, mixedSources: boolean }}
+ */
+function selectConsistentTimes(arrivalPhase, departurePhase) {
+  const aGps = Boolean(
+    arrivalPhase &&
+    arrivalPhase.visibility_gps_verified &&
+    arrivalPhase.visibility_time,
+  );
+  const dGps = Boolean(
+    departurePhase &&
+    departurePhase.visibility_gps_verified &&
+    departurePhase.visibility_time,
+  );
+  if (aGps && dGps) {
+    return {
+      source: "VISIBILITY",
+      arrivalTime: arrivalPhase.visibility_time,
+      arrivalLocal: arrivalPhase.visibility_local ?? null,
+      departureTime: departurePhase.visibility_time,
+      departureLocal: departurePhase.visibility_local ?? null,
+      mixedSources: false,
+    };
+  }
+
+  const aTp = arrivalPhase && arrivalPhase.tp_xp_time;
+  const dTp = departurePhase && departurePhase.tp_xp_time;
+  if (aTp && dTp) {
+    return {
+      source: "TP_XP",
+      arrivalTime: arrivalPhase.tp_xp_time,
+      arrivalLocal: arrivalPhase.tp_xp_local ?? null,
+      departureTime: departurePhase.tp_xp_time,
+      departureLocal: departurePhase.tp_xp_local ?? null,
+      mixedSources: false,
+    };
+  }
+
+  // Kein konsistentes Paar moeglich -> je Phase die massgebliche Zeit, aber der
+  // Stopp ist ein Prueffall (die Endpunkte stammen ggf. aus verschiedenen
+  // Quellen und sind nicht sicher vergleichbar).
+  const arrivalTime = arrivalPhase ? arrivalPhase.authoritative_time : null;
+  const departureTime = departurePhase
+    ? departurePhase.authoritative_time
+    : null;
+  const arrivalSrc = arrivalPhase ? arrivalPhase.authoritative_source : null;
+  const departureSrc = departurePhase
+    ? departurePhase.authoritative_source
+    : null;
+  const mixedSources = Boolean(
+    arrivalTime && departureTime && arrivalSrc !== departureSrc,
+  );
+  return {
+    source: mixedSources ? "MIXED" : (arrivalSrc ?? departureSrc ?? null),
+    arrivalTime,
+    arrivalLocal: arrivalPhase
+      ? (arrivalPhase.authoritative_local ?? null)
+      : null,
+    departureTime,
+    departureLocal: departurePhase
+      ? (departurePhase.authoritative_local ?? null)
+      : null,
+    mixedSources,
+  };
+}
+
+/**
  * Baut einen Stopp aus Ankunfts- und Abfahrts-Phase.
  *
  * @param {string} stopType STOP_TYPE
@@ -49,20 +128,26 @@ function minutesBetween(fromIso, toIso) {
  */
 function makeStop(stopType, arrivalPhase, departurePhase) {
   const ref = arrivalPhase || departurePhase || {};
-  const arrivalTime = arrivalPhase ? arrivalPhase.authoritative_time : null;
-  const departureTime = departurePhase
-    ? departurePhase.authoritative_time
-    : null;
+
+  // Konsistentes Quellenpaar bestimmen (verhindert Quellen-Mix ueber Tage).
+  const pair = selectConsistentTimes(arrivalPhase, departurePhase);
+  const arrivalTime = pair.arrivalTime;
+  const departureTime = pair.departureTime;
 
   const standingMinutes = minutesBetween(arrivalTime, departureTime);
   const negativeDuration = standingMinutes !== null && standingMinutes < 0;
 
   const incomplete = !arrivalTime || !departureTime;
+  const multiVisit =
+    Boolean(arrivalPhase && arrivalPhase.multi_visit) ||
+    Boolean(departurePhase && departurePhase.multi_visit);
   const needsReview =
     Boolean(arrivalPhase && arrivalPhase.needs_review) ||
     Boolean(departurePhase && departurePhase.needs_review) ||
     incomplete ||
-    negativeDuration;
+    negativeDuration ||
+    pair.mixedSources ||
+    multiVisit;
 
   const timezone =
     (arrivalPhase && arrivalPhase.timezone) ||
@@ -75,25 +160,21 @@ function makeStop(stopType, arrivalPhase, departurePhase) {
     stop_type: stopType,
 
     arrival_time: arrivalTime,
-    arrival_local: arrivalPhase
-      ? (arrivalPhase.authoritative_local ?? null)
-      : null,
-    arrival_source: arrivalPhase ? arrivalPhase.authoritative_source : null,
+    arrival_local: pair.arrivalLocal,
+    arrival_source: pair.source,
     arrival_status: arrivalPhase ? arrivalPhase.status : null,
 
     departure_time: departureTime,
-    departure_local: departurePhase
-      ? (departurePhase.authoritative_local ?? null)
-      : null,
-    departure_source: departurePhase
-      ? departurePhase.authoritative_source
-      : null,
+    departure_local: pair.departureLocal,
+    departure_source: pair.source,
     departure_status: departurePhase ? departurePhase.status : null,
 
     timezone,
     standing_minutes: negativeDuration ? null : standingMinutes,
     incomplete,
     negative_duration: negativeDuration,
+    mixed_sources: pair.mixedSources,
+    multi_visit: multiVisit,
     needs_review: needsReview,
   });
 }

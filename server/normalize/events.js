@@ -210,6 +210,11 @@ function normalizeEventRow(row, ctx = {}) {
     order_index:
       input.order_index ?? (ctx.orderIndex != null ? ctx.orderIndex : null),
 
+    // Herkunft der Zeile (z.B. "EXPORT" fuer die saubere Transporeon-Export-
+    // Ist-Zeit). Erlaubt es, bei mehreren TP-XP-Events die verlaessliche
+    // Export-Zeit zu bevorzugen statt widerspruechliche Wire-Zeiten zu mischen.
+    origin: input.origin ?? null,
+
     import_run_id: ctx.importRunId ?? null,
     imported_at: ctx.importedAt ?? null,
 

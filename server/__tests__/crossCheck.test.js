@@ -277,3 +277,87 @@ test("Abgleich nur ueber Transportnr.: unterschiedliche/fehlende Lieferungsnumme
   // Lieferungsnummer bleibt als Metadatum erhalten, trennt aber nicht.
   assert.equal(phases[0].delivery_number, "0346191670");
 });
+
+test("Mehrfachbesuch Entladung: erste Ankunft, letzte Abfahrt, Prueffall", () => {
+  // Fahrer kommt an, wird weggeschickt, kommt zurueck, wird entladen.
+  // Sixfold: Ankunft/Abfahrt/Ankunft/Abfahrt -> erste Ankunft + letzte Abfahrt.
+  const events = [
+    ev(
+      {
+        source: "VisibilityHubUser VisibilityHubUser",
+        status_qualifier: "status.unloading.arrival",
+        event_time: "2026-07-16 08:00",
+        timezone: "Europe/Berlin",
+        coordinates: REAL_GPS,
+      },
+      0,
+    ),
+    ev(
+      {
+        source: "VisibilityHubUser VisibilityHubUser",
+        status_qualifier: "status.unloading.arrival",
+        event_time: "2026-07-16 16:00",
+        timezone: "Europe/Berlin",
+        coordinates: REAL_GPS,
+      },
+      1,
+    ),
+  ];
+  const { phases } = crossCheckEvents(events);
+  assert.equal(phases.length, 1);
+  const p = phases[0];
+  // Ankunftsphase -> FRUEHESTE Zeit (08:00 Berlin = 06:00Z).
+  assert.equal(p.authoritative_time, "2026-07-16T06:00:00.000Z");
+  assert.equal(p.multi_visit, true);
+  assert.equal(p.needs_review, true);
+  assert.match(p.note, /Mehrfachbesuch/);
+});
+
+test("Mehrfachbesuch Abfahrt: spaeteste endgueltige Abfahrt zaehlt", () => {
+  const events = [
+    ev(
+      {
+        source: "VisibilityHubUser VisibilityHubUser",
+        status_qualifier: "status.unloading.departure",
+        event_time: "2026-07-16 09:00",
+        timezone: "Europe/Berlin",
+        coordinates: REAL_GPS,
+      },
+      0,
+    ),
+    ev(
+      {
+        source: "VisibilityHubUser VisibilityHubUser",
+        status_qualifier: "status.unloading.departure",
+        event_time: "2026-07-16 17:30",
+        timezone: "Europe/Berlin",
+        coordinates: REAL_GPS,
+      },
+      1,
+    ),
+  ];
+  const { phases } = crossCheckEvents(events);
+  assert.equal(phases.length, 1);
+  const p = phases[0];
+  // Abfahrtsphase -> SPAETESTE Zeit (17:30 Berlin = 15:30Z).
+  assert.equal(p.authoritative_time, "2026-07-16T15:30:00.000Z");
+  assert.equal(p.multi_visit, true);
+  assert.equal(p.needs_review, true);
+});
+
+test("Einzelbesuch bleibt ohne Mehrfachbesuch-Flag", () => {
+  const events = [
+    ev(
+      {
+        source: "VisibilityHubUser VisibilityHubUser",
+        status_qualifier: "status.unloading.arrival",
+        event_time: "2026-07-16 08:00",
+        timezone: "Europe/Berlin",
+        coordinates: REAL_GPS,
+      },
+      0,
+    ),
+  ];
+  const { phases } = crossCheckEvents(events);
+  assert.equal(phases[0].multi_visit, false);
+});

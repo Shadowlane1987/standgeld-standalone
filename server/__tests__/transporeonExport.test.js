@@ -7,9 +7,9 @@ const {
   cleanDateTime,
   parseTransporeonExport,
   exportToWindowMap,
+  exportToEvents,
 } = require("../normalize/transporeonExport");
 const { billFromExport } = require("../normalize/exportBilling");
-
 const HEADER = [
   "Entladedatum",
   "Transportnr.",
@@ -91,6 +91,55 @@ test("exportToWindowMap: volle lokale Fensterzeit je Stopp", () => {
   const map = exportToWindowMap(out);
   assert.equal(map.get("B2_20260717_0006647418|LOADING"), "2026-07-16 18:00");
   assert.equal(map.get("B2_20260717_0006647418|UNLOADING"), "2026-07-17 07:00");
+});
+
+test("exportToEvents: Lade- UND Entlade-Ist-Zeiten als TP-XP-Events", () => {
+  const out = parseTransporeonExport([
+    HEADER,
+    row(
+      "2026-07-17",
+      "B2_20260717_0006647418",
+      "2026-07-16 18:00",
+      "2026-07-16 16:06",
+      "2026-07-16 16:57",
+      "2026-07-17 07:00",
+      "2026-07-17 06:02",
+      "2026-07-17 06:54",
+    ),
+  ]);
+  const events = exportToEvents(out);
+  // 2 Lade- + 2 Entlade-Events.
+  assert.equal(events.length, 4);
+  for (const e of events) {
+    assert.equal(e.source_type, "TP_XP");
+    assert.equal(e.transport_number, "B2_20260717_0006647418");
+    assert.equal(e.gps_verified, false);
+  }
+  const cats = events.map((e) => e.event_category).sort();
+  assert.deepEqual(cats, [
+    "LOAD_ARRIVAL",
+    "LOAD_DEPARTURE",
+    "UNLOAD_ARRIVAL",
+    "UNLOAD_DEPARTURE",
+  ]);
+});
+
+test("exportToEvents: fehlende Ist-Zeiten erzeugen keine Events", () => {
+  const out = parseTransporeonExport([
+    HEADER,
+    row(
+      "2026-07-17",
+      "91_20260717_0006647297",
+      "2026-07-17 04:30",
+      "-",
+      "-",
+      "-",
+      "-",
+      "-",
+    ),
+  ]);
+  // Nur ein Ladefenster, keine Ist-Zeiten -> keine Events.
+  assert.equal(exportToEvents(out).length, 0);
 });
 
 test("billFromExport: reproduziert Referenzbetraege (XP-Zeiten)", () => {

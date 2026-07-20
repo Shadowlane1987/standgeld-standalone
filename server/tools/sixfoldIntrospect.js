@@ -19,9 +19,14 @@
 const axios = require("axios");
 
 const INTERESTING_FIELD =
-  /(lat|lon|lng|geo|coord|position|point|address|delivery|reference|consignment|source|actor|user|event|status|timezone|arrival|departure)/i;
+  /(lat|lon|lng|geo|coord|position|point|address|delivery|reference|consignment|source|actor|user|event|status|timezone|arrival|departure|manual|provider|origin|telematic|telemetry|confidence|quality|accuracy|precision|method|automatic|tracking|carrier|connect|verified|gps|reported|detect)/i;
 const INTERESTING_TYPE =
-  /(stop|location|timeslot|geo|coordinate|address|event|delivery|reference|position)/i;
+  /(stop|location|timeslot|geo|coordinate|address|event|delivery|reference|position|source|provider|method|quality|tracking|telematic)/i;
+
+// Enum-Werte, die die Datenquelle (echtes GPS vs. manuell gesetzt) verraten.
+// Genau hier steckt das Fake-Erkennungs-Signal am wahrscheinlichsten.
+const SOURCE_ENUM =
+  /(source|provider|method|origin|manual|automatic|gps|telematic|telemetry|quality|tracking|detect|reported)/i;
 
 function originFromUrl(rawUrl) {
   const parsed = new URL(String(rawUrl || "").trim());
@@ -61,6 +66,10 @@ const INTROSPECTION_QUERY = `
         fields(includeDeprecated: true) {
           name
           type { ...TypeRef }
+        }
+        enumValues(includeDeprecated: true) {
+          name
+          description
         }
       }
     }
@@ -171,6 +180,39 @@ async function main() {
   }
   if (!printedField) {
     console.log("  (keine passenden Feldnamen gefunden)");
+  }
+
+  // 3) ENUMs mit ihren Werten - hier steckt das Signal manuell vs. GPS.
+  //    Zuerst die verdaechtigen (Name deutet auf Quelle/Methode/Qualitaet),
+  //    dann alle uebrigen Enums, deren WERTE nach MANUAL/GPS/TELEMATICS aussehen.
+  const enums = types.filter(
+    (t) =>
+      t.kind === "ENUM" &&
+      t.name &&
+      !t.name.startsWith("__") &&
+      Array.isArray(t.enumValues) &&
+      t.enumValues.length,
+  );
+
+  console.log(
+    "\n=== Enums, die die Datenquelle (GPS vs. manuell) verraten ===",
+  );
+  let printedEnum = false;
+  for (const type of enums) {
+    const values = type.enumValues.map((v) => v.name);
+    const nameHit = SOURCE_ENUM.test(type.name);
+    const valueHit = values.some((v) => SOURCE_ENUM.test(v));
+    if (!nameHit && !valueHit) continue;
+    printedEnum = true;
+    console.log(`\n${type.name}`);
+    for (const v of type.enumValues) {
+      const mark = SOURCE_ENUM.test(v.name) ? " <==" : "";
+      const desc = v.description ? `  // ${v.description}` : "";
+      console.log(`  ${v.name}${mark}${desc}`);
+    }
+  }
+  if (!printedEnum) {
+    console.log("  (keine quellenbezogenen Enums gefunden)");
   }
 
   console.log("\nFertig. Es wurden keine Transportdaten geladen/gespeichert.");

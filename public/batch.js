@@ -21,9 +21,10 @@ let currentStops = [];
 
 const REASON_LABELS = {
   chargeable: "Abrechenbar",
-  within_free: "Innerhalb Freizeit",
+  within_free_time: "Innerhalb Freizeit",
   below_trigger: "Unter Auslöser",
   missing_data: "Daten fehlen",
+  implausible_duration: "Unplausibel (Prüfen)",
 };
 
 const TYPE_LABELS = {

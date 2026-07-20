@@ -61,21 +61,68 @@ function groupKey(event) {
 }
 
 /**
- * Waehlt aus mehreren Events derselben Quelle das massgebliche aus.
- * Kriterium: kleinster order_index (zuerst gelesen). Zusaetzlich wird die
- * Anzahl gemeldet, damit Mehrdeutigkeit sichtbar bleibt.
+ * Ankunftsphasen (Belade-/Entlade-Ankunft). Bei Mehrfachbesuchen (§Regel 3)
+ * zaehlt die ERSTE Ankunft, bei Abfahrten die LETZTE endgueltige Abfahrt.
+ */
+function isArrivalPhase(category) {
+  return (
+    category === EVENT_CATEGORY.LOAD_ARRIVAL ||
+    category === EVENT_CATEGORY.UNLOAD_ARRIVAL
+  );
+}
+
+/**
+ * Zaehlt die unterschiedlichen Aufenthalte einer Quelle (auf Minutenraster).
+ * Mehrere gleiche Zeitstempel gelten als EIN Besuch (Rausch-/Doppel-Events).
  *
  * @param {Array<object>} events
+ * @returns {number}
+ */
+function distinctVisitCount(events) {
+  const minutes = new Set();
+  for (const e of events) {
+    const t = toEpoch(e.event_time);
+    if (t !== null) minutes.add(Math.round(t / 60000));
+  }
+  return minutes.size;
+}
+
+/**
+ * Waehlt aus mehreren Events derselben Quelle das massgebliche aus.
+ * Fachregel Mehrfachbesuch (§Regel 3): bei Ankunft die FRUEHESTE Zeit, bei
+ * Abfahrt die SPAETESTE (endgueltige) Zeit. Fehlt die Zeit, entscheidet der
+ * order_index.
+ *
+ * preferOrigin: liegt ein Event dieser Herkunft vor (z.B. "EXPORT" = saubere,
+ * gepaarte Transporeon-Ist-Zeit), wird NUR aus diesen gewaehlt. Das verhindert,
+ * dass eine widerspruechliche Wire-Zeit die Spanne kuenstlich aufblaeht.
+ *
+ * @param {Array<object>} events
+ * @param {"earliest"|"latest"} mode
+ * @param {string|null} [preferOrigin]
  * @returns {{ chosen: object|null, count: number }}
  */
-function pickPrimary(events) {
+function pickPrimary(events, mode, preferOrigin = null) {
   if (!events.length) return { chosen: null, count: 0 };
-  const sorted = [...events].sort((a, b) => {
-    const ai = a.order_index ?? Number.MAX_SAFE_INTEGER;
-    const bi = b.order_index ?? Number.MAX_SAFE_INTEGER;
-    return ai - bi;
+  let pool = events;
+  if (preferOrigin) {
+    const preferred = events.filter((e) => e.origin === preferOrigin);
+    if (preferred.length) pool = preferred;
+  }
+  const sorted = [...pool].sort((a, b) => {
+    const at = toEpoch(a.event_time);
+    const bt = toEpoch(b.event_time);
+    if (at === null && bt === null) {
+      const ai = a.order_index ?? Number.MAX_SAFE_INTEGER;
+      const bi = b.order_index ?? Number.MAX_SAFE_INTEGER;
+      return ai - bi;
+    }
+    if (at === null) return 1;
+    if (bt === null) return -1;
+    return at - bt;
   });
-  return { chosen: sorted[0], count: events.length };
+  const chosen = mode === "latest" ? sorted[sorted.length - 1] : sorted[0];
+  return { chosen, count: events.length };
 }
 
 /**
@@ -99,8 +146,19 @@ function evaluateGroup(groupEvents, toleranceMinutes) {
     (e) => e.source_type === SOURCE_TYPE.VISIBILITY,
   );
 
-  const { chosen: tp, count: tpCount } = pickPrimary(tpEvents);
-  const { chosen: vis, count: visCount } = pickPrimary(visEvents);
+  // Ankunft -> frueheste Zeit, Abfahrt -> spaeteste Zeit (Mehrfachbesuch §3).
+  const mode = isArrivalPhase(first.event_category) ? "earliest" : "latest";
+
+  // TP-XP: die saubere Export-Ist-Zeit bevorzugen (gepaart, verlaesslich),
+  // damit widerspruechliche Wire-Zeiten die Spanne nicht aufblaehen.
+  const { chosen: tp, count: tpCount } = pickPrimary(tpEvents, mode, "EXPORT");
+  const { chosen: vis, count: visCount } = pickPrimary(visEvents, mode);
+
+  // Mehrfachbesuch (§Regel 3) zeigt sich in den GPS-Events (Sixfold:
+  // Ankunft/Abfahrt/Ankunft/Abfahrt). Nur echte Wiederholbesuche zaehlen; die
+  // erste Ankunft/letzte Abfahrt sind bereits gewaehlt. Wegen abzuziehender
+  // Ruhezeiten ist das immer ein Prueffall.
+  const multiVisit = distinctVisitCount(visEvents) > 1;
 
   const visProvable = Boolean(vis && vis.gps_verified);
   const diff = tp && vis ? diffMinutes(tp.event_time, vis.event_time) : null;
@@ -151,6 +209,15 @@ function evaluateGroup(groupEvents, toleranceMinutes) {
     status = CROSSCHECK_STATUS.EMPTY;
   }
 
+  // Mehrfachbesuch immer als Prueffall: erste Ankunft/letzte Abfahrt stehen,
+  // aber gesetzliche Ruhezeiten muessen manuell abgezogen werden.
+  if (multiVisit) {
+    needsReview = true;
+    const hint =
+      "Mehrfachbesuch erkannt (mehrere An-/Abfahrten) - erste Ankunft bis letzte Abfahrt, Ruhezeiten manuell pruefen.";
+    note = note ? `${note} ${hint}` : hint;
+  }
+
   return Object.freeze({
     transport_number: first.transport_number ?? null,
     delivery_number: deliveryNumber,
@@ -167,6 +234,7 @@ function evaluateGroup(groupEvents, toleranceMinutes) {
 
     diff_minutes: diff,
     status,
+    multi_visit: multiVisit,
     authoritative_time: authoritativeTime,
     authoritative_source: authoritativeSource,
     authoritative_local: authoritativeEvent

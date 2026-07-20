@@ -35,6 +35,7 @@ const { bookingsToWindowMap } = require("../normalize/transporeonWindows");
 const {
   parseTransporeonExport,
   exportToWindowMap,
+  exportToEvents,
 } = require("../normalize/transporeonExport");
 const { loadZeitfenster } = require("./readZeitfensterExcel");
 
@@ -307,6 +308,10 @@ async function main() {
   // Live-Erfassung der Wire-Templates (Strong-Name/Endpoint/Account) + Fenster.
   const captured = { list: null, visibility: null };
   const transporeonWindows = new Map();
+  // Transporeon-Export je Transportnummer sammeln (ueber alle Seiten). Er liefert
+  // die zuverlaessigen Ist-Ankunft/Abfahrt fuer BEIDE Stopps -- besonders am
+  // Entladeort, wo GPS (VisibilityHubUser) oft nur automatisch (0/0) gesetzt ist.
+  const exportByTn = new Map();
   // ALLE Listen-Antworten (je Pagination-Seite eine) sammeln. Die reiche
   // Antwort (mit Transportnummern) feuert oft schon beim initialen Laden --
   // deshalb NIE verwerfen, sondern akkumulieren und spaeter mergen.
@@ -392,6 +397,8 @@ async function main() {
               seenTnWindows.add(tn);
               neu++;
             }
+            // Export-Transport (mit Ist-Zeiten) je Transportnummer merken.
+            if (tn) exportByTn.set(tn, row);
           }
           console.log(
             `Seite ${pageNo}: Export ${exported.length} Transporte ` +
@@ -525,6 +532,17 @@ async function main() {
     }
     console.log(
       `${rows.length} Transporte in ${secs}s abgerufen, ${allEvents.length} Events, ${failures.length} Fehler.`,
+    );
+
+    // 6b) Transporeon-Export als TP-XP-Zeitquelle einspeisen. GPS bleibt
+    //     massgeblich (crossCheck bevorzugt belegte VisibilityHubUser-Zeiten);
+    //     die Export-Ist-Zeiten greifen dort, wo kein echtes GPS vorliegt --
+    //     vor allem am Entladeort. So faellt kein Stopp mehr auf missing_data,
+    //     ohne dass etwas erfunden wird.
+    const exportEvents = exportToEvents(Array.from(exportByTn.values()));
+    for (const e of exportEvents) allEvents.push(e);
+    console.log(
+      `Export-Ist-Zeiten eingespeist: ${exportEvents.length} Events aus ${exportByTn.size} Transporten.`,
     );
 
     // 7) Standgeld rechnen.
