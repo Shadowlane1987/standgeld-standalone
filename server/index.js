@@ -5,7 +5,11 @@ const axios = require("axios");
 const dotenv = require("dotenv");
 
 const { loadTransporeonExport } = require("./tools/readTransporeonExport");
-const { billFromExport } = require("./normalize/exportBilling");
+const { billFromExport, buildGpsIndex } = require("./normalize/exportBilling");
+const { classifySixfoldStop } = require("./normalize/sixfoldGps");
+const {
+  loadTransporeonExportFromBuffer,
+} = require("./tools/readTransporeonExport");
 
 dotenv.config();
 
@@ -104,30 +108,82 @@ function buildEvaluationWindow(period, referenceDateValue) {
   };
 }
 
+const FLEET_STOP_FIELDS = `
+  stop_id
+  type
+  status
+  arrival_time
+  departure_time
+  estimated_arrival
+  deadline
+  timeslot {
+    begin
+    end
+    timezone
+  }
+  location {
+    name
+    bookingLocationName
+    gate
+    address {
+      full_address
+    }
+    customerProvidedAddress {
+      full_address
+    }
+    position {
+      lat
+      lng
+    }
+  }
+  status_events {
+    event_name
+    event_time
+    created_at
+  }
+`;
+
 function normalizeFleetStops(tour) {
   const stops = Array.isArray(tour?.stops) ? tour.stops : [];
-  return stops.map((stop, index) => ({
-    order: index + 1,
-    stop_id: stop?.stop_id || null,
-    type: stop?.type || null,
-    status: stop?.status || null,
-    booking_location:
-      stop?.location?.bookingLocationName || stop?.location?.name || null,
-    address:
-      stop?.location?.address?.full_address ||
-      stop?.location?.customerProvidedAddress?.full_address ||
-      null,
-    timeslot_begin: stop?.timeslot?.begin || null,
-    timeslot_end: stop?.timeslot?.end || null,
-    timeslot_timezone: stop?.timeslot?.timezone || null,
-    arrival_time: stop?.arrival_time || null,
-    departure_time: stop?.departure_time || null,
-    transport_number: tour?.shipper_transport_number || null,
-    tour_id: tour?.tour_id || null,
-    tour_status: tour?.status || null,
-    working_stop_id: tour?.working_stop_id || null,
-    plate: tour?.plate || null,
-  }));
+  return stops.map((stop, index) => {
+    const gps = classifySixfoldStop(stop);
+    return {
+      order: index + 1,
+      stop_id: stop?.stop_id || null,
+      type: stop?.type || null,
+      status: stop?.status || null,
+      booking_location:
+        stop?.location?.bookingLocationName || stop?.location?.name || null,
+      address:
+        stop?.location?.address?.full_address ||
+        stop?.location?.customerProvidedAddress?.full_address ||
+        null,
+      timeslot_begin: stop?.timeslot?.begin || null,
+      timeslot_end: stop?.timeslot?.end || null,
+      timeslot_timezone: stop?.timeslot?.timezone || null,
+      arrival_time: stop?.arrival_time || null,
+      departure_time: stop?.departure_time || null,
+      transport_number: tour?.shipper_transport_number || null,
+      tour_id: tour?.tour_id || null,
+      tour_status: tour?.status || null,
+      working_stop_id: tour?.working_stop_id || null,
+      plate: tour?.plate || null,
+      position: stop?.location?.position
+        ? {
+            lat: stop.location.position.lat ?? null,
+            lng: stop.location.position.lng ?? null,
+          }
+        : null,
+      status_events: Array.isArray(stop?.status_events)
+        ? stop.status_events.map((event) => ({
+            event_name: event?.event_name || null,
+            event_time: event?.event_time || null,
+            created_at: event?.created_at || null,
+          }))
+        : [],
+      gps,
+    };
+  });
 }
 
 function isStopInWindow(stop, fromTime, toTime) {
@@ -168,12 +224,12 @@ async function fetchFleetTimelineStops(url, options = {}) {
   if (cookie) headers.Cookie = cookie;
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  async function runGraphql(query, variables) {
+  async function runGraphql(query, variables, timeoutMs = 25000) {
     try {
       const response = await axios.post(
         `${context.origin}/graphql`,
         { query, variables },
-        { timeout: 25000, headers },
+        { timeout: timeoutMs, headers },
       );
       if (
         Array.isArray(response?.data?.errors) &&
@@ -375,38 +431,14 @@ async function fetchFleetTimelineStops(url, options = {}) {
           company(company_id: $companyId) {
             tours(role: ${role}) {
               count
-              tours(first: 5000, after: $after) {
+              tours(first: 500, after: $after) {
                 edges {
                   node {
                     tour_id
                     shipper_transport_number
                     status
                     working_stop_id
-                    stops {
-                      stop_id
-                      type
-                      status
-                      arrival_time
-                      departure_time
-                      estimated_arrival
-                      deadline
-                      timeslot {
-                        begin
-                        end
-                        timezone
-                      }
-                      location {
-                        name
-                        bookingLocationName
-                        gate
-                        address {
-                          full_address
-                        }
-                        customerProvidedAddress {
-                          full_address
-                        }
-                      }
-                    }
+                    stops {${FLEET_STOP_FIELDS}}
                   }
                 }
                 pageInfo {
@@ -425,10 +457,14 @@ async function fetchFleetTimelineStops(url, options = {}) {
     let pageCount = 0;
 
     while (pageCount < 200) {
-      const data = await runGraphql(query, {
-        companyId: context.companyId,
-        after,
-      });
+      const data = await runGraphql(
+        query,
+        {
+          companyId: context.companyId,
+          after,
+        },
+        45000,
+      );
 
       const toursConnection = data?.viewer?.company?.tours?.tours || null;
       const edges = toursConnection?.edges || [];
@@ -536,31 +572,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
                       shipper_transport_number
                       status
                       working_stop_id
-                      stops {
-                        stop_id
-                        type
-                        status
-                        arrival_time
-                        departure_time
-                        estimated_arrival
-                        deadline
-                        timeslot {
-                          begin
-                          end
-                          timezone
-                        }
-                        location {
-                          name
-                          bookingLocationName
-                          gate
-                          address {
-                            full_address
-                          }
-                          customerProvidedAddress {
-                            full_address
-                          }
-                        }
-                      }
+                      stops {${FLEET_STOP_FIELDS}}
                     }
                   }
                 }
@@ -614,31 +626,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
                               shipper_transport_number
                               status
                               working_stop_id
-                              stops {
-                                stop_id
-                                type
-                                status
-                                arrival_time
-                                departure_time
-                                estimated_arrival
-                                deadline
-                                timeslot {
-                                  begin
-                                  end
-                                  timezone
-                                }
-                                location {
-                                  name
-                                  bookingLocationName
-                                  gate
-                                  address {
-                                    full_address
-                                  }
-                                  customerProvidedAddress {
-                                    full_address
-                                  }
-                                }
-                              }
+                              stops {${FLEET_STOP_FIELDS}}
                             }
                           }
                         }
@@ -697,31 +685,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
                         shipper_transport_number
                         status
                         working_stop_id
-                        stops {
-                          stop_id
-                          type
-                          status
-                          arrival_time
-                          departure_time
-                          estimated_arrival
-                          deadline
-                          timeslot {
-                            begin
-                            end
-                            timezone
-                          }
-                          location {
-                            name
-                            bookingLocationName
-                            gate
-                            address {
-                              full_address
-                            }
-                            customerProvidedAddress {
-                              full_address
-                            }
-                          }
-                        }
+                        stops {${FLEET_STOP_FIELDS}}
                       }
                     }
                   }
@@ -778,31 +742,7 @@ async function fetchFleetTimelineStops(url, options = {}) {
                       shipper_transport_number
                       status
                       working_stop_id
-                      stops {
-                        stop_id
-                        type
-                        status
-                        arrival_time
-                        departure_time
-                        estimated_arrival
-                        deadline
-                        timeslot {
-                          begin
-                          end
-                          timezone
-                        }
-                        location {
-                          name
-                          bookingLocationName
-                          gate
-                          address {
-                            full_address
-                          }
-                          customerProvidedAddress {
-                            full_address
-                          }
-                        }
-                      }
+                      stops {${FLEET_STOP_FIELDS}}
                     }
                   }
                 }
@@ -1029,12 +969,14 @@ function calcStop(stop, rules) {
   const slotBegin = toDate(stop.timeslot_begin);
 
   if (!arrival || !departure) {
+    // Ohne Ankunft ODER Abfahrt gibt es keine Dauer zum Zaehlen -> 0 EUR.
     return {
       ...stop,
       effective_minutes: 0,
       billable_minutes: 0,
       billed_units: 0,
       amount_eur: 0,
+      gps_verified: Boolean(stop?.gps?.gps_connected),
     };
   }
 
@@ -1060,6 +1002,8 @@ function calcStop(stop, rules) {
     billed_units: billedUnits,
     amount_eur: amount,
     threshold_reached: amount >= rules.thresholdEur,
+    // GPS ist nur Zusatz-Info. Die gesetzten (XP-)Zeiten werden IMMER abgerechnet.
+    gps_verified: Boolean(stop?.gps?.gps_connected),
     arrival_display: formatDateTime(arrival),
     departure_display: formatDateTime(departure),
     slot_begin_display: formatDateTime(stop.timeslot_begin),
@@ -1081,7 +1025,76 @@ const EXPORT_XLSX_PATH = path.join(
   "transporeon_export.xlsx",
 );
 
-app.get("/api/billing/export", (req, res) => {
+// Leitet aus den Export-Transporten ein GPS-Abfragefenster ab. Die lokalen
+// Zeitfelder haben das Format "YYYY-MM-DD HH:MM" (Europe/Berlin). Wir nehmen die
+// frueheste und spaeteste erkennbare Zeit und puffern grosszuegig (+/- 2 Tage),
+// damit Sixfold alle relevanten Touren liefert.
+function computeTransportsWindow(transports) {
+  let minMs = null;
+  let maxMs = null;
+  const consider = (local) => {
+    if (!local) return;
+    const ms = Date.parse(String(local).replace(" ", "T"));
+    if (Number.isNaN(ms)) return;
+    if (minMs === null || ms < minMs) minMs = ms;
+    if (maxMs === null || ms > maxMs) maxMs = ms;
+  };
+  for (const t of Array.isArray(transports) ? transports : []) {
+    for (const stop of [t?.loading, t?.unloading]) {
+      if (!stop) continue;
+      consider(stop.window_local);
+      consider(stop.arrival_local);
+      consider(stop.departure_local);
+    }
+  }
+  const DAY = 24 * 60 * 60 * 1000;
+  if (minMs === null || maxMs === null) {
+    const now = Date.now();
+    return {
+      fromTime: new Date(now - 90 * DAY).toISOString(),
+      toTime: new Date(now + 30 * DAY).toISOString(),
+    };
+  }
+  return {
+    fromTime: new Date(minMs - 2 * DAY).toISOString(),
+    toTime: new Date(maxMs + 2 * DAY).toISOString(),
+  };
+}
+
+// Optionaler GPS-Abgleich: Sixfold-Link + Token via Header (NICHT als Query,
+// damit keine Zugangsdaten in Server-Logs/History landen). Liefert
+// { gpsIndex, gpsInfo } oder { gpsIndex: null, gpsInfo: null } wenn nichts gesetzt.
+// `window` = { fromTime, toTime } (ISO) begrenzt die Sixfold-Abfrage.
+async function resolveGpsIndexFromHeaders(req, window = {}) {
+  const sixfoldUrl = String(req.get("x-sixfold-url") || "").trim();
+  const sixfoldToken = String(req.get("x-sixfold-token") || "").trim();
+  const sixfoldCookieRaw = String(req.get("x-sixfold-cookie") || "").trim();
+  if (!sixfoldUrl || !(sixfoldToken || sixfoldCookieRaw)) {
+    return { gpsIndex: null, gpsInfo: null };
+  }
+  const sessionCookie = sixfoldCookieRaw
+    ? sixfoldCookieRaw
+    : `sessionToken=${sixfoldToken}; sixfold_lng=de`;
+  const fleet = await fetchFleetTimelineStops(sixfoldUrl, {
+    sessionCookie,
+    fromTime: window.fromTime,
+    toTime: window.toTime,
+  });
+  const sixfoldStops = Array.isArray(fleet?.stops) ? fleet.stops : [];
+  const gpsIndex = buildGpsIndex(sixfoldStops);
+  return {
+    gpsIndex,
+    gpsInfo: {
+      fetched: true,
+      window_from: window.fromTime || null,
+      window_to: window.toTime || null,
+      sixfold_stops: sixfoldStops.length,
+      gps_index_size: gpsIndex.size,
+    },
+  };
+}
+
+app.get("/api/billing/export", async (req, res) => {
   try {
     const filePath = req.query.file ? String(req.query.file) : EXPORT_XLSX_PATH;
     if (!fs.existsSync(filePath)) {
@@ -1101,11 +1114,15 @@ app.get("/api/billing/export", (req, res) => {
       config.triggerMinutes = Number(req.query.triggerMinutes);
 
     const transports = loadTransporeonExport(filePath);
-    const result = billFromExport(transports, { config });
+    const window = computeTransportsWindow(transports);
+    const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(req, window);
+
+    const result = billFromExport(transports, { config, gpsIndex });
 
     res.json({
       file: filePath,
       generated_at: new Date().toISOString(),
+      gps: gpsInfo,
       summary: {
         ...result.summary,
         total_fee_display: formatEuro(result.summary.total_fee_eur),
@@ -1116,6 +1133,59 @@ app.get("/api/billing/export", (req, res) => {
     res.status(500).json({ error: error.message || "Unbekannter Fehler" });
   }
 });
+
+// Excel-Upload: Transporeon-Export als Datei hochladen und sofort abrechnen.
+// Rohbytes der .xlsx im Body (application/octet-stream o.ae.).
+app.post(
+  "/api/billing/upload",
+  express.raw({
+    type: () => true,
+    limit: "25mb",
+  }),
+  async (req, res) => {
+    try {
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "Keine Datei empfangen (leerer Body)." });
+      }
+
+      const config = {};
+      if (req.query.freeMinutes)
+        config.freeMinutes = Number(req.query.freeMinutes);
+      if (req.query.blockMinutes)
+        config.blockMinutes = Number(req.query.blockMinutes);
+      if (req.query.blockRateEur)
+        config.blockRateEur = Number(req.query.blockRateEur);
+      if (req.query.triggerMinutes)
+        config.triggerMinutes = Number(req.query.triggerMinutes);
+
+      // Optionaler GPS-Abgleich ueber Sixfold (Header, siehe Helper).
+      const transports = loadTransporeonExportFromBuffer(buffer);
+      const window = computeTransportsWindow(transports);
+      const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(
+        req,
+        window,
+      );
+
+      const result = billFromExport(transports, { config, gpsIndex });
+
+      res.json({
+        file: req.query.name ? String(req.query.name) : "upload.xlsx",
+        generated_at: new Date().toISOString(),
+        gps: gpsInfo,
+        summary: {
+          ...result.summary,
+          total_fee_display: formatEuro(result.summary.total_fee_eur),
+        },
+        stops: result.stops,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message || "Unbekannter Fehler" });
+    }
+  },
+);
 
 app.post("/api/sixfold/standgeld", async (req, res) => {
   try {
@@ -1234,6 +1304,10 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
       (s) => s.window_override_applied,
     ).length;
 
+    const gpsVerifiedPositions = recalculated.filter(
+      (s) => s.gps_verified,
+    ).length;
+
     res.json({
       source,
       rules,
@@ -1247,6 +1321,7 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
         time_window_matches: windowMatches,
         removed_long_stand_positions: removedLongStand.length,
         max_effective_hours: null,
+        gps_verified_positions: gpsVerifiedPositions,
         excluded_from_total_threshold_eur: EXCLUDE_FROM_TOTAL_AMOUNT_EUR,
         excluded_from_total_positions: excludedFromTotal.length,
         excluded_from_total_amount: excludedSummary.amount,

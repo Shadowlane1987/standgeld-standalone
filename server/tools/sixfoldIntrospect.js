@@ -79,7 +79,12 @@ const INTROSPECTION_QUERY = `
 
 async function main() {
   const url = String(process.env.SIXFOLD_URL || "").trim();
-  const cookie = String(process.env.SIXFOLD_COOKIE || "").trim();
+  const sessionToken = String(process.env.SIXFOLD_SESSION_TOKEN || "").trim();
+  // Bequemlichkeit: aus dem reinen sessionToken denselben Cookie bauen wie die
+  // App (public/app.js -> "sessionToken=...; sixfold_lng=de").
+  const cookie =
+    String(process.env.SIXFOLD_COOKIE || "").trim() ||
+    (sessionToken ? `sessionToken=${sessionToken}; sixfold_lng=de` : "");
   const token = String(process.env.SIXFOLD_TOKEN || "").trim();
 
   if (!url) {
@@ -88,7 +93,9 @@ async function main() {
     return;
   }
   if (!cookie && !token) {
-    console.error("Fehlt: SIXFOLD_COOKIE oder SIXFOLD_TOKEN (Session).");
+    console.error(
+      "Fehlt: SIXFOLD_SESSION_TOKEN (oder SIXFOLD_COOKIE / SIXFOLD_TOKEN).",
+    );
     process.exitCode = 1;
     return;
   }

@@ -159,3 +159,48 @@ test("knapp unter der Obergrenze bleibt ungedeckelt", () => {
   assert.equal(r.fee_eur, 0);
   assert.equal(r.fee_capped, false);
 });
+
+test("Ruhezeit automatisch abziehen: 13h Standzeit -> 9h abgezogen -> 4h effektiv (Nutzer 2026-07-20)", () => {
+  // 13 Stunden (780 min) Standzeit: Fenster 06:00, Ankunft 06:00, Abfahrt 19:00Z.
+  // Mit Ruhezeit: 780 - 540 = 240 min (4h) effektiv.
+  // Mit Freizeit 120 min: 240 - 120 = 120 min = 4 Bloecke a 30 EUR = 120 EUR.
+  const r = computeStandgeld(
+    stop({ departure_time: "2026-07-16T19:00:00.000Z" }),
+  );
+  assert.equal(r.counted_standing_minutes, 780); // Rohwert
+  assert.equal(r.effective_standing_minutes, 240); // Nach Ruhezeit-Abzug
+  assert.equal(r.rest_time_deducted, true);
+  assert.equal(r.minutes_over_free, 120); // 240 - 120 Freizeit
+  assert.equal(r.billable_blocks, 4);
+  assert.equal(r.fee_eur, 120);
+  assert.equal(r.chargeable, true);
+  assert.equal(r.reason, REASON.CHARGEABLE);
+});
+
+test("Standzeit genau 12h Grenze: keine Ruhezeit abgezogen", () => {
+  // 12 Stunden genau = 720 min -> NICHT > 720, also keine Ruhezeit-Abzug.
+  const r = computeStandgeld(
+    stop({ departure_time: "2026-07-16T18:00:00.000Z" }),
+  );
+  assert.equal(r.counted_standing_minutes, 720);
+  assert.equal(r.effective_standing_minutes, 720); // Kein Abzug
+  assert.equal(r.rest_time_deducted, false);
+  assert.equal(r.minutes_over_free, 600); // 720 - 120
+  assert.equal(r.billable_blocks, 20); // 600 / 30
+  assert.equal(r.fee_eur, 600);
+  assert.equal(r.chargeable, true);
+});
+
+test("Standzeit > 12h mit Ruhezeit ergibt niedrige Gebühr (nicht 650 EUR Deckel)", () => {
+  // 15 Stunden = 900 min. Nach Ruhezeit: 900 - 540 = 360 min.
+  // Mit Freizeit: 360 - 120 = 240 min = 8 Bloecke = 240 EUR.
+  const r = computeStandgeld(
+    stop({ departure_time: "2026-07-16T21:00:00.000Z" }),
+  );
+  assert.equal(r.counted_standing_minutes, 900);
+  assert.equal(r.effective_standing_minutes, 360);
+  assert.equal(r.rest_time_deducted, true);
+  assert.equal(r.fee_eur, 240);
+  assert.equal(r.fee_capped, false); // Nicht gedeckelt (weit unter 650)
+  assert.equal(r.chargeable, true);
+});

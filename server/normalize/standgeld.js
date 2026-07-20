@@ -90,7 +90,9 @@ function computeStandgeld(input = {}, config = {}) {
       arrived_late: null,
       count_start: null,
       counted_standing_minutes: null,
+      effective_standing_minutes: null,
       minutes_over_free: null,
+      rest_time_deducted: false,
       billable_blocks: 0,
       fee_eur: 0,
       fee_capped: false,
@@ -110,6 +112,20 @@ function computeStandgeld(input = {}, config = {}) {
   let countedMinutes = Math.round((departure - countStartMs) / 60000);
   if (countedMinutes < 0) countedMinutes = 0;
 
+  // Regel 7b: Ruhezeit automatisch abziehen (gesetzliche 9h Ruhe bei Langfahrten).
+  // Wenn Standzeit > 12h, wird 9h (540 min) als Ruhezeit abgezogen.
+  // Nutzer-Vorgabe 2026-07-20: keine Multi-Visit-Probleme erwartet, daher
+  // automatisch abziehen statt zu pruefen.
+  const REST_TIME_THRESHOLD_MIN = 12 * 60; // 12 Stunden
+  const REST_TIME_DEDUCTION_MIN = 9 * 60; // 9 Stunden
+  let effectiveMinutes = countedMinutes;
+  let restTimeDeducted = false;
+  if (countedMinutes > REST_TIME_THRESHOLD_MIN) {
+    effectiveMinutes = countedMinutes - REST_TIME_DEDUCTION_MIN;
+    restTimeDeducted = true;
+    if (effectiveMinutes < 0) effectiveMinutes = 0;
+  }
+
   // Regel 7: unplausibel lange Standzeit (> 24 h) nicht automatisch abrechnen.
   if (
     cfg.maxPlausibleMinutes != null &&
@@ -121,6 +137,8 @@ function computeStandgeld(input = {}, config = {}) {
       count_start: countStart,
       counted_standing_minutes: countedMinutes,
       minutes_over_free: Math.max(0, countedMinutes - cfg.freeMinutes),
+      effective_standing_minutes: effectiveMinutes,
+      rest_time_deducted: restTimeDeducted,
       billable_blocks: 0,
       fee_eur: 0,
       fee_capped: false,
@@ -130,7 +148,7 @@ function computeStandgeld(input = {}, config = {}) {
     });
   }
 
-  const rawOverrun = countedMinutes - cfg.freeMinutes;
+  const rawOverrun = effectiveMinutes - cfg.freeMinutes;
 
   let reason;
   let blocks = 0;
@@ -161,7 +179,9 @@ function computeStandgeld(input = {}, config = {}) {
     arrived_late: arrivedLate,
     count_start: countStart,
     counted_standing_minutes: countedMinutes,
+    effective_standing_minutes: effectiveMinutes,
     minutes_over_free: Math.max(0, rawOverrun),
+    rest_time_deducted: restTimeDeducted,
     billable_blocks: blocks,
     fee_eur: feeEur,
     fee_capped: feeCapped,
