@@ -40,6 +40,22 @@ async function findListFrame(context) {
   return null;
 }
 
+async function waitForListFrame(context, options = {}) {
+  const timeoutMs = Number.isFinite(options.timeoutMs)
+    ? options.timeoutMs
+    : 90000;
+  const pollMs = Number.isFinite(options.pollMs) ? options.pollMs : 1000;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const found = await findListFrame(context);
+    if (found) return found;
+    await sleep(pollMs);
+  }
+
+  return null;
+}
+
 async function scrollListToLoadAllPages(frame) {
   try {
     await frame.evaluate(async () => {
@@ -206,10 +222,13 @@ async function fetchLiveVisibilityEvents(transportNumbers, options = {}) {
       waitUntil: "domcontentloaded",
     });
 
-    const found = await findListFrame(context);
+    const found = await waitForListFrame(context, {
+      timeoutMs: options.waitForListTimeoutMs,
+      pollMs: options.waitForListPollMs,
+    });
     if (!found) {
       throw new Error(
-        "Keine Transporeon-Liste gefunden. Bitte im Playwright-Profil einloggen und 'Zugewiesene Transporte' laden.",
+        "Keine Transporeon-Liste gefunden. Bitte im geoeffneten Playwright-Browser bei Transporeon einloggen und 'Zugewiesene Transporte' laden, dann erneut starten.",
       );
     }
 

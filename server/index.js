@@ -1616,6 +1616,9 @@ app.get("/api/billing/live", async (req, res) => {
       {
         concurrency: req.query.concurrency ? Number(req.query.concurrency) : 8,
         headless: req.query.headless === "1" || req.query.headless === "true",
+        waitForListTimeoutMs: req.query.waitForListTimeoutMs
+          ? Number(req.query.waitForListTimeoutMs)
+          : 120000,
       },
     );
 
@@ -1796,8 +1799,10 @@ app.post(
           concurrency: req.query.concurrency
             ? Number(req.query.concurrency)
             : 8,
-          headless:
-            req.query.headless === "1" || req.query.headless === "true",
+          headless: req.query.headless === "1" || req.query.headless === "true",
+          waitForListTimeoutMs: req.query.waitForListTimeoutMs
+            ? Number(req.query.waitForListTimeoutMs)
+            : 120000,
         },
       );
 
