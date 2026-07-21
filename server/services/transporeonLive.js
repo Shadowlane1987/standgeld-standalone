@@ -101,6 +101,27 @@ async function ensureVisibilityTemplate(frame, captured) {
   }
 }
 
+async function waitForVisibilityTemplate(frame, captured, options = {}) {
+  const timeoutMs = Number.isFinite(options.timeoutMs)
+    ? options.timeoutMs
+    : 120000;
+  const retryMs = Number.isFinite(options.retryMs) ? options.retryMs : 5000;
+  const deadline = Date.now() + timeoutMs;
+
+  // Erst einmal aktiv versuchen, das Template automatisch auszulösen.
+  await ensureVisibilityTemplate(frame, captured);
+
+  while (!captured.visibility && Date.now() < deadline) {
+    // Nutzer kann parallel manuell einen Transport + Event-Management öffnen.
+    await sleep(retryMs);
+    if (captured.visibility) break;
+    // Best-effort erneut automatisch triggern.
+    await ensureVisibilityTemplate(frame, captured);
+  }
+
+  return captured.visibility;
+}
+
 async function fetchVisibilities(page, api, rows, concurrency) {
   const jobs = rows.map((row) => ({
     transportNumber: row.transportNumber,
@@ -244,11 +265,13 @@ async function fetchLiveVisibilityEvents(transportNumbers, options = {}) {
     }
 
     if (!captured.visibility) {
-      await ensureVisibilityTemplate(frame, captured);
+      await waitForVisibilityTemplate(frame, captured, {
+        timeoutMs: options.waitForVisibilityTimeoutMs,
+      });
     }
     if (!captured.visibility) {
       throw new Error(
-        "Kein Visibility-Template erhalten. Bitte pruefen, ob Event Management im Profil verfuegbar ist.",
+        "Kein Visibility-Template erhalten. Bitte im geoeffneten Playwright-Browser einen Transport anklicken und den Tab 'Event Management' oeffnen.",
       );
     }
 

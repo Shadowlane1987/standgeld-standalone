@@ -367,7 +367,9 @@ async function upload() {
         `Lade „${file.name}" hoch, lese Event Management + GPS und rechne ab …`,
       );
     } else {
-      setStatus(`Lade „${file.name}" hoch, lese Event Management und rechne ab …`);
+      setStatus(
+        `Lade „${file.name}" hoch, lese Event Management und rechne ab …`,
+      );
     }
     const res = await fetch(url, {
       method: "POST",

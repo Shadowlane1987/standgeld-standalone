@@ -1619,6 +1619,9 @@ app.get("/api/billing/live", async (req, res) => {
         waitForListTimeoutMs: req.query.waitForListTimeoutMs
           ? Number(req.query.waitForListTimeoutMs)
           : 120000,
+        waitForVisibilityTimeoutMs: req.query.waitForVisibilityTimeoutMs
+          ? Number(req.query.waitForVisibilityTimeoutMs)
+          : 120000,
       },
     );
 
@@ -1802,6 +1805,9 @@ app.post(
           headless: req.query.headless === "1" || req.query.headless === "true",
           waitForListTimeoutMs: req.query.waitForListTimeoutMs
             ? Number(req.query.waitForListTimeoutMs)
+            : 120000,
+          waitForVisibilityTimeoutMs: req.query.waitForVisibilityTimeoutMs
+            ? Number(req.query.waitForVisibilityTimeoutMs)
             : 120000,
         },
       );
