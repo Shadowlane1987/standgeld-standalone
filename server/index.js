@@ -212,6 +212,273 @@ function isStopInWindow(stop, fromTime, toTime) {
   });
 }
 
+async function fetchSixfoldGpsSimple(url, sessionCookie, timeWindow = {}) {
+  /**
+   * VEREINFACHTE GPS-Loader: Nur Transport-Nummer + Stopps abrufen.
+   * Datums-Filter wird CLIENT-SEITIG nach der Abfrage angewendet
+   * (Sixfold akzeptiert fromTime/toTime Parameter nicht auf diesem Endpunkt)
+   */
+  const companyId = "799";
+
+  // WICHTIG: Verwende ALLE Felder aus FLEET_STOP_FIELDS, nicht nur Minimal!
+  // Mit Cursor-Pagination, damit nicht nur die ersten 500 Touren verarbeitet werden.
+  const query = `
+    query FetchCarrierTours($after: String) {
+      viewer {
+        company(company_id: "${companyId}") {
+          tours(role: CARRIER) {
+            tours(first: 500, after: $after) {
+              edges {
+                node {
+                  tour_id
+                  shipper_transport_number
+                  stops {
+                    ${FLEET_STOP_FIELDS}
+                  }
+                }
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const headers = {
+    "Content-Type": "application/json",
+    Cookie: sessionCookie,
+  };
+
+  async function runSimpleGraphql(query, variables = {}, timeoutMs = 45000) {
+    const response = await axios.post(
+      "https://app.sixfold.com/graphql",
+      { query, variables },
+      { timeout: timeoutMs, headers },
+    );
+
+    if (response?.data?.errors?.length) {
+      throw new Error(response.data.errors[0]?.message || "GraphQL Error");
+    }
+
+    return response?.data?.data || null;
+  }
+
+  async function runSimpleGraphqlAllowPartial(
+    query,
+    variables = {},
+    timeoutMs = 45000,
+  ) {
+    const response = await axios.post(
+      "https://app.sixfold.com/graphql",
+      { query, variables },
+      { timeout: timeoutMs, headers },
+    );
+
+    return {
+      data: response?.data?.data || null,
+      errors: Array.isArray(response?.data?.errors) ? response.data.errors : [],
+    };
+  }
+
+  async function fetchTourPlateMap() {
+    const fromTimeIso = timeWindow?.fromTime
+      ? new Date(timeWindow.fromTime).toISOString()
+      : null;
+    const toTimeIso = timeWindow?.toTime
+      ? new Date(timeWindow.toTime).toISOString()
+      : null;
+
+    if (!fromTimeIso || !toTimeIso) {
+      return new Map();
+    }
+
+    const plateByKey = new Map();
+
+    const groupsConnectionQuery = `
+      query FetchSimplePlateMapConnection(
+        $companyId: String!
+        $fromTime: DateTime!
+        $toTime: DateTime!
+      ) {
+        viewer {
+          company(company_id: $companyId) {
+            companyVehicleGroupsConnection {
+              companyVehicleGroups(first: 100) {
+                edges {
+                  node {
+                    vehiclesConnection {
+                      vehicles(first: 250) {
+                        edges {
+                          node {
+                            license_plate_number
+                            tours(fromTime: $fromTime, toTime: $toTime) {
+                              tour_id
+                              shipper_transport_number
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const variables = {
+        companyId,
+        fromTime: fromTimeIso,
+        toTime: toTimeIso,
+      };
+
+      const connectionResult = await runSimpleGraphqlAllowPartial(
+        groupsConnectionQuery,
+        variables,
+      );
+      if (connectionResult.errors.length) {
+        console.warn(
+          `[Sixfold] Kennzeichen-Mapping Teilfehler (Connection): ${connectionResult.errors[0]?.message || "unbekannt"}`,
+        );
+      }
+      const groups = (
+        connectionResult?.data?.viewer?.company?.companyVehicleGroupsConnection
+          ?.companyVehicleGroups?.edges || []
+      ).map((edge) => edge?.node || null);
+
+      groups.forEach((group) => {
+        const edges = group?.vehiclesConnection?.vehicles?.edges || [];
+        edges.forEach((edge) => {
+          const vehicle = edge?.node || null;
+          const plate = String(vehicle?.license_plate_number || "").trim();
+          if (!plate) return;
+
+          (vehicle?.tours || []).forEach((tour) => {
+            const tourId = String(tour?.tour_id || "").trim();
+            const transport = String(
+              tour?.shipper_transport_number || "",
+            ).trim();
+
+            if (tourId && !plateByKey.has(`tour:${tourId}`)) {
+              plateByKey.set(`tour:${tourId}`, plate);
+            }
+            if (transport && !plateByKey.has(`transport:${transport}`)) {
+              plateByKey.set(`transport:${transport}`, plate);
+            }
+          });
+        });
+      });
+    } catch (error) {
+      console.warn(
+        `[Sixfold] Kennzeichen-Mapping nicht verfuegbar: ${error.message}`,
+      );
+    }
+
+    return plateByKey;
+  }
+
+  const allStops = [];
+
+  try {
+    const tours = [];
+    const plateByKey = new Map();
+    let after = null;
+    let pageCount = 0;
+
+    while (pageCount < 200) {
+      const data = await runSimpleGraphql(query, { after });
+      const connection = data?.viewer?.company?.tours?.tours || null;
+      const edges = connection?.edges || [];
+      tours.push(...edges);
+
+      const pageInfo = connection?.pageInfo || {};
+      if (!pageInfo.hasNextPage || !pageInfo.endCursor) break;
+
+      after = pageInfo.endCursor;
+      pageCount += 1;
+    }
+
+    // Datums-Filter: CLIENT-SEITIG anwenden
+    const fromTime = timeWindow?.fromTime
+      ? new Date(timeWindow.fromTime)
+      : null;
+    const toTime = timeWindow?.toTime ? new Date(timeWindow.toTime) : null;
+
+    tours.forEach((edge) => {
+      const tour = edge?.node;
+      const tn = String(tour?.shipper_transport_number || "").trim();
+      const tourId = String(tour?.tour_id || "").trim();
+      if (!tn) return;
+
+      const mappedPlate =
+        (tourId ? plateByKey.get(`tour:${tourId}`) : "") ||
+        (tn ? plateByKey.get(`transport:${tn}`) : "") ||
+        null;
+
+      const stops = Array.isArray(tour?.stops) ? tour.stops : [];
+      stops.forEach((stop) => {
+        // Datums-Filter robust auf allen Zeitfeldern anwenden
+        // (arrival/departure/estimated/deadline/timeslot).
+        if ((fromTime || toTime) && !isStopInWindow(stop, fromTime, toTime)) {
+          return;
+        }
+
+        const coords = stop?.location?.position || {};
+        const events = Array.isArray(stop?.status_events)
+          ? stop.status_events.map((e) => String(e?.event_name || ""))
+          : [];
+
+        // GPS-Verifikation
+        const hasApproach = events.includes("APPROACH");
+        const hasDepart = events.includes("DEPART");
+
+        allStops.push({
+          transport_number: tn,
+          license_plate: mappedPlate,
+          type: String(stop?.type || "").toUpperCase(),
+          arrival_time: stop?.arrival_time || null,
+          departure_time: stop?.departure_time || null,
+          position: {
+            lat: Number(coords?.lat) || 0,
+            lng: Number(coords?.lng) || 0,
+          },
+          gps: {
+            arrival_verified: hasApproach,
+            departure_verified: hasDepart,
+          },
+        });
+      });
+    });
+
+    return allStops;
+  } catch (err) {
+    // Besseres Error-Logging
+    if (err.response?.status) {
+      console.error(
+        `[Sixfold] HTTP ${err.response.status}: ${err.response.statusText}`,
+      );
+      if (err.response?.data?.errors) {
+        console.error(`[Sixfold] GraphQL Errors:`, err.response.data.errors);
+      } else if (err.response?.data) {
+        console.error(
+          `[Sixfold] Response:`,
+          JSON.stringify(err.response.data).substring(0, 500),
+        );
+      }
+    } else {
+      console.error(`[Sixfold] Fehler beim Laden: ${err.message}`);
+    }
+    throw err;
+  }
+}
+
 async function fetchFleetTimelineStops(url, options = {}) {
   const context = extractFleetTimelineContextFromUrl(url);
   if (!context?.companyId || !context?.vehicleGroupId) {
@@ -1061,27 +1328,92 @@ function computeTransportsWindow(transports) {
   };
 }
 
+function extractLocalDate(value) {
+  const text = String(value || "").trim();
+  const m = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
+// Filtert Transporte nach Entladedatum (aus dem Entlade-Stopp).
+// Bereich ist inklusiv: from <= datum <= to.
+function filterTransportsByUnloadDate(transports, fromDate, toDate) {
+  if (!fromDate && !toDate) return Array.isArray(transports) ? transports : [];
+
+  const list = Array.isArray(transports) ? transports : [];
+  return list.filter((t) => {
+    const unload = t?.unloading || null;
+    const unloadDate =
+      extractLocalDate(unload?.window_local) ||
+      extractLocalDate(unload?.arrival_local) ||
+      extractLocalDate(unload?.departure_local);
+    if (!unloadDate) return false;
+    if (fromDate && unloadDate < fromDate) return false;
+    if (toDate && unloadDate > toDate) return false;
+    return true;
+  });
+}
+
 // Optionaler GPS-Abgleich: Sixfold-Link + Token via Header (NICHT als Query,
 // damit keine Zugangsdaten in Server-Logs/History landen). Liefert
 // { gpsIndex, gpsInfo } oder { gpsIndex: null, gpsInfo: null } wenn nichts gesetzt.
 // `window` = { fromTime, toTime } (ISO) begrenzt die Sixfold-Abfrage.
-async function resolveGpsIndexFromHeaders(req, window = {}) {
+// `debug` = true zeigt Logging für GPS-Matching (z.B. 0/0-Koordinaten-Filter).
+async function resolveGpsIndexFromHeaders(req, window = {}, debug = false) {
   const sixfoldUrl = String(req.get("x-sixfold-url") || "").trim();
   const sixfoldToken = String(req.get("x-sixfold-token") || "").trim();
   const sixfoldCookieRaw = String(req.get("x-sixfold-cookie") || "").trim();
+
   if (!sixfoldUrl || !(sixfoldToken || sixfoldCookieRaw)) {
     return { gpsIndex: null, gpsInfo: null };
   }
+
   const sessionCookie = sixfoldCookieRaw
     ? sixfoldCookieRaw
     : `sessionToken=${sixfoldToken}; sixfold_lng=de`;
-  const fleet = await fetchFleetTimelineStops(sixfoldUrl, {
+
+  // Nutze die VEREINFACHTE fetchSixfoldGpsSimple Funktion (kein Hang!)
+  let sixfoldStops = await fetchSixfoldGpsSimple(
+    sixfoldUrl,
     sessionCookie,
-    fromTime: window.fromTime,
-    toTime: window.toTime,
-  });
-  const sixfoldStops = Array.isArray(fleet?.stops) ? fleet.stops : [];
-  const gpsIndex = buildGpsIndex(sixfoldStops);
+    window,
+  );
+
+  // Fallback: Wenn der Simple-Loader keine Kennzeichen liefert, hole Stops ueber
+  // den robusten Fleet-Timeline-Pfad mit Tour-/Vehicle-Mapping.
+  const hasMappedPlate = (sixfoldStops || []).some((stop) =>
+    Boolean(String(stop?.license_plate || "").trim()),
+  );
+  if (!hasMappedPlate) {
+    try {
+      const fleetResult = await fetchFleetTimelineStops(sixfoldUrl, {
+        sessionCookie,
+        fromTime: window.fromTime,
+        toTime: window.toTime,
+      });
+      const fleetStops = Array.isArray(fleetResult?.stops)
+        ? fleetResult.stops
+        : [];
+
+      if (fleetStops.length) {
+        sixfoldStops = fleetStops.map((stop) => ({
+          transport_number: stop?.transport_number || null,
+          license_plate: stop?.plate || null,
+          type: String(stop?.type || "").toUpperCase(),
+          arrival_time: stop?.arrival_time || null,
+          departure_time: stop?.departure_time || null,
+          position: stop?.position || null,
+          gps: stop?.gps || {},
+        }));
+      }
+    } catch (error) {
+      console.warn(
+        `[Sixfold] Fallback Fleet-Timeline fehlgeschlagen: ${error.message}`,
+      );
+    }
+  }
+
+  const gpsIndex = buildGpsIndex(sixfoldStops, { debug });
+
   return {
     gpsIndex,
     gpsInfo: {
@@ -1114,10 +1446,38 @@ app.get("/api/billing/export", async (req, res) => {
       config.triggerMinutes = Number(req.query.triggerMinutes);
 
     const transports = loadTransporeonExport(filePath);
-    const window = computeTransportsWindow(transports);
-    const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(req, window);
 
-    const result = billFromExport(transports, { config, gpsIndex });
+    // Nutze Datums-Filter, falls gesetzt
+    let window = computeTransportsWindow(transports);
+    const sixfoldDateFrom = req.query.sixfoldDateFrom
+      ? String(req.query.sixfoldDateFrom).trim()
+      : null;
+    const sixfoldDateTo = req.query.sixfoldDateTo
+      ? String(req.query.sixfoldDateTo).trim()
+      : null;
+    if (sixfoldDateFrom || sixfoldDateTo) {
+      window = {
+        fromTime: sixfoldDateFrom
+          ? `${sixfoldDateFrom}T00:00:00Z`
+          : window.fromTime,
+        toTime: sixfoldDateTo ? `${sixfoldDateTo}T23:59:59Z` : window.toTime,
+      };
+    }
+
+    const filteredTransports = filterTransportsByUnloadDate(
+      transports,
+      sixfoldDateFrom,
+      sixfoldDateTo,
+    );
+
+    const debug = req.query.debug === "1" || req.query.debug === "true";
+    const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(
+      req,
+      window,
+      debug,
+    );
+
+    const result = billFromExport(filteredTransports, { config, gpsIndex });
 
     res.json({
       file: filePath,
@@ -1163,13 +1523,35 @@ app.post(
 
       // Optionaler GPS-Abgleich ueber Sixfold (Header, siehe Helper).
       const transports = loadTransporeonExportFromBuffer(buffer);
-      const window = computeTransportsWindow(transports);
+      const sixfoldDateFrom = req.query.sixfoldDateFrom
+        ? String(req.query.sixfoldDateFrom).trim()
+        : null;
+      const sixfoldDateTo = req.query.sixfoldDateTo
+        ? String(req.query.sixfoldDateTo).trim()
+        : null;
+      const filteredTransports = filterTransportsByUnloadDate(
+        transports,
+        sixfoldDateFrom,
+        sixfoldDateTo,
+      );
+
+      let window = computeTransportsWindow(filteredTransports);
+      if (sixfoldDateFrom || sixfoldDateTo) {
+        window = {
+          fromTime: sixfoldDateFrom
+            ? `${sixfoldDateFrom}T00:00:00Z`
+            : window.fromTime,
+          toTime: sixfoldDateTo ? `${sixfoldDateTo}T23:59:59Z` : window.toTime,
+        };
+      }
+      const debug = req.query.debug === "1" || req.query.debug === "true";
       const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(
         req,
         window,
+        debug,
       );
 
-      const result = billFromExport(transports, { config, gpsIndex });
+      const result = billFromExport(filteredTransports, { config, gpsIndex });
 
       res.json({
         file: req.query.name ? String(req.query.name) : "upload.xlsx",

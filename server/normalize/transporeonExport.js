@@ -32,6 +32,10 @@ const EXPORT_TIMEZONE = "Europe/Berlin";
 // Header-Erkennung ueber Teilstrings (robust gegen Zusatz-Suffixe/Sprache-Reste).
 const COLUMN_MATCHERS = Object.freeze({
   transport_number: (h) => h === "transportnr." || h.startsWith("transportnr"),
+  vehicle_registration: (h) =>
+    h.includes("kfz-kennz") ||
+    h.includes("kennzeichen") ||
+    h.includes("license"),
   load_window: (h) => h.startsWith("gebucht ab") && !h.includes("zweite"),
   load_arrival: (h) => h.startsWith("ankunft") && !h.includes("zweite"),
   load_departure: (h) => h.startsWith("abfahrt") && !h.includes("zweite"),
@@ -114,6 +118,7 @@ function parseTransporeonExport(rows) {
     const transportNumber = cell(row, columns.transport_number);
     if (!transportNumber) continue;
 
+    const vehicleRegistration = cell(row, columns.vehicle_registration);
     const loadWin = cleanDateTime(cell(row, columns.load_window));
     const loadArr = cleanDateTime(cell(row, columns.load_arrival));
     const loadDep = cleanDateTime(cell(row, columns.load_departure));
@@ -139,7 +144,12 @@ function parseTransporeonExport(rows) {
         : null;
 
     out.push(
-      Object.freeze({ transport_number: transportNumber, loading, unloading }),
+      Object.freeze({
+        transport_number: transportNumber,
+        vehicle_registration: vehicleRegistration || null,
+        loading,
+        unloading,
+      }),
     );
   }
 

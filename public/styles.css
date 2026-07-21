@@ -280,6 +280,10 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .grid-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -813,6 +817,49 @@ tbody tr {
 #surchargeText {
   min-height: 220px;
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
+.detail-meta {
+  margin: 14px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(14, 92, 74, 0.05);
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.detail-table-wrap {
+  max-height: none;
+  margin-bottom: 14px;
+}
+
+.detail-table {
+  min-width: 0;
+}
+
+.detail-table th,
+.detail-table td {
+  white-space: nowrap;
+}
+
+.detail-win {
+  font-weight: 700;
+}
+
+.detail-win-xp {
+  background: rgba(22, 121, 79, 0.14);
+  color: #0f5f3f;
+}
+
+.detail-win-gps {
+  background: rgba(14, 92, 74, 0.18);
+  color: #0a4a3c;
+}
+
+.detail-used {
+  font-weight: 700;
+  color: var(--ink);
 }
 
 @media (max-width: 1100px) {

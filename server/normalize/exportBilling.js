@@ -19,10 +19,81 @@ const STOP_TYPES = Object.freeze([
   ["unloading", "UNLOADING"],
 ]);
 
+/**
+ * Normalisiere Transport-Numbers für Matching.
+ * Excel: "2M_20260715_0006638489" → "0006638489"
+ * Sixfold: "0006638489" → "0006638489"
+ * Diese Funktion extrahiert die LETZTE 10-stellige Nummer.
+ */
+function normalizeTransportNumber(tn) {
+  if (!tn) return "";
+  const str = String(tn).trim();
+  // Suche nach 10-stelligen Nummern am Ende (üblicherweise die Transport-ID)
+  const match = str.match(/(\d{10})$/);
+  return match ? match[1] : str;
+}
+
+function normalizeLicensePlate(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "");
+}
+
 function parseMs(iso) {
   if (!iso) return null;
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? null : ms;
+}
+
+function standingMinutes(arrivalIso, departureIso) {
+  const a = parseMs(arrivalIso);
+  const d = parseMs(departureIso);
+  if (a === null || d === null) return null;
+  return (d - a) / 60000;
+}
+
+function chooseSourcePair({
+  xpArrivalIso,
+  xpDepartureIso,
+  gpsArrivalIso,
+  gpsDepartureIso,
+  gpsAllowed,
+}) {
+  if (!gpsAllowed) {
+    return {
+      arrivalIso: xpArrivalIso,
+      departureIso: xpDepartureIso,
+      source: "XP",
+    };
+  }
+
+  // Kein Mix: GPS nur wenn beide Zeiten vorhanden und als Paar nutzbar.
+  const gpsDuration = standingMinutes(gpsArrivalIso, gpsDepartureIso);
+  const xpDuration = standingMinutes(xpArrivalIso, xpDepartureIso);
+  const gpsComplete = gpsDuration !== null;
+
+  if (!gpsComplete) {
+    return {
+      arrivalIso: xpArrivalIso,
+      departureIso: xpDepartureIso,
+      source: "XP",
+    };
+  }
+
+  if (xpDuration === null || gpsDuration > xpDuration) {
+    return {
+      arrivalIso: gpsArrivalIso,
+      departureIso: gpsDepartureIso,
+      source: "GPS",
+    };
+  }
+
+  return {
+    arrivalIso: xpArrivalIso,
+    departureIso: xpDepartureIso,
+    source: "XP",
+  };
 }
 
 /**
@@ -64,38 +135,98 @@ function chooseDeparture(xpIso, gpsIso) {
  * uebernommen; geschaetzte (DEPART_UNKNOWN) oder 0/0-Faelle bleiben leer.
  *
  * @param {Array<object>} sixfoldStops
+ * @param {object} [options] { debug: boolean }
  * @returns {Map<string, {arrival_iso:string|null, departure_iso:string|null, present:boolean}>}
  *   Key "<transport_number>|LOADING" bzw. "|UNLOADING".
  */
-function buildGpsIndex(sixfoldStops) {
+function buildGpsIndex(sixfoldStops, options = {}) {
   const index = new Map();
+  const debug = Boolean(options.debug);
+  const diagnostics = {
+    total: 0,
+    filtered: 0,
+    zeroCoords: 0,
+    noVerify: 0,
+    matched: 0,
+    licensePlateMatched: 0,
+    licensePlateMissing: 0,
+  };
+
   for (const stop of sixfoldStops || []) {
+    diagnostics.total++;
     const tn = String(stop?.transport_number || "").trim();
     if (!tn) continue;
+    const licensePlate = String(stop?.license_plate || "").trim() || null;
     const type = String(stop?.type || "").toUpperCase();
     const stopType = type === "LOADING" || type === "UNLOADING" ? type : null;
     if (!stopType) continue;
 
     const gps = stop.gps || {};
-    const arrivalIso = gps.arrival_verified ? stop.arrival_time || null : null;
-    const departureIso = gps.departure_verified
-      ? stop.departure_time || null
-      : null;
+    const coords = stop?.position || {};
+    const lat = Number(coords.lat) || 0;
+    const lng = Number(coords.lng) || 0;
+    const hasZeroCoords = lat === 0 && lng === 0;
 
-    const key = `${tn}|${stopType}`;
-    const prev = index.get(key);
-    // Mehrfachbesuch: frueheste Ankunft, spaeteste Abfahrt behalten.
-    const merged = {
-      arrival_iso: prev
-        ? chooseArrival(prev.arrival_iso, arrivalIso).iso
-        : arrivalIso,
-      departure_iso: prev
-        ? chooseDeparture(prev.departure_iso, departureIso).iso
-        : departureIso,
-      present: true,
+    const arrivalVerified = gps.arrival_verified && !hasZeroCoords;
+    const departureVerified = gps.departure_verified && !hasZeroCoords;
+
+    if (hasZeroCoords) diagnostics.zeroCoords++;
+    if (!arrivalVerified && !departureVerified) diagnostics.noVerify++;
+
+    const arrivalIso = arrivalVerified ? stop.arrival_time || null : null;
+    const departureIso = departureVerified ? stop.departure_time || null : null;
+
+    // Nur wenn MINDESTENS eine Zeit verifiziert ist, in den Index.
+    if (!arrivalIso && !departureIso) {
+      diagnostics.filtered++;
+      continue;
+    }
+
+    diagnostics.matched++;
+    if (licensePlate) diagnostics.licensePlateMatched++;
+    else diagnostics.licensePlateMissing++;
+
+    // Bevorzugt wird exaktes Matching ueber die volle Transportnummer.
+    // Fallback ist die normalisierte Endnummer, aber nur wenn eindeutig.
+    const normalizedTn = normalizeTransportNumber(tn);
+    const exactKey = `EXACT:${tn}|${stopType}`;
+    const normKey = `NORM:${normalizedTn}|${stopType}`;
+
+    const mergeEntry = (prev) => {
+      const sourceList = Array.isArray(prev?.source_transport_numbers)
+        ? prev.source_transport_numbers
+        : [];
+      const nextSources = sourceList.includes(tn)
+        ? sourceList
+        : [...sourceList, tn];
+      return {
+        arrival_iso: prev
+          ? chooseArrival(prev.arrival_iso, arrivalIso).iso
+          : arrivalIso,
+        departure_iso: prev
+          ? chooseDeparture(prev.departure_iso, departureIso).iso
+          : departureIso,
+        license_plate: prev?.license_plate || licensePlate,
+        source_transport_numbers: nextSources,
+        ambiguous_match: nextSources.length > 1,
+        present: true,
+      };
     };
-    index.set(key, merged);
+
+    index.set(exactKey, mergeEntry(index.get(exactKey)));
+    index.set(normKey, mergeEntry(index.get(normKey)));
+
+    if (debug && hasZeroCoords) {
+      console.log(
+        `[GPS-DEBUG] 0/0-Koordinaten: ${normKey} (arrival_verified=${arrivalVerified}, departure_verified=${departureVerified})`,
+      );
+    }
   }
+
+  if (debug) {
+    console.log(`[GPS-INDEX] Diagnostik:`, diagnostics);
+  }
+
   return index;
 }
 
@@ -120,21 +251,54 @@ function billFromExport(transports, options = {}) {
       const xpArrivalIso = toUtcIso(stop.arrival_local, tz);
       const xpDepartureIso = toUtcIso(stop.departure_local, tz);
 
-      const gpsEntry = gpsIndex
-        ? gpsIndex.get(`${t.transport_number}|${stopType}`)
-        : null;
-      const gpsAvailable = Boolean(gpsEntry && gpsEntry.present);
-      const gpsArrivalIso = gpsEntry ? gpsEntry.arrival_iso : null;
-      const gpsDepartureIso = gpsEntry ? gpsEntry.departure_iso : null;
+      // GPS-Matching: zuerst exakte Transportnummer, dann normalisiert (nur eindeutig).
+      const exactTn = String(t.transport_number || "").trim();
+      const normalizedTn = normalizeTransportNumber(t.transport_number);
+      let gpsEntry = null;
+      if (gpsIndex) {
+        gpsEntry = gpsIndex.get(`EXACT:${exactTn}|${stopType}`) || null;
+        if (!gpsEntry) {
+          const fallback =
+            gpsIndex.get(`NORM:${normalizedTn}|${stopType}`) || null;
+          gpsEntry = fallback && !fallback.ambiguous_match ? fallback : null;
+        }
+      }
 
-      // Mit GPS: laengere Zeit gewinnt (mehr Standgeld). Ohne GPS: XP-Zeit.
-      const arrival = chooseArrival(xpArrivalIso, gpsArrivalIso);
-      const departure = chooseDeparture(xpDepartureIso, gpsDepartureIso);
+      // GPS ist nur verfügbar wenn:
+      // 1) Sixfold-Eintrag vorhanden
+      // 2) Excel-Kennzeichen vorhanden
+      // 3) Sixfold-Kennzeichen vorhanden
+      // 4) Kennzeichen identisch
+      const excelLicensePlate = (t.vehicle_registration || "").trim() || null;
+      const sixfoldLicensePlate = gpsEntry?.license_plate || null;
+
+      const hasExcelPlate = Boolean(excelLicensePlate);
+      const hasSixfoldPlate = Boolean(sixfoldLicensePlate);
+      const licensePlateValid =
+        hasExcelPlate &&
+        hasSixfoldPlate &&
+        normalizeLicensePlate(sixfoldLicensePlate) ===
+          normalizeLicensePlate(excelLicensePlate);
+
+      const gpsAvailable = Boolean(
+        gpsEntry && gpsEntry.present && licensePlateValid,
+      );
+
+      const gpsArrivalIso = gpsAvailable ? gpsEntry?.arrival_iso : null;
+      const gpsDepartureIso = gpsAvailable ? gpsEntry?.departure_iso : null;
+
+      const selected = chooseSourcePair({
+        xpArrivalIso,
+        xpDepartureIso,
+        gpsArrivalIso,
+        gpsDepartureIso,
+        gpsAllowed: gpsAvailable,
+      });
 
       const fee = computeStandgeld(
         {
-          arrival_time: arrival.iso,
-          departure_time: departure.iso,
+          arrival_time: selected.arrivalIso,
+          departure_time: selected.departureIso,
           window_start: windowIso,
           transport_number: t.transport_number,
           stop_type: stopType,
@@ -149,15 +313,18 @@ function billFromExport(transports, options = {}) {
           arrival_local: stop.arrival_local,
           departure_local: stop.departure_local,
           timezone: tz,
+          excel_license_plate: excelLicensePlate,
+          gps_license_plate: sixfoldLicensePlate,
+          gps_plate_match: licensePlateValid,
           // Wurde ueberhaupt eine GPS-Quelle abgefragt? Sonst "nicht geprueft".
           gps_checked: gpsChecked,
           gps_available: gpsAvailable,
           // "kein GPS" NUR wenn tatsaechlich geprueft und nichts gefunden.
           gps_missing: gpsChecked && !gpsAvailable,
-          arrival_source: arrival.source,
-          departure_source: departure.source,
-          arrival_time_used: arrival.iso,
-          departure_time_used: departure.iso,
+          arrival_source: selected.source,
+          departure_source: selected.source,
+          arrival_time_used: selected.arrivalIso,
+          departure_time_used: selected.departureIso,
           xp_arrival_time: xpArrivalIso,
           xp_departure_time: xpDepartureIso,
           gps_arrival_time: gpsArrivalIso,

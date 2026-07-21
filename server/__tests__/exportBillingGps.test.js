@@ -38,11 +38,12 @@ test("buildGpsIndex: nur verifizierte GPS-Zeiten werden uebernommen", () => {
       type: "loading",
       arrival_time: "2026-07-16T06:00:00.000Z",
       departure_time: "2026-07-16T09:00:00.000Z",
+      position: { lat: 52.5, lng: 13.4 }, // Echte Koordinaten (nicht 0/0)
       gps: { arrival_verified: true, departure_verified: false },
     },
   ];
   const index = buildGpsIndex(stops);
-  const entry = index.get("T1|LOADING");
+  const entry = index.get("EXACT:T1|LOADING");
   assert.ok(entry);
   assert.equal(entry.arrival_iso, "2026-07-16T06:00:00.000Z");
   assert.equal(entry.departure_iso, null); // departure nicht verifiziert
@@ -98,10 +99,11 @@ test("billFromExport mit gpsIndex aber ohne Treffer: gps_missing=true", () => {
   // GPS-Index vorhanden, aber fuer eine ANDERE Transportnummer.
   const gpsIndex = buildGpsIndex([
     {
-      transport_number: "T2",
+      transport_number: "T2", // <- Andere Nummer, daher kein Match
       type: "loading",
       arrival_time: "2026-07-16T06:00:00.000Z",
       departure_time: "2026-07-16T10:00:00.000Z",
+      position: { lat: 52.5, lng: 13.4 }, // Echte Koordinaten
       gps: { arrival_verified: true, departure_verified: true },
     },
   ]);
@@ -113,6 +115,47 @@ test("billFromExport mit gpsIndex aber ohne Treffer: gps_missing=true", () => {
 });
 
 test("billFromExport mit gpsIndex: laengere GPS-Abfahrt gewinnt = mehr Standgeld", () => {
+  const transports = [
+    {
+      transport_number: "T1",
+      vehicle_registration: "B-AB 123",
+      loading: {
+        window_local: "2026-07-16 06:00",
+        arrival_local: "2026-07-16 08:00",
+        departure_local: "2026-07-16 10:00",
+      },
+      unloading: null,
+    },
+  ];
+
+  const gpsIndex = buildGpsIndex([
+    {
+      transport_number: "T1",
+      license_plate: "B AB-123",
+      type: "loading",
+      arrival_time: "2026-07-16T06:00:00.000Z", // 08:00 Berlin (CEST)
+      departure_time: "2026-07-16T10:00:00.000Z", // 12:00 Berlin -> spaeter als XP 10:00
+      position: { lat: 52.5, lng: 13.4 }, // Echte Koordinaten
+      gps: { arrival_verified: true, departure_verified: true },
+    },
+  ]);
+
+  const withoutGps = billFromExport(transports);
+  const withGps = billFromExport(transports, { gpsIndex });
+
+  assert.equal(withGps.stops[0].arrival_source, "GPS");
+  assert.equal(withGps.stops[0].departure_source, "GPS");
+  assert.equal(withGps.stops[0].gps_available, true);
+  assert.equal(withGps.stops[0].gps_missing, false);
+  assert.equal(withGps.stops[0].excel_license_plate, "B-AB 123");
+  assert.equal(withGps.stops[0].gps_license_plate, "B AB-123");
+  assert.equal(withGps.stops[0].gps_plate_match, true);
+  // Spaetere Abfahrt -> hoeheres oder gleiches Standgeld.
+  assert.ok(withGps.stops[0].fee_eur >= withoutGps.stops[0].fee_eur);
+  assert.equal(withGps.summary.gps_used_count, 1);
+});
+
+test("billFromExport mit gpsIndex aber ohne Kennzeichen in Export: nur XP", () => {
   const transports = [
     {
       transport_number: "T1",
@@ -128,20 +171,69 @@ test("billFromExport mit gpsIndex: laengere GPS-Abfahrt gewinnt = mehr Standgeld
   const gpsIndex = buildGpsIndex([
     {
       transport_number: "T1",
+      license_plate: "B-AB 123",
       type: "loading",
-      arrival_time: "2026-07-16T06:00:00.000Z", // 08:00 Berlin (CEST)
-      departure_time: "2026-07-16T10:00:00.000Z", // 12:00 Berlin -> spaeter als XP 10:00
+      arrival_time: "2026-07-16T06:00:00.000Z",
+      departure_time: "2026-07-16T10:00:00.000Z",
+      position: { lat: 52.5, lng: 13.4 },
       gps: { arrival_verified: true, departure_verified: true },
     },
   ]);
 
-  const withoutGps = billFromExport(transports);
-  const withGps = billFromExport(transports, { gpsIndex });
+  const result = billFromExport(transports, { gpsIndex });
+  assert.equal(result.stops[0].arrival_source, "XP");
+  assert.equal(result.stops[0].departure_source, "XP");
+  assert.equal(result.stops[0].gps_available, false);
+  assert.equal(result.summary.gps_used_count, 0);
+});
 
-  assert.equal(withGps.stops[0].departure_source, "GPS");
-  assert.equal(withGps.stops[0].gps_available, true);
-  assert.equal(withGps.stops[0].gps_missing, false);
-  // Spaetere Abfahrt -> hoeheres oder gleiches Standgeld.
-  assert.ok(withGps.stops[0].fee_eur >= withoutGps.stops[0].fee_eur);
-  assert.equal(withGps.summary.gps_used_count, 1);
+test("billFromExport: kein Mix - unvollstaendige GPS-Zeiten erzwingen XP fuer beide", () => {
+  const transports = [
+    {
+      transport_number: "T1",
+      vehicle_registration: "B-AB 123",
+      loading: {
+        window_local: "2026-07-16 06:00",
+        arrival_local: "2026-07-16 08:00",
+        departure_local: "2026-07-16 10:00",
+      },
+      unloading: null,
+    },
+  ];
+
+  const gpsIndex = buildGpsIndex([
+    {
+      transport_number: "T1",
+      license_plate: "B-AB 123",
+      type: "loading",
+      arrival_time: "2026-07-16T06:00:00.000Z",
+      departure_time: null,
+      position: { lat: 52.5, lng: 13.4 },
+      gps: { arrival_verified: true, departure_verified: false },
+    },
+  ]);
+
+  const result = billFromExport(transports, { gpsIndex });
+  assert.equal(result.stops[0].gps_available, true);
+  assert.equal(result.stops[0].arrival_source, "XP");
+  assert.equal(result.stops[0].departure_source, "XP");
+  assert.equal(result.summary.gps_used_count, 0);
+});
+
+test("buildGpsIndex: 0/0-Koordinaten werden gefiltert (keine Fake-GPS) (Nutzer 2026-07-20)", () => {
+  // Test für das echte Problem: 0/0-Koordinaten sind manuelle/gefälschte Einträge.
+  const stops = [
+    {
+      transport_number: "T1",
+      type: "loading",
+      arrival_time: "2026-07-16T06:00:00.000Z",
+      departure_time: "2026-07-16T23:00:00.000Z", // 23h Standzeit
+      position: { lat: 0, lng: 0 }, // 0/0 = FAKE GPS
+      gps: { arrival_verified: true, departure_verified: true },
+    },
+  ];
+  const index = buildGpsIndex(stops);
+  // Mit 0/0-Koordinaten sollte die GPS-Verifikation NICHT greifen.
+  const entry = index.get("EXACT:T1|LOADING");
+  assert.equal(entry, undefined, "0/0-GPS sollte nicht im Index sein");
 });

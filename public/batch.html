@@ -71,6 +71,26 @@
             <strong>längere</strong> Zeit (mehr Standgeld). Stopps ohne GPS
             werden markiert und trotzdem mit den XP-Zeiten abgerechnet.
           </p>
+          <div class="grid grid-3">
+            <label
+              >Von (Entladedatum)
+              <input
+                id="sixfoldDateFrom"
+                type="date"
+                placeholder="2026-07-14"
+              />
+            </label>
+            <label
+              >Bis (Entladedatum)
+              <input id="sixfoldDateTo" type="date" placeholder="2026-07-16" />
+            </label>
+            <label
+              >&nbsp;
+              <button id="applyDateFilter" type="button">
+                Filter anwenden
+              </button>
+            </label>
+          </div>
           <div class="grid grid-2">
             <label
               >Sixfold Fleet-Timeline-Link
@@ -136,6 +156,7 @@
                 <th>Ankunft</th>
                 <th>Abfahrt</th>
                 <th>Quelle</th>
+                <th>KFZ</th>
                 <th>Zählbeginn</th>
                 <th>Standzeit</th>
                 <th>Über frei</th>
@@ -146,6 +167,39 @@
             </thead>
             <tbody id="rows"></tbody>
           </table>
+        </div>
+      </section>
+
+      <section id="stopDetailModal" class="modal" hidden>
+        <div class="modal-card">
+          <div class="modal-head">
+            <h3 id="stopDetailTitle">Tour-Details</h3>
+            <button
+              id="closeStopDetailModalBtn"
+              class="modal-close"
+              type="button"
+            >
+              Schließen
+            </button>
+          </div>
+
+          <div id="stopDetailMeta" class="detail-meta"></div>
+
+          <div class="table-wrap detail-table-wrap">
+            <table class="detail-table">
+              <thead>
+                <tr>
+                  <th>Feld</th>
+                  <th>XP</th>
+                  <th>GPS</th>
+                  <th>Genutzt</th>
+                </tr>
+              </thead>
+              <tbody id="stopDetailRows"></tbody>
+            </table>
+          </div>
+
+          <button id="closeStopDetailModalBtn2" type="button">Schließen</button>
         </div>
       </section>
     </main>
