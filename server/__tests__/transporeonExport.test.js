@@ -9,7 +9,7 @@ const {
   exportToWindowMap,
   exportToEvents,
 } = require("../normalize/transporeonExport");
-const { billFromExport } = require("../normalize/exportBilling");
+const { billFromExport, buildGpsIndex } = require("../normalize/exportBilling");
 const HEADER = [
   "Entladedatum",
   "Transportnr.",
@@ -72,6 +72,32 @@ test("parseTransporeonExport: Transport ohne Entladefenster hat nur Ladestopp", 
   const out = parseTransporeonExport(rows);
   assert.equal(out[0].loading.window_local, "2026-07-17 04:30");
   assert.equal(out[0].unloading, null);
+});
+
+test("parseTransporeonExport: vertauschte erste/zweite Buchung wird korrigiert", () => {
+  const rows = [
+    HEADER,
+    row(
+      "2026-07-13",
+      "2Z_20260713_0006636393",
+      "2026-07-13 01:00",
+      "2026-07-13 06:11",
+      "2026-07-13 06:50",
+      "2026-07-13 02:00",
+      "2026-07-13 03:17",
+      "2026-07-13 04:12",
+    ),
+  ];
+
+  const out = parseTransporeonExport(rows);
+  assert.equal(out.length, 1);
+
+  // Erwartung: Loading ist der fruehere Besuch (03:17 -> 04:12),
+  // Unloading der spaetere Besuch (06:11 -> 06:50).
+  assert.equal(out[0].loading.arrival_local, "2026-07-13 03:17");
+  assert.equal(out[0].loading.departure_local, "2026-07-13 04:12");
+  assert.equal(out[0].unloading.arrival_local, "2026-07-13 06:11");
+  assert.equal(out[0].unloading.departure_local, "2026-07-13 06:50");
 });
 
 test("exportToWindowMap: volle lokale Fensterzeit je Stopp", () => {
@@ -197,4 +223,42 @@ test("billFromExport: fehlende Zeiten -> Prueffall, kein Absturz", () => {
   const { stops } = billFromExport(parseTransporeonExport(rows));
   assert.equal(stops.length, 1);
   assert.equal(stops[0].needs_review, true);
+});
+
+test("billFromExport: bei invertierter Buchung keine Entlade-Abfahrt im Lade-Stopp", () => {
+  const rows = [
+    HEADER,
+    row(
+      "2026-07-13",
+      "2Z_20260713_0006636393",
+      "2026-07-13 01:00",
+      "2026-07-13 06:11",
+      "2026-07-13 06:50",
+      "2026-07-13 02:00",
+      "2026-07-13 03:17",
+      "2026-07-13 04:12",
+    ),
+  ];
+
+  const transports = parseTransporeonExport(rows);
+  const gpsIndex = buildGpsIndex([
+    {
+      transport_number: "2Z_20260713_0006636393",
+      license_plate: "PEBL7030",
+      type: "loading",
+      arrival_time: "2026-07-13T01:04:00.000Z", // 03:04 CEST
+      departure_time: "2026-07-13T02:12:00.000Z", // 04:12 CEST
+      position: { lat: 52.5, lng: 13.4 },
+      gps: { arrival_verified: true, departure_verified: true },
+    },
+  ]);
+
+  const result = billFromExport(transports, { gpsIndex });
+  const loadingStop = result.stops.find((s) => s.stop_type === "LOADING");
+  assert.ok(loadingStop);
+
+  // Kritisch: Lade-Stopp endet NICHT mit 06:50 (spaetere Entlade-Abfahrt),
+  // sondern mit dem Lade-Ende 04:12.
+  assert.equal(loadingStop.departure_local, "2026-07-13 04:12");
+  assert.equal(loadingStop.departure_source, "XP");
 });

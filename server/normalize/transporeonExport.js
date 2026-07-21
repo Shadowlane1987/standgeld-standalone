@@ -95,6 +95,36 @@ function cell(row, index) {
   return String(row[index] ?? "").trim();
 }
 
+function toComparableMs(localDateTime) {
+  const text = String(localDateTime || "").trim();
+  if (!text) return null;
+  const iso = text.replace(" ", "T") + ":00";
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function shouldSwapStops(loading, unloading) {
+  if (!loading || !unloading) return false;
+
+  // Nur bei klarer Voll-Inversion tauschen: beide Endpunkte vorhanden und
+  // Lade-Ankunft/Abfahrt liegen jeweils NACH Entlade-Ankunft/Abfahrt.
+  const loadArr = toComparableMs(loading.arrival_local);
+  const loadDep = toComparableMs(loading.departure_local);
+  const unloadArr = toComparableMs(unloading.arrival_local);
+  const unloadDep = toComparableMs(unloading.departure_local);
+
+  if (
+    loadArr === null ||
+    loadDep === null ||
+    unloadArr === null ||
+    unloadDep === null
+  ) {
+    return false;
+  }
+
+  return loadArr > unloadArr && loadDep > unloadDep;
+}
+
 /**
  * Parst die Export-Rohzeilen (Array-of-Arrays inkl. Kopfzeile).
  *
@@ -126,7 +156,7 @@ function parseTransporeonExport(rows) {
     const unloadArr = cleanDateTime(cell(row, columns.unload_arrival));
     const unloadDep = cleanDateTime(cell(row, columns.unload_departure));
 
-    const loading =
+    let loading =
       loadWin || loadArr || loadDep
         ? {
             window_local: loadWin,
@@ -134,7 +164,7 @@ function parseTransporeonExport(rows) {
             departure_local: loadDep,
           }
         : null;
-    const unloading =
+    let unloading =
       unloadWin || unloadArr || unloadDep
         ? {
             window_local: unloadWin,
@@ -142,6 +172,12 @@ function parseTransporeonExport(rows) {
             departure_local: unloadDep,
           }
         : null;
+
+    if (shouldSwapStops(loading, unloading)) {
+      const tmp = loading;
+      loading = unloading;
+      unloading = tmp;
+    }
 
     out.push(
       Object.freeze({
