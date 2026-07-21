@@ -141,6 +141,8 @@ function openStopDetailModal(stop) {
     standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
       stop.counted_standing_minutes,
   );
+  const countedStanding = minutesToHours(stop.counted_standing_minutes);
+  const freeStanding = minutesToHours(stop.minutes_over_free);
   const windowLocal = stop.window_local || "-";
   const countStartLocal = isoToLocal(stop.count_start);
   const rebookingNote = stop.rebooking_suspected
@@ -148,7 +150,8 @@ function openStopDetailModal(stop) {
     : "";
   el.stopDetailMeta.textContent =
     `Zeitfenster: ${windowLocal} · Zählbeginn: ${countStartLocal} · ` +
-    `Quelle: ${source} · KFZ: ${kfz} · Genutzte Standzeit: ${usedStanding}` +
+    `Quelle: ${source} · KFZ: ${kfz} · Ist-Standzeit: ${usedStanding} · ` +
+    `Ab Zählbeginn: ${countedStanding} · 2h frei: ${freeStanding}` +
     rebookingNote;
 
   const xpArrival = isoToLocal(stop.xp_arrival_time);
@@ -168,7 +171,9 @@ function openStopDetailModal(stop) {
   el.stopDetailRows.innerHTML =
     detailRowHtml("Ankunft", xpArrival, gpsArrival, usedArrival) +
     detailRowHtml("Abfahrt", xpDeparture, gpsDeparture, usedDeparture) +
-    detailRowHtml("Standzeit", xpStanding, gpsStanding, usedStanding);
+    detailRowHtml("Standzeit (Ist)", xpStanding, gpsStanding, usedStanding) +
+    detailRowHtml("Standzeit ab Zählbeginn", "-", "-", countedStanding) +
+    detailRowHtml("2h frei", "-", "-", freeStanding);
 
   el.stopDetailModal.hidden = false;
 }
