@@ -1532,6 +1532,16 @@ app.get("/api/billing/export", async (req, res) => {
       sixfoldDateTo,
     );
 
+    if (filteredTransports.length === 0) {
+      return res.status(400).json({
+        error:
+          "Keine Transporte im vorgegebenen Entlade-Datumsbereich gefunden. Bitte Bereich oder Export pruefen.",
+        summary: {
+          ...filterMeta,
+        },
+      });
+    }
+
     const debug = req.query.debug === "1" || req.query.debug === "true";
     const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(
       req,
@@ -1667,6 +1677,7 @@ app.get("/api/billing/live", async (req, res) => {
       gps: gpsInfo,
       transporeon_live: {
         fetched: true,
+        requested_transport_count: filteredTransports.length,
         available_transport_count: liveResult.availableTransportCount,
         matched_transport_count: liveResult.matchedTransports.length,
         missing_transport_count: liveResult.missingTransportNumbers.length,
@@ -1731,6 +1742,16 @@ app.post(
         sixfoldDateFrom,
         sixfoldDateTo,
       );
+
+      if (filteredTransports.length === 0) {
+        return res.status(400).json({
+          error:
+            "Keine Transporte im vorgegebenen Entlade-Datumsbereich gefunden. Bitte Bereich oder Export pruefen.",
+          summary: {
+            ...filterMeta,
+          },
+        });
+      }
 
       let window = computeTransportsWindow(filteredTransports);
       if (sixfoldDateFrom || sixfoldDateTo) {
@@ -1885,6 +1906,7 @@ app.post(
         gps: gpsInfo,
         transporeon_live: {
           fetched: true,
+          requested_transport_count: filteredTransports.length,
           available_transport_count: liveResult.availableTransportCount,
           matched_transport_count: liveResult.matchedTransports.length,
           missing_transport_count: liveResult.missingTransportNumbers.length,
