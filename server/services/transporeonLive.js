@@ -5,6 +5,7 @@ const { chromium } = require("playwright");
 
 const { parseVisibilityResponse } = require("../normalize/gwtVisibility");
 const { mergeTransportLists } = require("../normalize/gwtTransportList");
+const { normalizeTransportNumber } = require("../normalize/exportBilling");
 
 const PROFILE_DIR = path.join(process.cwd(), ".pw-profile");
 const START_URL =
@@ -276,15 +277,60 @@ async function fetchLiveVisibilityEvents(transportNumbers, options = {}) {
     }
 
     const targetSet = new Set(targets);
-    const matchedTransports = allRows.filter((row) =>
+    const targetNormSet = new Set(
+      targets.map((tn) => normalizeTransportNumber(tn)),
+    );
+
+    const rowsByNorm = new Map();
+    for (const row of allRows) {
+      const norm = normalizeTransportNumber(row.transportNumber);
+      if (!rowsByNorm.has(norm)) rowsByNorm.set(norm, []);
+      rowsByNorm.get(norm).push(row);
+    }
+
+    // 1) Exaktes Matching (bevorzugt)
+    const matchedExact = allRows.filter((row) =>
       targetSet.has(String(row.transportNumber || "").trim()),
     );
+
+    // 2) Fallback ueber normalisierte Endnummer (nur eindeutig)
+    const seenExact = new Set(
+      matchedExact.map((row) => String(row.transportNumber || "").trim()),
+    );
+    const matchedFallback = [];
+    for (const target of targets) {
+      if (seenExact.has(target)) continue;
+      const norm = normalizeTransportNumber(target);
+      if (!targetNormSet.has(norm)) continue;
+      const candidates = rowsByNorm.get(norm) || [];
+      if (candidates.length === 1) matchedFallback.push(candidates[0]);
+    }
+
+    const matchedTransports = Array.from(
+      new Map(
+        [...matchedExact, ...matchedFallback].map((row) => [
+          String(row.transportNumber || "").trim(),
+          row,
+        ]),
+      ).values(),
+    );
+
+    if (!matchedTransports.length) {
+      throw new Error(
+        `Kein Match zwischen Export (${targets.length}) und geoeffneter Transporeon-Liste (${allRows.length}). Bitte in Transporeon denselben Datumsbereich/Liste wie im Export laden.`,
+      );
+    }
+
     const matchedNumbers = new Set(
       matchedTransports.map((row) => String(row.transportNumber || "").trim()),
     );
-    const missingTransportNumbers = targets.filter(
-      (transportNumber) => !matchedNumbers.has(transportNumber),
-    );
+    const missingTransportNumbers = targets.filter((transportNumber) => {
+      if (matchedNumbers.has(transportNumber)) return false;
+      const norm = normalizeTransportNumber(transportNumber);
+      return !matchedTransports.some(
+        (row) => normalizeTransportNumber(row.transportNumber) === norm,
+      );
+    });
     const fetchRows = matchedTransports.filter((row) => row.transportIdB64);
 
     const apiParts = captured.visibility.requestBody.split("|");
