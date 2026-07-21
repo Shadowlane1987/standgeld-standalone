@@ -1625,10 +1625,41 @@ app.get("/api/billing/live", async (req, res) => {
       },
     );
 
+    const allowPartialLive =
+      req.query.allowPartialLive === "1" ||
+      req.query.allowPartialLive === "true";
+
+    if (!allowPartialLive && liveResult.missingTransportNumbers.length > 0) {
+      return res.status(409).json({
+        error:
+          "Live-Abrechnung abgebrochen: Nicht alle Transporte konnten in der geoeffneten Transporeon-Liste gematcht werden.",
+        transporeon_live: {
+          fetched: true,
+          available_transport_count: liveResult.availableTransportCount,
+          matched_transport_count: liveResult.matchedTransports.length,
+          missing_transport_count: liveResult.missingTransportNumbers.length,
+          failure_count: liveResult.failures.length,
+        },
+        missing_transports: liveResult.missingTransportNumbers.slice(0, 50),
+      });
+    }
+
     const result = billFromLiveData(filteredTransports, liveResult.events, {
       config,
       gpsIndex,
     });
+
+    if (!allowPartialLive && result.summary.xp_missing_count > 0) {
+      return res.status(409).json({
+        error:
+          "Live-Abrechnung abgebrochen: Fuer einen Teil der Stopps fehlen XP-Zeiten aus Event Management.",
+        summary: {
+          ...result.summary,
+          ...filterMeta,
+          total_fee_display: formatEuro(result.summary.total_fee_eur),
+        },
+      });
+    }
 
     res.json({
       file: filePath,
@@ -1812,10 +1843,41 @@ app.post(
         },
       );
 
+      const allowPartialLive =
+        req.query.allowPartialLive === "1" ||
+        req.query.allowPartialLive === "true";
+
+      if (!allowPartialLive && liveResult.missingTransportNumbers.length > 0) {
+        return res.status(409).json({
+          error:
+            "Live-Abrechnung abgebrochen: Nicht alle Transporte konnten in der geoeffneten Transporeon-Liste gematcht werden.",
+          transporeon_live: {
+            fetched: true,
+            available_transport_count: liveResult.availableTransportCount,
+            matched_transport_count: liveResult.matchedTransports.length,
+            missing_transport_count: liveResult.missingTransportNumbers.length,
+            failure_count: liveResult.failures.length,
+          },
+          missing_transports: liveResult.missingTransportNumbers.slice(0, 50),
+        });
+      }
+
       const result = billFromLiveData(filteredTransports, liveResult.events, {
         config,
         gpsIndex,
       });
+
+      if (!allowPartialLive && result.summary.xp_missing_count > 0) {
+        return res.status(409).json({
+          error:
+            "Live-Abrechnung abgebrochen: Fuer einen Teil der Stopps fehlen XP-Zeiten aus Event Management.",
+          summary: {
+            ...result.summary,
+            ...filterMeta,
+            total_fee_display: formatEuro(result.summary.total_fee_eur),
+          },
+        });
+      }
 
       res.json({
         file: req.query.name ? String(req.query.name) : "upload.xlsx",
