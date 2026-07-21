@@ -66,7 +66,13 @@ function formatLocalWall(iso, timeZone = DEFAULT_TZ) {
       .map((part) => [part.type, part.value]),
   );
 
-  if (!parts.year || !parts.month || !parts.day || !parts.hour || !parts.minute) {
+  if (
+    !parts.year ||
+    !parts.month ||
+    !parts.day ||
+    !parts.hour ||
+    !parts.minute
+  ) {
     return null;
   }
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
@@ -108,7 +114,9 @@ function buildXpIndex(events) {
     const exactKey = `EXACT:${tn}|${stopType}`;
     const normalizedTn = normalizeTransportNumber(tn);
     const normKey = `NORM:${normalizedTn}|${stopType}`;
-    const mode = isArrivalCategory(event.event_category) ? "arrival" : "departure";
+    const mode = isArrivalCategory(event.event_category)
+      ? "arrival"
+      : "departure";
 
     const merge = (prev) => {
       const next = {
@@ -157,7 +165,11 @@ function billFromLiveData(transports, xpEvents, options = {}) {
       if (!stop) continue;
 
       const windowIso = toUtcIso(stop.window_local, tz);
-      const xpEntry = lookupXpEntry(xpIndex, transport.transport_number, stopType);
+      const xpEntry = lookupXpEntry(
+        xpIndex,
+        transport.transport_number,
+        stopType,
+      );
       const xpArrivalIso = xpEntry?.arrival?.iso || null;
       const xpDepartureIso = xpEntry?.departure?.iso || null;
 
@@ -167,12 +179,14 @@ function billFromLiveData(transports, xpEvents, options = {}) {
       if (gpsIndex) {
         gpsEntry = gpsIndex.get(`EXACT:${exactTn}|${stopType}`) || null;
         if (!gpsEntry) {
-          const fallback = gpsIndex.get(`NORM:${normalizedTn}|${stopType}`) || null;
+          const fallback =
+            gpsIndex.get(`NORM:${normalizedTn}|${stopType}`) || null;
           gpsEntry = fallback && !fallback.ambiguous_match ? fallback : null;
         }
       }
 
-      const excelLicensePlate = (transport.vehicle_registration || "").trim() || null;
+      const excelLicensePlate =
+        (transport.vehicle_registration || "").trim() || null;
       const sixfoldLicensePlate = gpsEntry?.license_plate || null;
       const hasExcelPlate = Boolean(excelLicensePlate);
       const hasSixfoldPlate = Boolean(sixfoldLicensePlate);
@@ -182,7 +196,9 @@ function billFromLiveData(transports, xpEvents, options = {}) {
         normalizeLicensePlate(sixfoldLicensePlate) ===
           normalizeLicensePlate(excelLicensePlate);
 
-      const gpsAvailable = Boolean(gpsEntry && gpsEntry.present && licensePlateValid);
+      const gpsAvailable = Boolean(
+        gpsEntry && gpsEntry.present && licensePlateValid,
+      );
       const gpsArrivalIso = gpsAvailable ? gpsEntry?.arrival_iso : null;
       const gpsDepartureIso = gpsAvailable ? gpsEntry?.departure_iso : null;
 
@@ -207,7 +223,8 @@ function billFromLiveData(transports, xpEvents, options = {}) {
           window_local: stop.window_local,
           arrival_local: xpEntry?.arrival?.local || null,
           departure_local: xpEntry?.departure?.local || null,
-          timezone: xpEntry?.arrival?.timezone || xpEntry?.departure?.timezone || tz,
+          timezone:
+            xpEntry?.arrival?.timezone || xpEntry?.departure?.timezone || tz,
           excel_license_plate: excelLicensePlate,
           gps_license_plate: sixfoldLicensePlate,
           gps_plate_match: licensePlateValid,

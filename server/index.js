@@ -16,9 +16,7 @@ const { classifySixfoldStop } = require("./normalize/sixfoldGps");
 const {
   loadTransporeonExportFromBuffer,
 } = require("./tools/readTransporeonExport");
-const {
-  fetchLiveVisibilityEvents,
-} = require("./services/transporeonLive");
+const { fetchLiveVisibilityEvents } = require("./services/transporeonLive");
 
 dotenv.config();
 
@@ -1616,9 +1614,7 @@ app.get("/api/billing/live", async (req, res) => {
     const liveResult = await fetchLiveVisibilityEvents(
       filteredTransports.map((transport) => transport.transport_number),
       {
-        concurrency: req.query.concurrency
-          ? Number(req.query.concurrency)
-          : 8,
+        concurrency: req.query.concurrency ? Number(req.query.concurrency) : 8,
         headless: req.query.headless === "1" || req.query.headless === "true",
       },
     );

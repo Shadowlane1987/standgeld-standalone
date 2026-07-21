@@ -92,7 +92,13 @@ async function fetchVisibilities(page, api, rows, concurrency) {
   }));
 
   return page.evaluate(
-    async ({ endpoint, moduleBase, strongName, jobs: batch, concurrency: max }) => {
+    async ({
+      endpoint,
+      moduleBase,
+      strongName,
+      jobs: batch,
+      concurrency: max,
+    }) => {
       const results = new Array(batch.length);
       let next = 0;
 
