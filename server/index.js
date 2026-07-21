@@ -5,7 +5,12 @@ const axios = require("axios");
 const dotenv = require("dotenv");
 
 const { loadTransporeonExport } = require("./tools/readTransporeonExport");
-const { billFromExport, buildGpsIndex } = require("./normalize/exportBilling");
+const {
+  billFromExport,
+  buildGpsIndex,
+  normalizeTransportNumber,
+  normalizeLicensePlate,
+} = require("./normalize/exportBilling");
 const { classifySixfoldStop } = require("./normalize/sixfoldGps");
 const {
   loadTransporeonExportFromBuffer,
@@ -1353,6 +1358,56 @@ function filterTransportsByUnloadDate(transports, fromDate, toDate) {
   });
 }
 
+function buildUnloadDateFilterMeta(transports, fromDate, toDate) {
+  const list = Array.isArray(transports) ? transports : [];
+  const hasFilter = Boolean(fromDate || toDate);
+  if (!hasFilter) {
+    return {
+      date_filter_applied: false,
+      date_filter_from: null,
+      date_filter_to: null,
+      input_transport_count: list.length,
+      filtered_transport_count: list.length,
+      excluded_transport_count: 0,
+      excluded_missing_unload_date_count: 0,
+      excluded_outside_date_range_count: 0,
+    };
+  }
+
+  let missingUnloadDate = 0;
+  let outsideRange = 0;
+  for (const t of list) {
+    const unload = t?.unloading || null;
+    const unloadDate =
+      extractLocalDate(unload?.window_local) ||
+      extractLocalDate(unload?.arrival_local) ||
+      extractLocalDate(unload?.departure_local);
+
+    if (!unloadDate) {
+      missingUnloadDate += 1;
+      continue;
+    }
+    if (
+      (fromDate && unloadDate < fromDate) ||
+      (toDate && unloadDate > toDate)
+    ) {
+      outsideRange += 1;
+    }
+  }
+
+  const filtered = filterTransportsByUnloadDate(list, fromDate, toDate);
+  return {
+    date_filter_applied: true,
+    date_filter_from: fromDate || null,
+    date_filter_to: toDate || null,
+    input_transport_count: list.length,
+    filtered_transport_count: filtered.length,
+    excluded_transport_count: Math.max(0, list.length - filtered.length),
+    excluded_missing_unload_date_count: missingUnloadDate,
+    excluded_outside_date_range_count: outsideRange,
+  };
+}
+
 // Optionaler GPS-Abgleich: Sixfold-Link + Token via Header (NICHT als Query,
 // damit keine Zugangsdaten in Server-Logs/History landen). Liefert
 // { gpsIndex, gpsInfo } oder { gpsIndex: null, gpsInfo: null } wenn nichts gesetzt.
@@ -1469,6 +1524,11 @@ app.get("/api/billing/export", async (req, res) => {
       sixfoldDateFrom,
       sixfoldDateTo,
     );
+    const filterMeta = buildUnloadDateFilterMeta(
+      transports,
+      sixfoldDateFrom,
+      sixfoldDateTo,
+    );
 
     const debug = req.query.debug === "1" || req.query.debug === "true";
     const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(
@@ -1485,6 +1545,7 @@ app.get("/api/billing/export", async (req, res) => {
       gps: gpsInfo,
       summary: {
         ...result.summary,
+        ...filterMeta,
         total_fee_display: formatEuro(result.summary.total_fee_eur),
       },
       stops: result.stops,
@@ -1534,6 +1595,11 @@ app.post(
         sixfoldDateFrom,
         sixfoldDateTo,
       );
+      const filterMeta = buildUnloadDateFilterMeta(
+        transports,
+        sixfoldDateFrom,
+        sixfoldDateTo,
+      );
 
       let window = computeTransportsWindow(filteredTransports);
       if (sixfoldDateFrom || sixfoldDateTo) {
@@ -1559,6 +1625,7 @@ app.post(
         gps: gpsInfo,
         summary: {
           ...result.summary,
+          ...filterMeta,
           total_fee_display: formatEuro(result.summary.total_fee_eur),
         },
         stops: result.stops,
@@ -1715,6 +1782,184 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
     res.status(500).json({ error: error.message || "Unbekannter Fehler" });
   }
 });
+
+/**
+ * POST /api/sixfold/selective-match
+ * Selektive Sixfold-Abfrage: Nutzer lädt Excel hoch, System sucht GENAU diese TNs
+ * in Sixfold und vergleicht mit Kennzeichen-Abgleich.
+ *
+ * Request:
+ *   - Body: Raw Excel-Buffer (application/octet-stream)
+ *   - Header: x-sixfold-url, x-sixfold-cookie (oder x-sixfold-token)
+ *
+ * Response:
+ *   - matches: Transporte mit Kennzeichen-Validierung
+ *   - only_in_excel: Nur im Upload vorhanden
+ *   - only_in_sixfold: Nur in Sixfold vorhanden
+ */
+app.post(
+  "/api/sixfold/selective-match",
+  express.raw({
+    type: () => true,
+    limit: "25mb",
+  }),
+  async (req, res) => {
+    try {
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "Keine Datei empfangen (leerer Body)." });
+      }
+
+      // Sixfold Credentials
+      const sixfoldUrl = String(req.get("x-sixfold-url") || "").trim();
+      const sixfoldCookieRaw = String(req.get("x-sixfold-cookie") || "").trim();
+      const sixfoldToken = String(req.get("x-sixfold-token") || "").trim();
+
+      if (!sixfoldUrl || !(sixfoldCookieRaw || sixfoldToken)) {
+        return res.status(400).json({
+          error:
+            "Sixfold Credentials erforderlich: x-sixfold-url und x-sixfold-cookie/token",
+        });
+      }
+
+      const sessionCookie = sixfoldCookieRaw
+        ? sixfoldCookieRaw
+        : `sessionToken=${sixfoldToken}; sixfold_lng=de`;
+
+      // 1. TNs aus Excel extrahieren
+      const excelTransports = loadTransporeonExportFromBuffer(buffer);
+      const excelTnMap = new Map(); // TN -> Excel-Transport
+      const excelTnSet = new Set();
+
+      for (const t of excelTransports) {
+        const tn = normalizeTransportNumber(t.transport_number);
+        if (tn) {
+          excelTnSet.add(tn);
+          if (!excelTnMap.has(tn)) {
+            excelTnMap.set(tn, t);
+          }
+        }
+      }
+
+      if (excelTnSet.size === 0) {
+        return res.status(400).json({
+          error: "Keine Transport-Nummern in der Excel-Datei gefunden",
+        });
+      }
+
+      // 2. Sixfold Stopps laden (ALLE, dann filtern)
+      const sixfoldStops = await fetchSixfoldGpsSimple(
+        sixfoldUrl,
+        sessionCookie,
+        {},
+      );
+
+      // 3. Auf Excel-TNs filtern
+      const sixfoldTnMap = new Map(); // TN -> Sixfold-Stop (nimm den ersten)
+      const sixfoldTnSet = new Set();
+
+      for (const stop of sixfoldStops) {
+        const tn = normalizeTransportNumber(stop.transport_number);
+        if (tn && excelTnSet.has(tn)) {
+          sixfoldTnSet.add(tn);
+          if (!sixfoldTnMap.has(tn)) {
+            sixfoldTnMap.set(tn, stop);
+          }
+        }
+      }
+
+      // 4. Kennzeichen-Abgleich mit Regel anwenden:
+      //    - Excel-Kennzeichen vorhanden
+      //    - Sixfold-Kennzeichen vorhanden
+      //    - Kennzeichen identisch (normalisiert)
+      const matches = [];
+      const onlyInExcel = [];
+      const onlyInSixfold = [];
+
+      // Für alle Excel-TNs prüfen
+      for (const tn of excelTnSet) {
+        const excelT = excelTnMap.get(tn);
+        const sixfoldStop = sixfoldTnMap.get(tn);
+        const excelPlate = (excelT?.vehicle_registration || "").trim() || null;
+
+        if (sixfoldStop) {
+          // Found in both
+          const sixfoldPlate =
+            String(sixfoldStop.license_plate || "").trim() || null;
+
+          const hasExcelPlate = Boolean(excelPlate);
+          const hasSixfoldPlate = Boolean(sixfoldPlate);
+
+          let plateValidationStatus = "no_match"; // Fallback
+          if (!hasExcelPlate && !hasSixfoldPlate) {
+            plateValidationStatus = "no_plates";
+          } else if (!hasExcelPlate) {
+            plateValidationStatus = "missing_excel_plate";
+          } else if (!hasSixfoldPlate) {
+            plateValidationStatus = "missing_sixfold_plate";
+          } else {
+            // Both have plates
+            const excelNorm = normalizeLicensePlate(excelPlate);
+            const sixfoldNorm = normalizeLicensePlate(sixfoldPlate);
+            plateValidationStatus =
+              excelNorm === sixfoldNorm ? "match" : "mismatch";
+          }
+
+          matches.push({
+            transport_number: tn,
+            excel_plate: excelPlate,
+            sixfold_plate: sixfoldPlate,
+            plate_validation: plateValidationStatus,
+            usable_for_comparison: true, // Wenn TNs stimmt, IMMER nutzbar (mismatch -> nur XP)
+          });
+        } else {
+          // Only in Excel
+          onlyInExcel.push({
+            transport_number: tn,
+            excel_plate: excelPlate,
+          });
+        }
+      }
+
+      // Sixfold-TNs die nicht in Excel sind
+      for (const tn of sixfoldTnSet) {
+        if (!excelTnSet.has(tn)) {
+          const sixfoldStop = sixfoldTnMap.get(tn);
+          const sixfoldPlate =
+            String(sixfoldStop.license_plate || "").trim() || null;
+          onlyInSixfold.push({
+            transport_number: tn,
+            sixfold_plate: sixfoldPlate,
+          });
+        }
+      }
+
+      res.json({
+        generated_at: new Date().toISOString(),
+        summary: {
+          total_excel: excelTnSet.size,
+          total_sixfold_filtered: sixfoldTnSet.size,
+          matched_count: matches.length,
+          only_in_excel_count: onlyInExcel.length,
+          only_in_sixfold_count: onlyInSixfold.length,
+          plate_matches_count: matches.filter(
+            (m) => m.plate_validation === "match",
+          ).length,
+          plate_mismatches_count: matches.filter(
+            (m) => m.plate_validation === "mismatch",
+          ).length,
+        },
+        matches,
+        only_in_excel: onlyInExcel,
+        only_in_sixfold: onlyInSixfold,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message || "Unbekannter Fehler" });
+    }
+  },
+);
 
 app.listen(PORT, () => {
   console.log(`Standgeld Standalone läuft auf http://localhost:${PORT}`);

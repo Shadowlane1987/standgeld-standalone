@@ -21,97 +21,92 @@
       <section class="panel">
         <div class="grid grid-5">
           <label
-            >Frei (Min)
-            <input id="freeMinutes" type="number" value="120" min="0" />
-          </label>
+            >Frei (Min)<input
+              id="freeMinutes"
+              type="number"
+              value="120"
+              min="0"
+          /></label>
           <label
-            >Takt (Min)
-            <input id="blockMinutes" type="number" value="30" min="1" />
-          </label>
+            >Takt (Min)<input
+              id="blockMinutes"
+              type="number"
+              value="30"
+              min="1"
+          /></label>
           <label
-            >Preis je Takt (€)
-            <input
+            >Preis je Takt (€)<input
               id="blockRateEur"
               type="number"
               value="30"
               min="0"
               step="0.01"
-            />
-          </label>
+          /></label>
           <label
-            >Auslöser (Min)
-            <input id="triggerMinutes" type="number" value="10" min="0" />
-          </label>
+            >Auslöser (Min)<input
+              id="triggerMinutes"
+              type="number"
+              value="10"
+              min="0"
+          /></label>
           <label
-            >&nbsp;
-            <button id="loadBtn" type="button">Alle Transporte laden</button>
-          </label>
+            >&nbsp;<button id="loadBtn" type="button">
+              Alle Transporte laden
+            </button></label
+          >
         </div>
         <div class="grid grid-5">
           <label class="upload-label"
-            >Excel-Export hochladen
-            <input
+            >Excel-Export hochladen<input
               id="fileInput"
               type="file"
               accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            />
-          </label>
+          /></label>
           <label
-            >&nbsp;
-            <button id="uploadBtn" type="button" disabled>
-              Hochladen & abrechnen
-            </button>
-          </label>
+            >Sixfold Fleet-Timeline-Link<input
+              id="sixfoldUrl"
+              type="url"
+              placeholder="https://app.sixfold.com/companies/…/fleet/all/timeline"
+          /></label>
+          <label
+            >Session-Token<input
+              id="sixfoldToken"
+              type="password"
+              autocomplete="off"
+              placeholder="sessionToken-Wert"
+          /></label>
+          <label
+            >&nbsp;<button id="uploadBtn" type="button" disabled>
+              Abrechnen
+            </button></label
+          >
+          <label
+            >&nbsp;<button id="selectiveSearchBtn" type="button" disabled>
+              Suchen & Abgleichen
+            </button></label
+          >
         </div>
-        <details class="sixfold-box">
-          <summary>Optional: GPS-Abgleich über Sixfold</summary>
-          <p class="status">
-            Wenn hinterlegt, zieht die App die GPS-Zeiten und nimmt pro Stopp
-            die
-            <strong>längere</strong> Zeit (mehr Standgeld). Stopps ohne GPS
-            werden markiert und trotzdem mit den XP-Zeiten abgerechnet.
-          </p>
-          <div class="grid grid-3">
-            <label
-              >Von (Entladedatum)
-              <input
-                id="sixfoldDateFrom"
-                type="date"
-                placeholder="2026-07-14"
-              />
-            </label>
-            <label
-              >Bis (Entladedatum)
-              <input id="sixfoldDateTo" type="date" placeholder="2026-07-16" />
-            </label>
-            <label
-              >&nbsp;
-              <button id="applyDateFilter" type="button">
-                Filter anwenden
-              </button>
-            </label>
-          </div>
-          <div class="grid grid-2">
-            <label
-              >Sixfold Fleet-Timeline-Link
-              <input
-                id="sixfoldUrl"
-                type="url"
-                placeholder="https://app.sixfold.com/companies/…/fleet/all/timeline"
-              />
-            </label>
-            <label
-              >Session-Token
-              <input
-                id="sixfoldToken"
-                type="password"
-                autocomplete="off"
-                placeholder="sessionToken-Wert"
-              />
-            </label>
-          </div>
-        </details>
         <p id="status" class="status">Bereit.</p>
+      </section>
+
+      <!-- Selective Search Results -->
+      <section class="panel" id="selectivePanel" hidden>
+        <h2>Sixfold-Abgleich</h2>
+        <p id="selectiveStatus" class="status"></p>
+        <div id="selectiveResult" class="table-wrap" hidden>
+          <table id="selectiveTable">
+            <thead>
+              <tr>
+                <th>Transport-Nr</th>
+                <th>Excel Kfz</th>
+                <th>Sixfold Kfz</th>
+                <th>Kennzeichen-Status</th>
+                <th>Abrechenbar?</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel" id="resultPanel" hidden>

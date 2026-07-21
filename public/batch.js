@@ -10,9 +10,11 @@ const el = {
   uploadBtn: document.getElementById("uploadBtn"),
   sixfoldUrl: document.getElementById("sixfoldUrl"),
   sixfoldToken: document.getElementById("sixfoldToken"),
-  sixfoldDateFrom: document.getElementById("sixfoldDateFrom"),
-  sixfoldDateTo: document.getElementById("sixfoldDateTo"),
-  applyDateFilter: document.getElementById("applyDateFilter"),
+  selectiveSearchBtn: document.getElementById("selectiveSearchBtn"),
+  selectivePanel: document.getElementById("selectivePanel"),
+  selectiveResult: document.getElementById("selectiveResult"),
+  selectiveTable: document.getElementById("selectiveTable"),
+  selectiveStatus: document.getElementById("selectiveStatus"),
   status: document.getElementById("status"),
   resultPanel: document.getElementById("resultPanel"),
   transportCount: document.getElementById("transportCount"),
@@ -139,7 +141,15 @@ function openStopDetailModal(stop) {
     standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
       stop.counted_standing_minutes,
   );
-  el.stopDetailMeta.textContent = `Quelle: ${source} · KFZ: ${kfz} · Genutzte Standzeit: ${usedStanding}`;
+  const windowLocal = stop.window_local || "-";
+  const countStartLocal = isoToLocal(stop.count_start);
+  const rebookingNote = stop.rebooking_suspected
+    ? " · ⚠ Umbuchung/Pause erkannt: gezählt ab GPS-Ankunft (Prüffall)"
+    : "";
+  el.stopDetailMeta.textContent =
+    `Zeitfenster: ${windowLocal} · Zählbeginn: ${countStartLocal} · ` +
+    `Quelle: ${source} · KFZ: ${kfz} · Genutzte Standzeit: ${usedStanding}` +
+    rebookingNote;
 
   const xpArrival = isoToLocal(stop.xp_arrival_time);
   const xpDeparture = isoToLocal(stop.xp_departure_time);
@@ -274,8 +284,15 @@ function applyResult(data) {
   const gpsNote = gpsChecked
     ? ` · GPS geprüft (${data.summary.gps_used_count} mit GPS)`
     : " · ohne GPS-Abgleich";
+  const filterNote = data.summary.date_filter_applied
+    ? ` · Datumsfilter: ${data.summary.filtered_transport_count}/${data.summary.input_transport_count} Transporte (ausgeschlossen: ${data.summary.excluded_transport_count})`
+    : "";
+  const mixNote =
+    typeof data.summary.mixed_source_count === "number"
+      ? ` · Mix-Stopps: ${data.summary.mixed_source_count}`
+      : "";
   setStatus(
-    `${data.summary.transport_count} Transporte · ${data.summary.stop_count} Positionen${gpsNote}.`,
+    `${data.summary.transport_count} Transporte · ${data.summary.stop_count} Positionen${gpsNote}${filterNote}${mixNote}.`,
     "success",
   );
 }
@@ -291,13 +308,8 @@ function sixfoldHeaders() {
 }
 
 function sixfoldParams() {
-  // Füge Datums-Filter als Query-Parameter hinzu (für Sixfold-API)
-  const params = new URLSearchParams();
-  const dateFrom = (el.sixfoldDateFrom.value || "").trim();
-  const dateTo = (el.sixfoldDateTo.value || "").trim();
-  if (dateFrom) params.set("sixfoldDateFrom", dateFrom);
-  if (dateTo) params.set("sixfoldDateTo", dateTo);
-  return params.toString() ? `&${params.toString()}` : "";
+  // Keine Datums-Filter mehr (Filterung erfolgt in Transporeon)
+  return "";
 }
 
 async function load() {
@@ -361,11 +373,137 @@ async function upload() {
   }
 }
 
+async function selectiveSearch() {
+  const file = el.fileInput.files && el.fileInput.files[0];
+  if (!file) {
+    el.selectiveStatus.textContent = "Bitte zuerst eine Excel-Datei auswählen.";
+    el.selectiveStatus.style.color = "#b91c1c";
+    return;
+  }
+
+  const gps = sixfoldHeaders();
+  if (!gps["x-sixfold-url"] || !gps["x-sixfold-token"]) {
+    el.selectiveStatus.textContent =
+      "Bitte Sixfold Fleet-Timeline-Link und Session-Token hinterlegen.";
+    el.selectiveStatus.style.color = "#b91c1c";
+    return;
+  }
+
+  el.selectiveStatus.textContent = `Suche „${file.name}" in Sixfold und gleiche ab …`;
+  el.selectiveStatus.style.color = "#73675a";
+  el.selectiveSearchBtn.disabled = true;
+
+  try {
+    const headers = { "Content-Type": "application/octet-stream", ...gps };
+    const res = await fetch("/api/sixfold/selective-match", {
+      method: "POST",
+      headers,
+      body: file,
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    renderSelectiveResult(data);
+  } catch (error) {
+    el.selectiveStatus.textContent = `Fehler: ${error.message || "Abfrage fehlgeschlagen"}`;
+    el.selectiveStatus.style.color = "#b91c1c";
+  } finally {
+    el.selectiveSearchBtn.disabled = false;
+  }
+}
+
+function renderSelectiveResult(data) {
+  const summary = data.summary || {};
+  const matches = data.matches || [];
+  const onlyInExcel = data.only_in_excel || [];
+  const onlyInSixfold = data.only_in_sixfold || [];
+
+  // Status-Text
+  const statusText = `
+    ✓ ${summary.matched_count || 0} Abgleiche · 
+    ${summary.plate_matches_count || 0} Kennzeichen-Match · 
+    ${summary.plate_mismatches_count || 0} Kennzeichen-Mismatch · 
+    ∘ ${onlyInExcel.length} Nur Excel · 
+    ∘ ${onlyInSixfold.length} Nur Sixfold
+  `;
+  el.selectiveStatus.textContent = statusText;
+  el.selectiveStatus.style.color = "#166534";
+
+  // Tabelle rendern
+  const tbody = el.selectiveTable.querySelector("tbody");
+  tbody.innerHTML = "";
+
+  for (const match of matches) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td><code>${match.transport_number}</code></td>
+      <td>${match.excel_plate || "—"}</td>
+      <td>${match.sixfold_plate || "—"}</td>
+      <td>
+        <span style="font-size: 0.85em; padding: 2px 6px; border-radius: 3px; ${
+          match.plate_validation === "match"
+            ? "background: #dcfce7; color: #166534;"
+            : match.plate_validation === "mismatch"
+              ? "background: #fecaca; color: #991b1b;"
+              : "background: #f3f4f6; color: #4b5563;"
+        }">
+          ${
+            match.plate_validation === "match"
+              ? "✓ Match"
+              : match.plate_validation === "mismatch"
+                ? "✗ Mismatch"
+                : match.plate_validation === "no_plates"
+                  ? "◯ Keine Kennzeichen"
+                  : match.plate_validation
+          }
+        </span>
+      </td>
+      <td>${match.usable_for_comparison ? "✓ Ja (XP)" : "✗ Nein"}</td>
+    `;
+    tbody.appendChild(row);
+  }
+
+  // Nur-in-Excel
+  for (const item of onlyInExcel) {
+    const row = document.createElement("tr");
+    row.style.opacity = "0.6";
+    row.innerHTML = `
+      <td><code>${item.transport_number}</code></td>
+      <td>${item.excel_plate || "—"}</td>
+      <td>—</td>
+      <td><span style="color: #666;">Nur Excel</span></td>
+      <td>—</td>
+    `;
+    tbody.appendChild(row);
+  }
+
+  // Nur-in-Sixfold
+  for (const item of onlyInSixfold) {
+    const row = document.createElement("tr");
+    row.style.opacity = "0.6";
+    row.innerHTML = `
+      <td><code>${item.transport_number}</code></td>
+      <td>—</td>
+      <td>${item.sixfold_plate || "—"}</td>
+      <td><span style="color: #666;">Nur Sixfold</span></td>
+      <td>—</td>
+    `;
+    tbody.appendChild(row);
+  }
+
+  el.selectivePanel.hidden = false;
+  el.selectiveResult.hidden = false;
+}
+
 el.loadBtn.addEventListener("click", load);
 el.uploadBtn.addEventListener("click", upload);
 el.fileInput.addEventListener("change", () => {
-  el.uploadBtn.disabled = !(el.fileInput.files && el.fileInput.files.length);
+  const hasFile = el.fileInput.files && el.fileInput.files.length;
+  el.uploadBtn.disabled = !hasFile;
+  el.selectiveSearchBtn.disabled = !hasFile;
 });
+el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
 el.filterMode.addEventListener("change", render);
 if (el.closeStopDetailModalBtn) {
   el.closeStopDetailModalBtn.addEventListener("click", closeStopDetailModal);

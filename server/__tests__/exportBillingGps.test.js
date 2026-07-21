@@ -143,7 +143,9 @@ test("billFromExport mit gpsIndex: laengere GPS-Abfahrt gewinnt = mehr Standgeld
   const withoutGps = billFromExport(transports);
   const withGps = billFromExport(transports, { gpsIndex });
 
-  assert.equal(withGps.stops[0].arrival_source, "GPS");
+  // Ankunft ist bei XP und GPS gleich (08:00) -> XP gewinnt bei Gleichstand.
+  assert.equal(withGps.stops[0].arrival_source, "XP");
+  // Abfahrt: GPS 12:00 ist spaeter als XP 10:00 -> GPS gewinnt.
   assert.equal(withGps.stops[0].departure_source, "GPS");
   assert.equal(withGps.stops[0].gps_available, true);
   assert.equal(withGps.stops[0].gps_missing, false);
@@ -187,15 +189,17 @@ test("billFromExport mit gpsIndex aber ohne Kennzeichen in Export: nur XP", () =
   assert.equal(result.summary.gps_used_count, 0);
 });
 
-test("billFromExport: kein Mix - unvollstaendige GPS-Zeiten erzwingen XP fuer beide", () => {
+test("billFromExport: Mix - fruehe GPS-Ankunft + spaete XP-Abfahrt (Pause/Mehrfachbesuch)", () => {
+  // Realfall: LKW kommt frueh an (GPS), macht Pause, faehrt erst nach der
+  // Ruhezeit endgueltig ab (XP). Ankunft = frueheste, Abfahrt = spaeteste.
   const transports = [
     {
       transport_number: "T1",
       vehicle_registration: "B-AB 123",
       loading: {
         window_local: "2026-07-16 06:00",
-        arrival_local: "2026-07-16 08:00",
-        departure_local: "2026-07-16 10:00",
+        arrival_local: "2026-07-16 15:00",
+        departure_local: "2026-07-16 18:00",
       },
       unloading: null,
     },
@@ -206,18 +210,20 @@ test("billFromExport: kein Mix - unvollstaendige GPS-Zeiten erzwingen XP fuer be
       transport_number: "T1",
       license_plate: "B-AB 123",
       type: "loading",
-      arrival_time: "2026-07-16T06:00:00.000Z",
-      departure_time: null,
+      arrival_time: "2026-07-16T05:00:00.000Z", // 07:00 Berlin -> viel frueher als XP 15:00
+      departure_time: "2026-07-16T06:00:00.000Z", // 08:00 Berlin -> nur Pausenbeginn, frueher als XP 18:00
       position: { lat: 52.5, lng: 13.4 },
-      gps: { arrival_verified: true, departure_verified: false },
+      gps: { arrival_verified: true, departure_verified: true },
     },
   ]);
 
   const result = billFromExport(transports, { gpsIndex });
   assert.equal(result.stops[0].gps_available, true);
-  assert.equal(result.stops[0].arrival_source, "XP");
+  // Ankunft: GPS 07:00 Berlin ist frueher als XP 15:00 -> GPS gewinnt.
+  assert.equal(result.stops[0].arrival_source, "GPS");
+  // Abfahrt: XP 18:00 ist spaeter als GPS 08:00 -> XP gewinnt.
   assert.equal(result.stops[0].departure_source, "XP");
-  assert.equal(result.summary.gps_used_count, 0);
+  assert.equal(result.summary.gps_used_count, 1);
 });
 
 test("buildGpsIndex: 0/0-Koordinaten werden gefiltert (keine Fake-GPS) (Nutzer 2026-07-20)", () => {

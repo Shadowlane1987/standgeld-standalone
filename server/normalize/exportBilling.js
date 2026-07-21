@@ -53,53 +53,6 @@ function standingMinutes(arrivalIso, departureIso) {
   return (d - a) / 60000;
 }
 
-function chooseSourcePair({
-  xpArrivalIso,
-  xpDepartureIso,
-  gpsArrivalIso,
-  gpsDepartureIso,
-  gpsAllowed,
-}) {
-  if (!gpsAllowed) {
-    return {
-      arrivalIso: xpArrivalIso,
-      departureIso: xpDepartureIso,
-      source: "XP",
-    };
-  }
-
-  // Kein Mix: GPS nur wenn beide Zeiten vorhanden und als Paar nutzbar.
-  const gpsDuration = standingMinutes(gpsArrivalIso, gpsDepartureIso);
-  const xpDuration = standingMinutes(xpArrivalIso, xpDepartureIso);
-  const gpsComplete = gpsDuration !== null;
-
-  if (!gpsComplete) {
-    return {
-      arrivalIso: xpArrivalIso,
-      departureIso: xpDepartureIso,
-      source: "XP",
-    };
-  }
-
-  if (xpDuration === null || gpsDuration > xpDuration) {
-    return {
-      arrivalIso: gpsArrivalIso,
-      departureIso: gpsDepartureIso,
-      source: "GPS",
-    };
-  }
-
-  return {
-    arrivalIso: xpArrivalIso,
-    departureIso: xpDepartureIso,
-    source: "XP",
-  };
-}
-
-/**
- * Ankunft: die FRUEHERE der beiden Zeiten ergibt die laengere Standzeit.
- * Nur echte Zeiten werden verglichen; fehlt eine, gewinnt die andere.
- */
 function chooseArrival(xpIso, gpsIso) {
   const x = parseMs(xpIso);
   const g = parseMs(gpsIso);
@@ -115,6 +68,7 @@ function chooseArrival(xpIso, gpsIso) {
 
 /**
  * Abfahrt: die SPAETERE der beiden Zeiten ergibt die laengere Standzeit.
+ * Nur echte Zeiten werden verglichen; fehlt eine, gewinnt die andere.
  */
 function chooseDeparture(xpIso, gpsIso) {
   const x = parseMs(xpIso);
@@ -268,7 +222,10 @@ function billFromExport(transports, options = {}) {
       // 1) Sixfold-Eintrag vorhanden
       // 2) Excel-Kennzeichen vorhanden
       // 3) Sixfold-Kennzeichen vorhanden
-      // 4) Kennzeichen identisch
+      // 4) Kennzeichen identisch (normalisiert)
+      //
+      // WICHTIG: Wenn TN stimmt aber Kennzeichen NICHT -> trotzdem abrechnen mit XP-Zeiten!
+      // (chooseArrival/chooseDeparture nehmen automatisch XP wenn kein GPS verfuegbar)
       const excelLicensePlate = (t.vehicle_registration || "").trim() || null;
       const sixfoldLicensePlate = gpsEntry?.license_plate || null;
 
@@ -287,21 +244,24 @@ function billFromExport(transports, options = {}) {
       const gpsArrivalIso = gpsAvailable ? gpsEntry?.arrival_iso : null;
       const gpsDepartureIso = gpsAvailable ? gpsEntry?.departure_iso : null;
 
-      const selected = chooseSourcePair({
-        xpArrivalIso,
-        xpDepartureIso,
-        gpsArrivalIso,
-        gpsDepartureIso,
-        gpsAllowed: gpsAvailable,
-      });
+      // Pro Grenze die laengere Standzeit waehlen (dokumentierte Nutzer-Regel):
+      // Ankunft = FRUEHESTE aus {XP, verifiziertes GPS}
+      // Abfahrt = SPAETESTE aus {XP, verifiziertes GPS}
+      // So wird der echte Standzeit-Zeitraum erfasst, auch bei Mehrfachbesuch/
+      // Pause (z.B. GPS-Ankunft frueh, XP-Abfahrt spaet nach der Ruhezeit).
+      const arrivalChoice = chooseArrival(xpArrivalIso, gpsArrivalIso);
+      const departureChoice = chooseDeparture(xpDepartureIso, gpsDepartureIso);
 
       const fee = computeStandgeld(
         {
-          arrival_time: selected.arrivalIso,
-          departure_time: selected.departureIso,
+          arrival_time: arrivalChoice.iso,
+          departure_time: departureChoice.iso,
           window_start: windowIso,
           transport_number: t.transport_number,
           stop_type: stopType,
+          // Signalisiert der Regel-Engine, dass die verwendete Ankunft GPS-belegt
+          // ist -> ermoeglicht den Umbuchungs-/Pausefall (ab GPS-Ankunft zaehlen).
+          arrival_gps_verified: arrivalChoice.source === "GPS",
         },
         config,
       );
@@ -321,10 +281,10 @@ function billFromExport(transports, options = {}) {
           gps_available: gpsAvailable,
           // "kein GPS" NUR wenn tatsaechlich geprueft und nichts gefunden.
           gps_missing: gpsChecked && !gpsAvailable,
-          arrival_source: selected.source,
-          departure_source: selected.source,
-          arrival_time_used: selected.arrivalIso,
-          departure_time_used: selected.departureIso,
+          arrival_source: arrivalChoice.source,
+          departure_source: departureChoice.source,
+          arrival_time_used: arrivalChoice.iso,
+          departure_time_used: departureChoice.iso,
           xp_arrival_time: xpArrivalIso,
           xp_departure_time: xpDepartureIso,
           gps_arrival_time: gpsArrivalIso,
@@ -339,7 +299,16 @@ function billFromExport(transports, options = {}) {
   const gpsUsed = stops.filter(
     (s) => s.arrival_source === "GPS" || s.departure_source === "GPS",
   );
+  const gpsUsedTransportCount = new Set(
+    gpsUsed.map((s) => String(s.transport_number || "").trim()).filter(Boolean),
+  ).size;
+  const mixedSourceCount = stops.filter(
+    (s) => s.arrival_source !== s.departure_source,
+  ).length;
   const gpsMissing = stops.filter((s) => s.gps_missing);
+  const rebookingSuspectedCount = stops.filter(
+    (s) => s.rebooking_suspected,
+  ).length;
   const totalFee = stops.reduce((sum, s) => sum + (s.fee_eur || 0), 0);
 
   return {
@@ -351,7 +320,10 @@ function billFromExport(transports, options = {}) {
       review_count: review.length,
       gps_checked: gpsChecked,
       gps_used_count: gpsUsed.length,
+      gps_used_transport_count: gpsUsedTransportCount,
       gps_missing_count: gpsMissing.length,
+      mixed_source_count: mixedSourceCount,
+      rebooking_suspected_count: rebookingSuspectedCount,
       total_fee_eur: totalFee,
     },
   };
@@ -362,4 +334,6 @@ module.exports = {
   buildGpsIndex,
   chooseArrival,
   chooseDeparture,
+  normalizeTransportNumber,
+  normalizeLicensePlate,
 };

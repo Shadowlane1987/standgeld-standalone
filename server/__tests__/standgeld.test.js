@@ -204,3 +204,49 @@ test("Standzeit > 12h mit Ruhezeit ergibt niedrige Gebühr (nicht 650 EUR Deckel
   assert.equal(r.fee_capped, false); // Nicht gedeckelt (weit unter 650)
   assert.equal(r.chargeable, true);
 });
+
+test("Umbuchung/Pause: GPS-Ankunft weit vor Fenster -> ab Ankunft zaehlen + Prueffall", () => {
+  // Fenster 06:00 (umgebucht), GPS-Ankunft 4h frueher (02:00), Abfahrt 09:00.
+  // Ohne Sonderregel wuerde ab 06:00 gezaehlt (3h). Mit GPS-Beleg ab 02:00 (7h).
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T02:00:00.000Z",
+      departure_time: "2026-07-16T09:00:00.000Z",
+      arrival_gps_verified: true,
+    }),
+  );
+  assert.equal(r.rebooking_suspected, true);
+  assert.equal(r.count_start, "2026-07-16T02:00:00.000Z");
+  assert.equal(r.counted_standing_minutes, 420); // 7h ab echter Ankunft
+  assert.equal(r.needs_review, true); // Prueffall
+  assert.equal(r.chargeable, true);
+});
+
+test("Umbuchung/Pause: OHNE GPS bleibt es beim Fenster (konservativ)", () => {
+  // Gleiche Zeiten, aber arrival_gps_verified nicht gesetzt -> normale Frueh-
+  // ankunft-Regel: ab Fenster 06:00 zaehlen, kein Prueffall.
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T02:00:00.000Z",
+      departure_time: "2026-07-16T09:00:00.000Z",
+    }),
+  );
+  assert.equal(r.rebooking_suspected, false);
+  assert.equal(r.count_start, "2026-07-16T06:00:00.000Z");
+  assert.equal(r.counted_standing_minutes, 180); // 3h ab Fenster
+});
+
+test("Umbuchung/Pause: GPS-Ankunft nur knapp vor Fenster (unter Schwelle) -> Fenster", () => {
+  // GPS-Ankunft nur 1h vor Fenster (< 3h Schwelle) -> normale Fruehankunft, kein
+  // Umbuchungsfall. Ab Fenster zaehlen.
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T05:00:00.000Z",
+      departure_time: "2026-07-16T09:00:00.000Z",
+      arrival_gps_verified: true,
+    }),
+  );
+  assert.equal(r.rebooking_suspected, false);
+  assert.equal(r.count_start, "2026-07-16T06:00:00.000Z");
+  assert.equal(r.counted_standing_minutes, 180);
+});

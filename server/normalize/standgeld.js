@@ -32,6 +32,7 @@ const DEFAULT_CONFIG = Object.freeze({
   blockRateEur: 30, // 30 EUR je angefangenem Block
   maxFeeEur: 650, // Obergrenze: mehr als 650 EUR wird nie abgerechnet
   maxPlausibleMinutes: 1440, // > 24 h Standzeit = unplausibel -> Prueffall
+  rebookingGapMinutes: 180, // GPS-Ankunft >= 3 h vor Fenster -> Umbuchungs-/Pausefall
 });
 
 const REASON = Object.freeze({
@@ -99,14 +100,29 @@ function computeStandgeld(input = {}, config = {}) {
       chargeable: false,
       reason: REASON.MISSING_DATA,
       needs_review: true,
+      rebooking_suspected: false,
     });
   }
 
   const arrivedLate = arrival > windowStart;
 
+  // Sonderfall Umbuchung/Pause: Geht ein LKW in die Pause, wird das Zeitfenster
+  // umgebucht (neues, spaeteres Fenster). Die echte Standzeit begann aber schon
+  // bei der physischen Ankunft. Liegt eine GPS-BELEGTE Ankunft deutlich (>= rebooking-
+  // GapMinutes) VOR dem Fenster, zaehlen wir ab der echten Ankunft statt ab dem
+  // umgebuchten Fenster - und fuehren den Fall als Prueffall (needs_review).
+  // Nur mit GPS-Beleg; ohne GPS bleibt es beim Fenster (konservativ).
+  const earlyGapMs = windowStart - arrival; // > 0 wenn Ankunft vor Fenster
+  const rebookingSuspected =
+    input.arrival_gps_verified === true &&
+    cfg.rebookingGapMinutes != null &&
+    earlyGapMs >= cfg.rebookingGapMinutes * 60000;
+
   // Regel 2: Zaehlbeginn ab Fenster, bei Spaetankunft ab Ankunft.
-  // Wartezeit vor dem Fenster wird nie gezaehlt.
-  const countStartMs = Math.max(windowStart, arrival);
+  // Wartezeit vor dem Fenster wird nie gezaehlt - AUSSER im Umbuchungsfall.
+  const countStartMs = rebookingSuspected
+    ? arrival
+    : Math.max(windowStart, arrival);
   const countStart = new Date(countStartMs).toISOString();
 
   let countedMinutes = Math.round((departure - countStartMs) / 60000);
@@ -145,6 +161,7 @@ function computeStandgeld(input = {}, config = {}) {
       chargeable: false,
       reason: REASON.IMPLAUSIBLE_DURATION,
       needs_review: true,
+      rebooking_suspected: rebookingSuspected,
     });
   }
 
@@ -187,8 +204,10 @@ function computeStandgeld(input = {}, config = {}) {
     fee_capped: feeCapped,
     chargeable,
     reason,
-    // Prueffall, wenn die Zeitbasis nicht belegbar war (aus dem Stopp uebernommen).
-    needs_review: Boolean(input.needs_review),
+    // Prueffall, wenn die Zeitbasis nicht belegbar war (aus dem Stopp uebernommen)
+    // ODER wenn wegen Umbuchung ab der GPS-Ankunft statt ab dem Fenster gezaehlt wird.
+    needs_review: Boolean(input.needs_review) || rebookingSuspected,
+    rebooking_suspected: rebookingSuspected,
   });
 }
 
