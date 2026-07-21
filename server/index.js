@@ -1730,6 +1730,108 @@ app.post(
   },
 );
 
+app.post(
+  "/api/billing/live-upload",
+  express.raw({
+    type: () => true,
+    limit: "25mb",
+  }),
+  async (req, res) => {
+    try {
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "Keine Datei empfangen (leerer Body)." });
+      }
+
+      const config = {};
+      if (req.query.freeMinutes)
+        config.freeMinutes = Number(req.query.freeMinutes);
+      if (req.query.blockMinutes)
+        config.blockMinutes = Number(req.query.blockMinutes);
+      if (req.query.blockRateEur)
+        config.blockRateEur = Number(req.query.blockRateEur);
+      if (req.query.triggerMinutes)
+        config.triggerMinutes = Number(req.query.triggerMinutes);
+
+      const transports = loadTransporeonExportFromBuffer(buffer);
+      const sixfoldDateFrom = req.query.sixfoldDateFrom
+        ? String(req.query.sixfoldDateFrom).trim()
+        : null;
+      const sixfoldDateTo = req.query.sixfoldDateTo
+        ? String(req.query.sixfoldDateTo).trim()
+        : null;
+      const filteredTransports = filterTransportsByUnloadDate(
+        transports,
+        sixfoldDateFrom,
+        sixfoldDateTo,
+      );
+      const filterMeta = buildUnloadDateFilterMeta(
+        transports,
+        sixfoldDateFrom,
+        sixfoldDateTo,
+      );
+
+      let window = computeTransportsWindow(filteredTransports);
+      if (sixfoldDateFrom || sixfoldDateTo) {
+        window = {
+          fromTime: sixfoldDateFrom
+            ? `${sixfoldDateFrom}T00:00:00Z`
+            : window.fromTime,
+          toTime: sixfoldDateTo ? `${sixfoldDateTo}T23:59:59Z` : window.toTime,
+        };
+      }
+
+      const debug = req.query.debug === "1" || req.query.debug === "true";
+      const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(
+        req,
+        window,
+        debug,
+      );
+
+      const liveResult = await fetchLiveVisibilityEvents(
+        filteredTransports.map((transport) => transport.transport_number),
+        {
+          concurrency: req.query.concurrency
+            ? Number(req.query.concurrency)
+            : 8,
+          headless:
+            req.query.headless === "1" || req.query.headless === "true",
+        },
+      );
+
+      const result = billFromLiveData(filteredTransports, liveResult.events, {
+        config,
+        gpsIndex,
+      });
+
+      res.json({
+        file: req.query.name ? String(req.query.name) : "upload.xlsx",
+        generated_at: new Date().toISOString(),
+        gps: gpsInfo,
+        transporeon_live: {
+          fetched: true,
+          available_transport_count: liveResult.availableTransportCount,
+          matched_transport_count: liveResult.matchedTransports.length,
+          missing_transport_count: liveResult.missingTransportNumbers.length,
+          failure_count: liveResult.failures.length,
+        },
+        summary: {
+          ...result.summary,
+          ...filterMeta,
+          total_fee_display: formatEuro(result.summary.total_fee_eur),
+        },
+        stops: result.stops,
+        live_failures: liveResult.failures,
+        missing_transports: liveResult.missingTransportNumbers,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message || "Unbekannter Fehler" });
+    }
+  },
+);
+
 app.post("/api/sixfold/standgeld", async (req, res) => {
   try {
     const rulesRaw = req.body?.rules || {};

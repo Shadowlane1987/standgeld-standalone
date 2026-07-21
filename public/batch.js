@@ -320,11 +320,15 @@ function sixfoldParams() {
 async function load() {
   const gps = sixfoldHeaders();
   const hasGps = Boolean(gps["x-sixfold-url"]);
-  setStatus(hasGps ? "Lade Transporte + GPS-Abgleich …" : "Lade Transporte …");
+  setStatus(
+    hasGps
+      ? "Lade Transporte aus Event Management + GPS-Abgleich …"
+      : "Lade Transporte aus Event Management …",
+  );
   el.loadBtn.disabled = true;
 
   try {
-    const baseUrl = `/api/billing/export?${ruleParams().toString()}`;
+    const baseUrl = `/api/billing/live?${ruleParams().toString()}`;
     const url = baseUrl + sixfoldParams();
     const res = await fetch(url, {
       headers: gps,
@@ -356,10 +360,14 @@ async function upload() {
     params.set("name", file.name);
     const gps = sixfoldHeaders();
     const headers = { "Content-Type": "application/octet-stream", ...gps };
-    const baseUrl = `/api/billing/upload?${params.toString()}`;
+    const baseUrl = `/api/billing/live-upload?${params.toString()}`;
     const url = baseUrl + sixfoldParams();
     if (gps["x-sixfold-url"]) {
-      setStatus(`Lade „${file.name}" hoch, gleiche GPS ab und rechne ab …`);
+      setStatus(
+        `Lade „${file.name}" hoch, lese Event Management + GPS und rechne ab …`,
+      );
+    } else {
+      setStatus(`Lade „${file.name}" hoch, lese Event Management und rechne ab …`);
     }
     const res = await fetch(url, {
       method: "POST",
