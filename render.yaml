@@ -6,10 +6,10 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
-    disks:
-      - name: app-data
-        mountPath: /var/data
-        sizeGB: 1
+    disk:
+      name: app-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 20
