@@ -32,6 +32,23 @@ function readWindowRows(filePath) {
 }
 
 /**
+ * Liest die erste Tabelle aus einem Buffer als Array-of-Arrays.
+ *
+ * @param {Buffer} buffer Inhalt der .xlsx-Datei
+ * @returns {Array<Array<string>>}
+ */
+function readWindowRowsFromBuffer(buffer) {
+  const workbook = XLSX.read(buffer, { type: "buffer" });
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  return XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    raw: false,
+    defval: "",
+  });
+}
+
+/**
  * Liest die Datei und liefert Parser-Ergebnis + Lookup-Index.
  *
  * @param {string} filePath
@@ -43,4 +60,21 @@ function loadZeitfenster(filePath) {
   return { windows, index: buildWindowIndex(windows) };
 }
 
-module.exports = { readWindowRows, loadZeitfenster };
+/**
+ * Liest Zeitfenster aus einem Upload-Buffer und liefert Parser-Ergebnis + Index.
+ *
+ * @param {Buffer} buffer
+ * @returns {{ windows: Array<object>, index: Map<string, object> }}
+ */
+function loadZeitfensterFromBuffer(buffer) {
+  const rows = readWindowRowsFromBuffer(buffer);
+  const windows = parseWindowRows(rows);
+  return { windows, index: buildWindowIndex(windows) };
+}
+
+module.exports = {
+  readWindowRows,
+  readWindowRowsFromBuffer,
+  loadZeitfenster,
+  loadZeitfensterFromBuffer,
+};

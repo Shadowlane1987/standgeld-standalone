@@ -7,11 +7,13 @@ const el = {
   triggerMinutes: document.getElementById("triggerMinutes"),
   loadBtn: document.getElementById("loadBtn"),
   fileInput: document.getElementById("fileInput"),
+  unloadWindowFileInput: document.getElementById("unloadWindowFileInput"),
   importSelect: document.getElementById("importSelect"),
   importWorkspace: document.getElementById("importWorkspace"),
   activeImportName: document.getElementById("activeImportName"),
   activeImportMeta: document.getElementById("activeImportMeta"),
   refreshImportsBtn: document.getElementById("refreshImportsBtn"),
+  uploadUnloadWindowsBtn: document.getElementById("uploadUnloadWindowsBtn"),
   openImportPageBtn: document.getElementById("openImportPageBtn"),
   deleteImportBtn: document.getElementById("deleteImportBtn"),
   uploadBtn: document.getElementById("uploadBtn"),
@@ -317,10 +319,12 @@ function openStopDetailModal(stop) {
   const rebookingNote = stop.rebooking_suspected
     ? " · ⚠ Umbuchung/Pause erkannt: gezählt ab GPS-Ankunft (Prüffall)"
     : "";
+  const amountNote = ` · Abrechenbare Summe: ${euro(stop.fee_eur)}`;
   el.stopDetailMeta.textContent =
     `Zeitfenster: ${windowLocal} · Zählbeginn: ${countStartLocal} · ` +
     `Quelle: ${source} · KFZ: ${kfz} · Ist-Standzeit: ${usedStanding} · ` +
     `Ab Zählbeginn: ${countedStanding} · 2h frei: ${freeStanding}` +
+    amountNote +
     rebookingNote;
 
   const xpArrival = isoToLocal(stop.xp_arrival_time);
@@ -354,9 +358,7 @@ function closeStopDetailModal() {
 
 function billedMinutes(stop) {
   if (!stop || !stop.chargeable) return 0;
-  const blocks = Number(stop.billable_blocks || 0);
-  const blockMinutes = Number(stop.block_minutes || 30);
-  return Math.max(0, blocks * blockMinutes);
+  return Math.max(0, Math.round(Number(stop.minutes_over_free || 0)));
 }
 
 function buildJustificationText(stop) {
@@ -376,7 +378,8 @@ function buildJustificationText(stop) {
     `Abfahrt: ${departureUsed}`,
     `Standzeit: ${standing}`,
     `2h frei: ${freeText}`,
-    `Abgerechnete Zeit: ${billedText}`,
+    `Abzurechnende Zeit (exakt): ${billedText}`,
+    `Abrechenbare Summe: ${euro(stop.fee_eur)}`,
   ].join("\n");
 }
 
@@ -687,8 +690,12 @@ function applyResult(data) {
     typeof data.summary.mixed_source_count === "number"
       ? ` · Mix-Stopps: ${data.summary.mixed_source_count}`
       : "";
+  const fallbackNote =
+    typeof data.summary.fallback_applied === "number"
+      ? ` · Entladefenster ersetzt: ${data.summary.fallback_applied}/${data.summary.fallback_candidates || 0}`
+      : "";
   setStatus(
-    `${data.summary.transport_count} Transporte · ${data.summary.stop_count} Positionen${gpsNote}${filterNote}${mixNote}.`,
+    `${data.summary.transport_count} Transporte · ${data.summary.stop_count} Positionen${gpsNote}${filterNote}${mixNote}${fallbackNote}.`,
     "success",
   );
 }
@@ -803,6 +810,49 @@ async function upload() {
   } finally {
     el.uploadBtn.disabled = false;
     el.loadBtn.disabled = false;
+  }
+}
+
+async function uploadUnloadWindows() {
+  const file =
+    el.unloadWindowFileInput?.files && el.unloadWindowFileInput.files[0];
+  if (!file) {
+    setStatus("Bitte zuerst eine Entladezeitfenster-Excel auswählen.", "error");
+    return;
+  }
+
+  if (el.uploadUnloadWindowsBtn) el.uploadUnloadWindowsBtn.disabled = true;
+  setStatus(`Importiere Entladezeitfenster aus „${file.name}“ …`);
+
+  try {
+    const res = await fetch("/api/windows/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    setStatus(
+      `Entladezeitfenster importiert (${data.windows_count || 0} Zeilen).`,
+      "success",
+    );
+
+    if (currentImportId) {
+      await load();
+    }
+  } catch (error) {
+    setStatus(
+      error.message || "Entladezeitfenster-Import fehlgeschlagen.",
+      "error",
+    );
+  } finally {
+    if (el.uploadUnloadWindowsBtn) {
+      const hasFile =
+        el.unloadWindowFileInput?.files &&
+        el.unloadWindowFileInput.files.length > 0;
+      el.uploadUnloadWindowsBtn.disabled = !hasFile;
+    }
   }
 }
 
@@ -1032,6 +1082,18 @@ el.fileInput.addEventListener("change", () => {
   el.uploadBtn.disabled = !hasFile;
   el.selectiveSearchBtn.disabled = !hasFile;
 });
+if (el.unloadWindowFileInput) {
+  el.unloadWindowFileInput.addEventListener("change", () => {
+    const hasFile =
+      el.unloadWindowFileInput.files && el.unloadWindowFileInput.files.length;
+    if (el.uploadUnloadWindowsBtn) {
+      el.uploadUnloadWindowsBtn.disabled = !hasFile;
+    }
+  });
+}
+if (el.uploadUnloadWindowsBtn) {
+  el.uploadUnloadWindowsBtn.addEventListener("click", uploadUnloadWindows);
+}
 el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
 el.filterMode.addEventListener("change", render);
 if (el.bookkeepingExportBtn) {

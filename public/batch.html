@@ -55,10 +55,16 @@
             </button></label
           >
         </div>
-        <div class="grid grid-4">
+        <div class="grid grid-5">
           <label class="upload-label"
             >Excel-Export hochladen<input
               id="fileInput"
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          /></label>
+          <label class="upload-label"
+            >Entladezeitfenster-Excel (Fallback)<input
+              id="unloadWindowFileInput"
               type="file"
               accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           /></label>
@@ -92,6 +98,14 @@
           </button>
           <button id="refreshImportsBtn" type="button" class="btn-secondary">
             Importe aktualisieren
+          </button>
+          <button
+            id="uploadUnloadWindowsBtn"
+            type="button"
+            class="btn-secondary"
+            disabled
+          >
+            Entladezeitfenster importieren
           </button>
           <button
             id="openImportPageBtn"

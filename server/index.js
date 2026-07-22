@@ -17,6 +17,9 @@ const { classifySixfoldStop } = require("./normalize/sixfoldGps");
 const {
   loadTransporeonExportFromBuffer,
 } = require("./tools/readTransporeonExport");
+const { loadZeitfensterFromBuffer } = require("./tools/readZeitfensterExcel");
+const { transportNumberToLadenummer } = require("./normalize/ladenummer");
+const { windowStartForStop } = require("./normalize/zeitfenster");
 const { fetchLiveVisibilityEvents } = require("./services/transporeonLive");
 const { ImportStore } = require("./storage/importStore");
 
@@ -30,6 +33,15 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 const EXCLUDE_FROM_TOTAL_AMOUNT_EUR = 450;
+const UNLOAD_WINDOWS_DIR = path.join(process.cwd(), "data", "imports");
+const UNLOAD_WINDOWS_FILE = path.join(
+  UNLOAD_WINDOWS_DIR,
+  "unload_windows.xlsx",
+);
+
+function ensureParentDir(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
 
 function toDate(value) {
   const text = String(value || "").trim();
@@ -1360,6 +1372,41 @@ app.delete("/api/imports/:id", (req, res) => {
   }
 });
 
+app.post(
+  "/api/windows/upload",
+  express.raw({
+    type: () => true,
+    limit: "10mb",
+  }),
+  (req, res) => {
+    try {
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "Keine Zeitfenster-Datei empfangen (leerer Body)." });
+      }
+
+      const parsed = loadZeitfensterFromBuffer(buffer);
+      ensureParentDir(UNLOAD_WINDOWS_FILE);
+      fs.writeFileSync(UNLOAD_WINDOWS_FILE, buffer);
+
+      return res.json({
+        ok: true,
+        windows_count: Array.isArray(parsed.windows)
+          ? parsed.windows.length
+          : 0,
+        stored_file: path.relative(process.cwd(), UNLOAD_WINDOWS_FILE),
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error:
+          error.message || "Zeitfenster-Excel konnte nicht verarbeitet werden.",
+      });
+    }
+  },
+);
+
 // Batch-Abrechnung aller Transporte aus dem Transporeon-Excel-Export.
 // Liefert Zeitfenster + Standgeld je Stopp (Laden/Entladen) fuer ALLE Transporte.
 const EXPORT_XLSX_PATH = path.join(
@@ -1480,6 +1527,68 @@ function buildUnloadDateFilterMeta(transports, fromDate, toDate) {
   };
 }
 
+function localDateForUnloadWindowFallback(transport) {
+  const unload = transport?.unloading || null;
+  const load = transport?.loading || null;
+  return (
+    extractLocalDate(unload?.arrival_local) ||
+    extractLocalDate(unload?.departure_local) ||
+    extractLocalDate(load?.window_local) ||
+    extractLocalDate(load?.arrival_local) ||
+    extractLocalDate(load?.departure_local) ||
+    null
+  );
+}
+
+function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
+  const list = Array.isArray(transports) ? transports : [];
+  if (!unloadWindowIndex || typeof unloadWindowIndex.get !== "function") {
+    return {
+      fallback_available: false,
+      fallback_candidates: 0,
+      fallback_applied: 0,
+      fallback_unresolved: 0,
+    };
+  }
+
+  let candidates = 0;
+  let applied = 0;
+
+  for (const transport of list) {
+    const unload = transport?.unloading;
+    if (!unload) continue;
+    if (String(unload.window_local || "").trim()) continue;
+
+    candidates += 1;
+    const ladenummer = transportNumberToLadenummer(transport.transport_number);
+    const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
+    const unloadStart = windowStartForStop(windowRow, "UNLOADING");
+    const localDate = localDateForUnloadWindowFallback(transport);
+    if (!unloadStart || !localDate) continue;
+
+    unload.window_local = `${localDate} ${unloadStart}`;
+    applied += 1;
+  }
+
+  return {
+    fallback_available: true,
+    fallback_candidates: candidates,
+    fallback_applied: applied,
+    fallback_unresolved: Math.max(0, candidates - applied),
+  };
+}
+
+function loadPersistedUnloadWindowIndex() {
+  try {
+    if (!fs.existsSync(UNLOAD_WINDOWS_FILE)) return null;
+    const buffer = fs.readFileSync(UNLOAD_WINDOWS_FILE);
+    const parsed = loadZeitfensterFromBuffer(buffer);
+    return parsed.index;
+  } catch (_error) {
+    return null;
+  }
+}
+
 // Optionaler GPS-Abgleich: Sixfold-Link + Token via Header (NICHT als Query,
 // damit keine Zugangsdaten in Server-Logs/History landen). Liefert
 // { gpsIndex, gpsInfo } oder { gpsIndex: null, gpsInfo: null } wenn nichts gesetzt.
@@ -1588,6 +1697,10 @@ app.get("/api/billing/export", async (req, res) => {
       sixfoldDateFrom,
       sixfoldDateTo,
     );
+    const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
+      filteredTransports,
+      loadPersistedUnloadWindowIndex(),
+    );
     const filterMeta = buildUnloadDateFilterMeta(
       transports,
       sixfoldDateFrom,
@@ -1620,6 +1733,7 @@ app.get("/api/billing/export", async (req, res) => {
       summary: {
         ...result.summary,
         ...filterMeta,
+        ...unloadFallbackMeta,
         total_fee_display: formatEuro(result.summary.total_fee_eur),
       },
       stops: result.stops,
@@ -1663,6 +1777,10 @@ app.get("/api/billing/live", async (req, res) => {
       transports,
       sixfoldDateFrom,
       sixfoldDateTo,
+    );
+    const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
+      filteredTransports,
+      loadPersistedUnloadWindowIndex(),
     );
     const filterMeta = buildUnloadDateFilterMeta(
       transports,
@@ -1742,6 +1860,7 @@ app.get("/api/billing/live", async (req, res) => {
       summary: {
         ...result.summary,
         ...filterMeta,
+        ...unloadFallbackMeta,
         total_fee_display: formatEuro(result.summary.total_fee_eur),
       },
       stops: result.stops,
@@ -1792,6 +1911,10 @@ app.post(
         sixfoldDateFrom,
         sixfoldDateTo,
       );
+      const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
+        filteredTransports,
+        loadPersistedUnloadWindowIndex(),
+      );
       const filterMeta = buildUnloadDateFilterMeta(
         transports,
         sixfoldDateFrom,
@@ -1834,6 +1957,7 @@ app.post(
         summary: {
           ...result.summary,
           ...filterMeta,
+          ...unloadFallbackMeta,
           total_fee_display: formatEuro(result.summary.total_fee_eur),
         },
         stops: result.stops,
@@ -1880,6 +2004,10 @@ app.post(
         transports,
         sixfoldDateFrom,
         sixfoldDateTo,
+      );
+      const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
+        filteredTransports,
+        loadPersistedUnloadWindowIndex(),
       );
       const filterMeta = buildUnloadDateFilterMeta(
         transports,
@@ -1971,6 +2099,7 @@ app.post(
         summary: {
           ...result.summary,
           ...filterMeta,
+          ...unloadFallbackMeta,
           total_fee_display: formatEuro(result.summary.total_fee_eur),
         },
         stops: result.stops,
