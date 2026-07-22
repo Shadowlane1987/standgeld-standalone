@@ -610,21 +610,14 @@ function buildJustificationText(stop) {
   const countedStanding = minutesToHours(stop.counted_standing_minutes);
   const freeMinutes = Number(stop.free_minutes || 120);
   const freeLabel = freeMinutes >= 180 ? "3h frei" : "2h frei";
-  const freeText = minutesToHours(freeMinutes);
   const startAtWindow = isSameTimestamp(stop.count_start, stop.window_start);
-  const arrivalText = startAtWindow
-    ? `${windowLocal} Zeitfenster`
-    : `${countStartLocal} Ankunft`;
-  const standingLabel = startAtWindow
-    ? "Standzeit ab Zeitfenster"
-    : "Standzeit ab Ankunft";
+  const arrivalText = startAtWindow ? windowLocal : countStartLocal;
 
   return [
     `Ankunft: ${arrivalText}`,
     `Abfahrt: ${departureUsed}`,
-    `${standingLabel}: ${countedStanding}`,
-    `${freeLabel}: ${freeText}`,
-    `Abrechenbare Summe: ${euro(stop.fee_eur)}`,
+    `Standzeit: ${countedStanding}`,
+    freeLabel,
   ].join("\n");
 }
 
