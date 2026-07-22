@@ -125,6 +125,27 @@ class ImportStore {
     );
     return fs.existsSync(filePath) ? filePath : null;
   }
+
+  deleteImport(importId) {
+    this.init();
+    const meta = this.getImport(importId);
+    if (!meta) return false;
+
+    const metaPath = path.join(this.metaDir, `${meta.id}.json`);
+    const filePath = path.join(
+      this.filesDir,
+      String(meta.stored_file_name || ""),
+    );
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    if (fs.existsSync(metaPath)) {
+      fs.unlinkSync(metaPath);
+    }
+
+    return true;
+  }
 }
 
 module.exports = {

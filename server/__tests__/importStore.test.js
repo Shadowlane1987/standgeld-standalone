@@ -42,3 +42,21 @@ test("ImportStore speichert Excel-Importe mit Metadaten und listet sie wieder au
   assert.ok(filePath);
   assert.equal(fs.readFileSync(filePath, "utf8"), "excel");
 });
+
+test("ImportStore kann gespeicherte Importe loeschen", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "standgeld-imports-"));
+  const store = new ImportStore({ root });
+
+  const meta = store.saveImport({
+    buffer: Buffer.from("excel"),
+    fileName: "transporte.xlsx",
+    transports: [],
+  });
+
+  assert.equal(store.listImports().length, 1);
+  assert.equal(store.deleteImport(meta.id), true);
+  assert.equal(store.listImports().length, 0);
+  assert.equal(store.resolveImportFile(meta.id), null);
+  assert.equal(store.getImport(meta.id), null);
+  assert.equal(store.deleteImport(meta.id), false);
+});

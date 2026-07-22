@@ -1327,11 +1327,36 @@ app.get("/api/imports", (_req, res) => {
       imports: importStore.listImports(),
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        error: error.message || "Importe konnten nicht geladen werden.",
-      });
+    res.status(500).json({
+      error: error.message || "Importe konnten nicht geladen werden.",
+    });
+  }
+});
+
+app.delete("/api/imports/:id", (req, res) => {
+  try {
+    const importId = String(req.params.id || "").trim();
+    if (!importId) {
+      return res.status(400).json({ error: "Import-ID fehlt." });
+    }
+
+    const meta = importStore.getImport(importId);
+    if (!meta) {
+      return res.status(404).json({ error: "Import nicht gefunden." });
+    }
+
+    importStore.deleteImport(importId);
+    return res.json({
+      ok: true,
+      deleted: {
+        id: meta.id,
+        file_name: meta.file_name,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Import konnte nicht geloescht werden.",
+    });
   }
 });
 

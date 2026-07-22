@@ -51,7 +51,7 @@
           /></label>
           <label
             >&nbsp;<button id="loadBtn" type="button" disabled>
-              Gespeicherten Import laden
+              Aktiven Import laden
             </button></label
           >
         </div>
@@ -81,6 +81,11 @@
               placeholder="sessionToken-Wert"
           /></label>
         </div>
+        <div class="import-workspace" id="importWorkspace" hidden>
+          <strong>Aktiver Upload:</strong>
+          <span id="activeImportName">-</span>
+          <span id="activeImportMeta"></span>
+        </div>
         <div class="actions-row bookkeeping-toolbar">
           <button id="uploadBtn" type="button" disabled>
             Hochladen, speichern & abrechnen
@@ -88,7 +93,28 @@
           <button id="refreshImportsBtn" type="button" class="btn-secondary">
             Importe aktualisieren
           </button>
-          <button id="selectiveSearchBtn" type="button" class="btn-secondary" disabled>
+          <button
+            id="openImportPageBtn"
+            type="button"
+            class="btn-secondary"
+            disabled
+          >
+            Eigene Seite öffnen
+          </button>
+          <button
+            id="deleteImportBtn"
+            type="button"
+            class="btn-secondary"
+            disabled
+          >
+            Upload löschen
+          </button>
+          <button
+            id="selectiveSearchBtn"
+            type="button"
+            class="btn-secondary"
+            disabled
+          >
             Suchen & Abgleichen
           </button>
         </div>
@@ -208,10 +234,16 @@
           </div>
 
           <div class="modal-actions">
-            <button id="openJustificationBtn" type="button" class="btn-secondary">
+            <button
+              id="openJustificationBtn"
+              type="button"
+              class="btn-secondary"
+            >
               Begründung
             </button>
-            <button id="closeStopDetailModalBtn2" type="button">Schließen</button>
+            <button id="closeStopDetailModalBtn2" type="button">
+              Schließen
+            </button>
           </div>
         </div>
       </section>
@@ -220,41 +252,8 @@
         <div class="modal-card justification-card">
           <div class="modal-head">
             <h3>Begründung für Zuschlagsmanagement</h3>
-            <button id="closeJustificationModalBtn" class="modal-close" type="button">
-              Schließen
-            </button>
-          </div>
-
-          <textarea id="justificationText" rows="9" readonly></textarea>
-
-          <div class="modal-actions">
-            <button id="copyJustificationBtn" type="button" class="btn-secondary">
-              Text kopieren
-            </button>
-            <button id="closeJustificationModalBtn2" type="button">Schließen</button>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <script src="/batch.js"></script>
-  </body>
-</html>
-                <th>Betrag</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="rows"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="stopDetailModal" class="modal" hidden>
-        <div class="modal-card">
-          <div class="modal-head">
-            <h3 id="stopDetailTitle">Tour-Details</h3>
             <button
-              id="closeStopDetailModalBtn"
+              id="closeJustificationModalBtn"
               class="modal-close"
               type="button"
             >
@@ -262,47 +261,19 @@
             </button>
           </div>
 
-          <div id="stopDetailMeta" class="detail-meta"></div>
-
-          <div class="table-wrap detail-table-wrap">
-            <table class="detail-table">
-              <thead>
-                <tr>
-                  <th>Feld</th>
-                  <th>XP</th>
-                  <th>GPS</th>
-                  <th>Genutzt</th>
-                </tr>
-              </thead>
-              <tbody id="stopDetailRows"></tbody>
-            </table>
-          </div>
-
-          <div class="modal-actions">
-            <button id="openJustificationBtn" type="button" class="btn-secondary">
-              Begründung
-            </button>
-            <button id="closeStopDetailModalBtn2" type="button">Schließen</button>
-          </div>
-        </div>
-      </section>
-
-      <section id="justificationModal" class="modal" hidden>
-        <div class="modal-card justification-card">
-          <div class="modal-head">
-            <h3>Begründung für Zuschlagsmanagement</h3>
-            <button id="closeJustificationModalBtn" class="modal-close" type="button">
-              Schließen
-            </button>
-          </div>
-
           <textarea id="justificationText" rows="9" readonly></textarea>
 
           <div class="modal-actions">
-            <button id="copyJustificationBtn" type="button" class="btn-secondary">
+            <button
+              id="copyJustificationBtn"
+              type="button"
+              class="btn-secondary"
+            >
               Text kopieren
             </button>
-            <button id="closeJustificationModalBtn2" type="button">Schließen</button>
+            <button id="closeJustificationModalBtn2" type="button">
+              Schließen
+            </button>
           </div>
         </div>
       </section>

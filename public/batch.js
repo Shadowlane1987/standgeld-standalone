@@ -8,7 +8,12 @@ const el = {
   loadBtn: document.getElementById("loadBtn"),
   fileInput: document.getElementById("fileInput"),
   importSelect: document.getElementById("importSelect"),
+  importWorkspace: document.getElementById("importWorkspace"),
+  activeImportName: document.getElementById("activeImportName"),
+  activeImportMeta: document.getElementById("activeImportMeta"),
   refreshImportsBtn: document.getElementById("refreshImportsBtn"),
+  openImportPageBtn: document.getElementById("openImportPageBtn"),
+  deleteImportBtn: document.getElementById("deleteImportBtn"),
   uploadBtn: document.getElementById("uploadBtn"),
   sixfoldUrl: document.getElementById("sixfoldUrl"),
   sixfoldToken: document.getElementById("sixfoldToken"),
@@ -51,6 +56,7 @@ const el = {
 let currentStops = [];
 let activeDetailStop = null;
 let currentImportId = "";
+let currentImports = [];
 const bookkeepingByKey = new Map();
 
 const REASON_LABELS = {
@@ -70,6 +76,79 @@ function setStatus(text, type = "info") {
   el.status.textContent = text;
   el.status.style.color =
     type === "error" ? "#b91c1c" : type === "success" ? "#166534" : "#73675a";
+}
+
+function formatImportTimestamp(isoValue) {
+  if (!isoValue) return "";
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function importIdFromUrl() {
+  const url = new URL(window.location.href);
+  return String(url.searchParams.get("import") || "").trim();
+}
+
+function setImportIdInUrl(importId, replace = true) {
+  const url = new URL(window.location.href);
+  if (importId) url.searchParams.set("import", importId);
+  else url.searchParams.delete("import");
+  if (replace) {
+    window.history.replaceState({}, "", url.toString());
+  } else {
+    window.history.pushState({}, "", url.toString());
+  }
+}
+
+function currentImportMeta() {
+  return currentImports.find((item) => item.id === currentImportId) || null;
+}
+
+function syncImportWorkspace() {
+  const hasImport = Boolean(currentImportId);
+  if (el.loadBtn) el.loadBtn.disabled = !hasImport;
+  if (el.openImportPageBtn) el.openImportPageBtn.disabled = !hasImport;
+  if (el.deleteImportBtn) el.deleteImportBtn.disabled = !hasImport;
+
+  if (!el.importWorkspace || !el.activeImportName || !el.activeImportMeta) {
+    return;
+  }
+
+  if (!hasImport) {
+    el.importWorkspace.hidden = true;
+    el.activeImportName.textContent = "-";
+    el.activeImportMeta.textContent = "";
+    return;
+  }
+
+  const meta = currentImportMeta();
+  const fileName = meta?.file_name || currentImportId;
+  const importedAt = formatImportTimestamp(meta?.imported_at);
+  const transportCount = Number(meta?.transport_count || 0);
+  const range =
+    meta?.unload_date_from && meta?.unload_date_to
+      ? `${meta.unload_date_from} bis ${meta.unload_date_to}`
+      : "kein Datumsbereich";
+
+  el.importWorkspace.hidden = false;
+  el.activeImportName.textContent = fileName;
+  el.activeImportMeta.textContent =
+    ` · ${transportCount} Transporte · ${range}` +
+    (importedAt ? ` · hochgeladen: ${importedAt}` : "");
+}
+
+function clearResults() {
+  currentStops = [];
+  if (el.rows) el.rows.innerHTML = "";
+  if (el.resultPanel) el.resultPanel.hidden = true;
+  activeDetailStop = null;
 }
 
 function euro(value) {
@@ -454,7 +533,9 @@ function ruleParams() {
 function setImportOptions(imports, preferredId = "") {
   if (!el.importSelect) return;
   const list = Array.isArray(imports) ? imports : [];
-  const targetId = preferredId || currentImportId || list[0]?.id || "";
+  const urlImportId = importIdFromUrl();
+  const targetId =
+    preferredId || urlImportId || currentImportId || list[0]?.id || "";
 
   el.importSelect.innerHTML = "";
   if (!list.length) {
@@ -463,31 +544,36 @@ function setImportOptions(imports, preferredId = "") {
     option.textContent = "Keine gespeicherten Importe";
     el.importSelect.appendChild(option);
     currentImportId = "";
-    el.loadBtn.disabled = true;
+    syncImportWorkspace();
     return;
   }
 
   for (const item of list) {
     const option = document.createElement("option");
     option.value = item.id;
+    const importedAt = formatImportTimestamp(item.imported_at);
     const dateRange =
       item.unload_date_from && item.unload_date_to
         ? ` · ${item.unload_date_from} bis ${item.unload_date_to}`
         : "";
-    option.textContent = `${item.file_name} (${item.transport_count || 0})${dateRange}`;
+    option.textContent =
+      `${item.file_name} (${item.transport_count || 0})${dateRange}` +
+      (importedAt ? ` · ${importedAt}` : "");
     if (item.id === targetId) option.selected = true;
     el.importSelect.appendChild(option);
   }
 
   currentImportId = el.importSelect.value || targetId;
-  el.loadBtn.disabled = !currentImportId;
+  setImportIdInUrl(currentImportId, true);
+  syncImportWorkspace();
 }
 
 async function refreshImports(preferredId = "", silent = false) {
   const res = await fetch("/api/imports");
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  setImportOptions(data.imports || [], preferredId);
+  currentImports = Array.isArray(data.imports) ? data.imports : [];
+  setImportOptions(currentImports, preferredId);
   if (!silent) {
     const count = Array.isArray(data.imports) ? data.imports.length : 0;
     setStatus(`${count} gespeicherte Importe verfügbar.`, "success");
@@ -582,6 +668,8 @@ async function load() {
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
     applyResult(data);
+    setImportIdInUrl(importId, true);
+    syncImportWorkspace();
   } catch (error) {
     setStatus(error.message || "Fehler beim Laden", "error");
   } finally {
@@ -625,6 +713,8 @@ async function upload() {
     applyResult(data);
     currentImportId = String(data.import?.id || "").trim() || currentImportId;
     await refreshImports(currentImportId, true);
+    setImportIdInUrl(currentImportId, true);
+    syncImportWorkspace();
     if (currentImportId) {
       setStatus(
         `Import gespeichert und abgerechnet: ${data.import?.file_name || file.name}`,
@@ -636,6 +726,69 @@ async function upload() {
   } finally {
     el.uploadBtn.disabled = false;
     el.loadBtn.disabled = false;
+  }
+}
+
+function openImportPage() {
+  const importId = String(currentImportId || "").trim();
+  if (!importId) {
+    setStatus("Bitte zuerst einen Import auswählen.", "error");
+    return;
+  }
+  const target = `/batch.html?import=${encodeURIComponent(importId)}`;
+  window.open(target, "_blank", "noopener");
+}
+
+async function deleteSelectedImport() {
+  const importId = String(
+    currentImportId || el.importSelect?.value || "",
+  ).trim();
+  if (!importId) {
+    setStatus("Bitte zuerst einen Import auswählen.", "error");
+    return;
+  }
+
+  const meta = currentImportMeta();
+  const label = meta?.file_name || importId;
+  const ok = window.confirm(
+    `Upload wirklich löschen?\n\n${label}\n(${importId})`,
+  );
+  if (!ok) return;
+
+  if (el.deleteImportBtn) el.deleteImportBtn.disabled = true;
+  setStatus(`Lösche Upload „${label}“…`);
+
+  try {
+    const res = await fetch(`/api/imports/${encodeURIComponent(importId)}`, {
+      method: "DELETE",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    const remaining = await refreshImports("", true);
+    const nextImportId = String(el.importSelect?.value || "").trim();
+    if (importId !== nextImportId) {
+      currentImportId = nextImportId;
+    }
+    if (!remaining.length) {
+      clearResults();
+      setImportIdInUrl("", true);
+      setStatus(
+        "Upload gelöscht. Es sind keine gespeicherten Importe mehr vorhanden.",
+        "success",
+      );
+    } else {
+      setImportIdInUrl(currentImportId, true);
+      setStatus(
+        `Upload gelöscht. Aktiver Upload: ${currentImportMeta()?.file_name || currentImportId}`,
+        "success",
+      );
+    }
+    syncImportWorkspace();
+  } catch (error) {
+    setStatus(error.message || "Upload konnte nicht gelöscht werden.", "error");
+  } finally {
+    if (el.deleteImportBtn) el.deleteImportBtn.disabled = false;
   }
 }
 
@@ -767,7 +920,8 @@ el.uploadBtn.addEventListener("click", upload);
 if (el.importSelect) {
   el.importSelect.addEventListener("change", () => {
     currentImportId = String(el.importSelect.value || "").trim();
-    el.loadBtn.disabled = !currentImportId;
+    setImportIdInUrl(currentImportId, true);
+    syncImportWorkspace();
   });
 }
 if (el.refreshImportsBtn) {
@@ -781,6 +935,12 @@ if (el.refreshImportsBtn) {
       );
     }
   });
+}
+if (el.openImportPageBtn) {
+  el.openImportPageBtn.addEventListener("click", openImportPage);
+}
+if (el.deleteImportBtn) {
+  el.deleteImportBtn.addEventListener("click", deleteSelectedImport);
 }
 el.fileInput.addEventListener("change", () => {
   const hasFile = el.fileInput.files && el.fileInput.files.length;
@@ -836,8 +996,12 @@ document.addEventListener("keydown", (event) => {
 });
 
 refreshImports("", true)
-  .then(() => {
+  .then(async () => {
     setStatus("Bereit. Excel hochladen oder gespeicherten Import auswählen.");
+    const importFromUrl = importIdFromUrl();
+    if (importFromUrl && currentImportId === importFromUrl) {
+      await load();
+    }
   })
   .catch(() => {
     setStatus("Bereit. Excel hochladen oder gespeicherten Import auswählen.");

@@ -402,6 +402,25 @@ textarea {
   margin-top: 10px;
 }
 
+.import-workspace {
+  margin-top: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(14, 92, 74, 0.26);
+  background: linear-gradient(
+    180deg,
+    rgba(14, 92, 74, 0.09),
+    rgba(14, 92, 74, 0.03)
+  );
+  color: #1e3028;
+  font-size: 0.86rem;
+}
+
+.import-workspace strong {
+  color: #0a4a3c;
+}
+
 .actions-row button {
   width: auto;
 }
