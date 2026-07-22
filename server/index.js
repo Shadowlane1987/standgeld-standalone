@@ -21,7 +21,7 @@ const { loadZeitfensterFromBuffer } = require("./tools/readZeitfensterExcel");
 const { transportNumberToLadenummer } = require("./normalize/ladenummer");
 const { windowStartForStop } = require("./normalize/zeitfenster");
 const { fetchLiveVisibilityEvents } = require("./services/transporeonLive");
-const { ImportStore } = require("./storage/importStore");
+const { ImportStore, normalizeScope } = require("./storage/importStore");
 
 dotenv.config();
 
@@ -37,10 +37,14 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 
 const EXCLUDE_FROM_TOTAL_AMOUNT_EUR = 450;
 const UNLOAD_WINDOWS_DIR = path.join(APP_DATA_DIR, "imports");
-const UNLOAD_WINDOWS_FILE = path.join(
-  UNLOAD_WINDOWS_DIR,
-  "unload_windows.xlsx",
-);
+
+function scopeFromReq(req) {
+  return normalizeScope(req.query.scope);
+}
+
+function unloadWindowsFileForScope(scope) {
+  return path.join(UNLOAD_WINDOWS_DIR, `unload_windows_${scope}.xlsx`);
+}
 
 function ensureParentDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -1336,10 +1340,11 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: "standgeld-standalone" });
 });
 
-app.get("/api/imports", (_req, res) => {
+app.get("/api/imports", (req, res) => {
   try {
+    const scope = scopeFromReq(req);
     res.json({
-      imports: importStore.listImports(),
+      imports: importStore.listImports({ scope }),
     });
   } catch (error) {
     res.status(500).json({
@@ -1383,6 +1388,7 @@ app.post(
   }),
   (req, res) => {
     try {
+      const scope = scopeFromReq(req);
       const buffer = req.body;
       if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
         return res
@@ -1391,15 +1397,17 @@ app.post(
       }
 
       const parsed = loadZeitfensterFromBuffer(buffer);
-      ensureParentDir(UNLOAD_WINDOWS_FILE);
-      fs.writeFileSync(UNLOAD_WINDOWS_FILE, buffer);
+      const unloadWindowsFile = unloadWindowsFileForScope(scope);
+      ensureParentDir(unloadWindowsFile);
+      fs.writeFileSync(unloadWindowsFile, buffer);
 
       return res.json({
         ok: true,
+        scope,
         windows_count: Array.isArray(parsed.windows)
           ? parsed.windows.length
           : 0,
-        stored_file: path.relative(process.cwd(), UNLOAD_WINDOWS_FILE),
+        stored_file: path.relative(process.cwd(), unloadWindowsFile),
       });
     } catch (error) {
       return res.status(400).json({
@@ -1580,10 +1588,11 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
   };
 }
 
-function loadPersistedUnloadWindowIndex() {
+function loadPersistedUnloadWindowIndex(scope) {
   try {
-    if (!fs.existsSync(UNLOAD_WINDOWS_FILE)) return null;
-    const buffer = fs.readFileSync(UNLOAD_WINDOWS_FILE);
+    const unloadWindowsFile = unloadWindowsFileForScope(scope);
+    if (!fs.existsSync(unloadWindowsFile)) return null;
+    const buffer = fs.readFileSync(unloadWindowsFile);
     const parsed = loadZeitfensterFromBuffer(buffer);
     return parsed.index;
   } catch (_error) {
@@ -1666,6 +1675,7 @@ async function resolveGpsIndexFromHeaders(req, window = {}, debug = false) {
 
 app.get("/api/billing/export", async (req, res) => {
   try {
+    const scope = scopeFromReq(req);
     const filePath = resolveExportFilePath(req, EXPORT_XLSX_PATH);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({
@@ -1701,7 +1711,7 @@ app.get("/api/billing/export", async (req, res) => {
     );
     const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
       filteredTransports,
-      loadPersistedUnloadWindowIndex(),
+      loadPersistedUnloadWindowIndex(scope),
     );
     const filterMeta = buildUnloadDateFilterMeta(
       transports,
@@ -1749,6 +1759,7 @@ app.get("/api/billing/export", async (req, res) => {
 
 app.get("/api/billing/live", async (req, res) => {
   try {
+    const scope = scopeFromReq(req);
     const filePath = resolveExportFilePath(req, EXPORT_XLSX_PATH);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({
@@ -1782,7 +1793,7 @@ app.get("/api/billing/live", async (req, res) => {
     );
     const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
       filteredTransports,
-      loadPersistedUnloadWindowIndex(),
+      loadPersistedUnloadWindowIndex(scope),
     );
     const filterMeta = buildUnloadDateFilterMeta(
       transports,
@@ -1886,6 +1897,7 @@ app.post(
   }),
   async (req, res) => {
     try {
+      const scope = scopeFromReq(req);
       const buffer = req.body;
       if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
         return res
@@ -1901,6 +1913,7 @@ app.post(
         buffer,
         fileName: req.query.name ? String(req.query.name) : "upload.xlsx",
         transports,
+        scope,
       });
       const sixfoldDateFrom = req.query.sixfoldDateFrom
         ? String(req.query.sixfoldDateFrom).trim()
@@ -1915,7 +1928,7 @@ app.post(
       );
       const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
         filteredTransports,
-        loadPersistedUnloadWindowIndex(),
+        loadPersistedUnloadWindowIndex(scope),
       );
       const filterMeta = buildUnloadDateFilterMeta(
         transports,
@@ -1978,6 +1991,7 @@ app.post(
   }),
   async (req, res) => {
     try {
+      const scope = scopeFromReq(req);
       const buffer = req.body;
       if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
         return res
@@ -2009,7 +2023,7 @@ app.post(
       );
       const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
         filteredTransports,
-        loadPersistedUnloadWindowIndex(),
+        loadPersistedUnloadWindowIndex(scope),
       );
       const filterMeta = buildUnloadDateFilterMeta(
         transports,

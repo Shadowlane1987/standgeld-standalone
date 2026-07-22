@@ -1,5 +1,12 @@
 "use strict";
 
+const APP_SCOPE = (() => {
+  const raw = String(window.STANDGELD_SCOPE || "fernverkehr")
+    .trim()
+    .toLowerCase();
+  return raw === "nahverkehr" ? "nahverkehr" : "fernverkehr";
+})();
+
 const el = {
   freeMinutes: document.getElementById("freeMinutes"),
   blockMinutes: document.getElementById("blockMinutes"),
@@ -60,7 +67,7 @@ let activeDetailStop = null;
 let currentImportId = "";
 let currentImports = [];
 const bookkeepingByKey = new Map();
-const BOOKKEEPING_STORAGE_KEY = "standgeld.bookkeeping.v1";
+const BOOKKEEPING_STORAGE_KEY = `standgeld.bookkeeping.${APP_SCOPE}.v1`;
 
 const REASON_LABELS = {
   chargeable: "Abrechenbar",
@@ -599,6 +606,7 @@ function render() {
 
 function ruleParams() {
   return new URLSearchParams({
+    scope: APP_SCOPE,
     freeMinutes: el.freeMinutes.value,
     blockMinutes: el.blockMinutes.value,
     blockRateEur: el.blockRateEur.value,
@@ -649,7 +657,9 @@ function setImportOptions(imports, preferredId = "") {
 }
 
 async function refreshImports(preferredId = "", silent = false) {
-  const res = await fetch("/api/imports");
+  const res = await fetch(
+    `/api/imports?scope=${encodeURIComponent(APP_SCOPE)}`,
+  );
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   currentImports = Array.isArray(data.imports) ? data.imports : [];
@@ -825,11 +835,14 @@ async function uploadUnloadWindows() {
   setStatus(`Importiere Entladezeitfenster aus „${file.name}“ …`);
 
   try {
-    const res = await fetch("/api/windows/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file,
-    });
+    const res = await fetch(
+      `/api/windows/upload?scope=${encodeURIComponent(APP_SCOPE)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      },
+    );
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
@@ -862,7 +875,8 @@ function openImportPage() {
     setStatus("Bitte zuerst einen Import auswählen.", "error");
     return;
   }
-  const target = `/batch.html?import=${encodeURIComponent(importId)}`;
+  const pagePath = window.location.pathname || "/batch.html";
+  const target = `${pagePath}?import=${encodeURIComponent(importId)}`;
   window.open(target, "_blank", "noopener");
 }
 

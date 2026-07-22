@@ -53,6 +53,15 @@ function summarizeTransports(transports) {
   };
 }
 
+function normalizeScope(value) {
+  const scope = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!scope) return "fernverkehr";
+  if (scope === "nahverkehr") return "nahverkehr";
+  return "fernverkehr";
+}
+
 class ImportStore {
   constructor(options = {}) {
     this.root = options.root || DEFAULT_ROOT;
@@ -65,7 +74,7 @@ class ImportStore {
     ensureDir(this.metaDir);
   }
 
-  saveImport({ buffer, fileName, transports }) {
+  saveImport({ buffer, fileName, transports, scope }) {
     if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
       throw new Error("Leerer Import kann nicht gespeichert werden.");
     }
@@ -73,6 +82,7 @@ class ImportStore {
     this.init();
     const ext = path.extname(String(fileName || "").trim()) || ".xlsx";
     const summary = summarizeTransports(transports);
+    const importScope = normalizeScope(scope);
 
     let lastError = null;
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -91,6 +101,7 @@ class ImportStore {
             String(fileName || storedFileName).trim() || storedFileName,
           stored_file_name: storedFileName,
           imported_at: importedAt,
+          scope: importScope,
           ...summary,
         };
 
@@ -111,14 +122,23 @@ class ImportStore {
     );
   }
 
-  listImports() {
+  listImports(options = {}) {
     this.init();
+    const scopeFilter = options.scope ? normalizeScope(options.scope) : null;
+
     return fs
       .readdirSync(this.metaDir)
       .filter((name) => name.endsWith(".json"))
       .map((name) =>
         JSON.parse(fs.readFileSync(path.join(this.metaDir, name), "utf8")),
       )
+      .filter((meta) => {
+        if (!scopeFilter) return true;
+        const metaScope = normalizeScope(meta.scope);
+        // Rueckwaertskompatibel: alte Metadaten ohne scope gelten als Fernverkehr.
+        if (!meta.scope && scopeFilter === "fernverkehr") return true;
+        return metaScope === scopeFilter;
+      })
       .sort((a, b) =>
         String(b.imported_at).localeCompare(String(a.imported_at)),
       );
@@ -169,4 +189,5 @@ module.exports = {
   DEFAULT_ROOT,
   ImportStore,
   generateImportId,
+  normalizeScope,
 };
