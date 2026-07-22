@@ -260,6 +260,22 @@ async function persistRuleSettingsAndReload() {
   }
 }
 
+function applyResult(data) {
+  const summary = data?.summary || {};
+  if (summary.total_fee_eur != null) {
+    el.totalFee.textContent = summary.total_fee_display || "0,00 €";
+  }
+  if (typeof data?.cached === "boolean") {
+    setStatus(
+      data.cached
+        ? "Verwendete gecachte Abrechnung."
+        : "Frische Abrechnung berechnet.",
+      data.cached ? "info" : "success",
+    );
+  }
+  render();
+}
+
 function restoreRuleSettings() {
   const stored = readRuleStorage();
   lateArrivalGraceEnabledState = Boolean(stored.lateArrivalGraceEnabled);
