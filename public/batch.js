@@ -27,6 +27,8 @@ const el = {
   gpsMissingCount: document.getElementById("gpsMissingCount"),
   totalFee: document.getElementById("totalFee"),
   filterMode: document.getElementById("filterMode"),
+  bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
+  bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
   rows: document.getElementById("rows"),
   stopDetailModal: document.getElementById("stopDetailModal"),
   stopDetailTitle: document.getElementById("stopDetailTitle"),
@@ -34,9 +36,21 @@ const el = {
   stopDetailRows: document.getElementById("stopDetailRows"),
   closeStopDetailModalBtn: document.getElementById("closeStopDetailModalBtn"),
   closeStopDetailModalBtn2: document.getElementById("closeStopDetailModalBtn2"),
+  openJustificationBtn: document.getElementById("openJustificationBtn"),
+  justificationModal: document.getElementById("justificationModal"),
+  justificationText: document.getElementById("justificationText"),
+  copyJustificationBtn: document.getElementById("copyJustificationBtn"),
+  closeJustificationModalBtn: document.getElementById(
+    "closeJustificationModalBtn",
+  ),
+  closeJustificationModalBtn2: document.getElementById(
+    "closeJustificationModalBtn2",
+  ),
 };
 
 let currentStops = [];
+let activeDetailStop = null;
+const bookkeepingByKey = new Map();
 
 const REASON_LABELS = {
   chargeable: "Abrechenbar",
@@ -133,6 +147,7 @@ function detailRowHtml(label, xpValue, gpsValue, usedValue) {
 
 function openStopDetailModal(stop) {
   if (!el.stopDetailModal || !stop) return;
+  activeDetailStop = stop;
 
   const typeLabel = TYPE_LABELS[stop.stop_type] || stop.stop_type || "-";
   el.stopDetailTitle.textContent = `${stop.transport_number || "-"} · ${typeLabel}`;
@@ -185,6 +200,69 @@ function closeStopDetailModal() {
   el.stopDetailModal.hidden = true;
 }
 
+function billedMinutes(stop) {
+  if (!stop || !stop.chargeable) return 0;
+  const blocks = Number(stop.billable_blocks || 0);
+  const blockMinutes = Number(stop.block_minutes || 30);
+  return Math.max(0, blocks * blockMinutes);
+}
+
+function buildJustificationText(stop) {
+  if (!stop) return "";
+
+  const typeLabel = TYPE_LABELS[stop.stop_type] || stop.stop_type || "-";
+  const arrivalUsed = isoToLocal(stop.arrival_time_used);
+  const departureUsed = isoToLocal(stop.departure_time_used);
+  const windowLocal = stop.window_local || "-";
+  const standing = minutesToHours(stop.counted_standing_minutes);
+  const freeText = minutesToHours(stop.free_minutes || 120);
+  const billedText = minutesToHours(billedMinutes(stop));
+  const amount = euro(stop.fee_eur);
+  const source = sourceLabel(stop);
+
+  return [
+    `Transport: ${stop.transport_number || "-"} (${typeLabel})`,
+    `Zeitfenster: ${windowLocal}`,
+    `Ankunft (verwendet): ${arrivalUsed}`,
+    `Abfahrt (verwendet): ${departureUsed}`,
+    `Standzeit ab Zählbeginn: ${standing}`,
+    `Freie Zeit: ${freeText}`,
+    `Abgerechnete Zeit: ${billedText}`,
+    `Betrag: ${amount}`,
+    `Quelle der verwendeten Zeiten: ${source}`,
+  ].join("\n");
+}
+
+function openJustificationModal() {
+  if (!el.justificationModal || !el.justificationText || !activeDetailStop) {
+    return;
+  }
+  el.justificationText.value = buildJustificationText(activeDetailStop);
+  el.justificationModal.hidden = false;
+}
+
+function closeJustificationModal() {
+  if (!el.justificationModal) return;
+  el.justificationModal.hidden = true;
+}
+
+async function copyJustificationText() {
+  const text = String(el.justificationText?.value || "").trim();
+  if (!text) return;
+
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus("Begründung in Zwischenablage kopiert.", "success");
+  } catch {
+    if (el.justificationText) {
+      el.justificationText.focus();
+      el.justificationText.select();
+      document.execCommand("copy");
+      setStatus("Begründung in Zwischenablage kopiert.", "success");
+    }
+  }
+}
+
 function filteredStops() {
   const mode = el.filterMode.value;
   if (mode === "chargeable") return currentStops.filter((s) => s.fee_eur > 0);
@@ -217,6 +295,98 @@ function plateCheckLabel(stop) {
   return excelPlate || gpsPlate || "-";
 }
 
+function stopKey(stop) {
+  return [
+    String(stop.transport_number || "").trim(),
+    String(stop.stop_type || "").trim(),
+    String(stop.window_local || "").trim(),
+    String(stop.arrival_time_used || "").trim(),
+    String(stop.departure_time_used || "").trim(),
+  ].join("|");
+}
+
+function getBookkeepingEntry(stop) {
+  const key = stopKey(stop);
+  if (!bookkeepingByKey.has(key)) {
+    bookkeepingByKey.set(key, {
+      colaNumber: String(stop.delivery_number || "").trim(),
+      billed: Boolean(stop.fee_eur > 0),
+      surchargeId: "",
+    });
+  }
+  return bookkeepingByKey.get(key);
+}
+
+function ensureBookkeepingEntries(stops) {
+  for (const stop of stops || []) getBookkeepingEntry(stop);
+}
+
+function buildBookkeepingRows(onlyMarked) {
+  const rows = [];
+  for (const stop of currentStops || []) {
+    const entry = getBookkeepingEntry(stop);
+    if (onlyMarked && !entry.billed) continue;
+
+    rows.push({
+      cola_number: entry.colaNumber || "",
+      amount_eur: Number(stop.fee_eur || 0),
+      surcharge_id: entry.surchargeId || "",
+    });
+  }
+  return rows;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportBookkeeping() {
+  const onlyMarked = Boolean(el.bookkeepingOnlyMarked?.checked);
+  const rows = buildBookkeepingRows(onlyMarked);
+  if (!rows.length) {
+    setStatus("Keine Positionen für den Buchungs-Export ausgewählt.", "error");
+    return;
+  }
+
+  if (el.bookkeepingExportBtn) el.bookkeepingExportBtn.disabled = true;
+  setStatus("Erstelle Buchungs-Excel …");
+
+  try {
+    const res = await fetch("/api/billing/bookkeeping-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows }),
+    });
+
+    if (!res.ok) {
+      let err = `HTTP ${res.status}`;
+      try {
+        const data = await res.json();
+        err = data.error || err;
+      } catch {
+        // ignore JSON parse error
+      }
+      throw new Error(err);
+    }
+
+    const blob = await res.blob();
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `standgeld_buchungsjournal_${stamp}.xlsx`);
+    setStatus("Buchungs-Excel wurde exportiert.", "success");
+  } catch (error) {
+    setStatus(error.message || "Buchungs-Export fehlgeschlagen.", "error");
+  } finally {
+    if (el.bookkeepingExportBtn) el.bookkeepingExportBtn.disabled = false;
+  }
+}
+
 function render() {
   const stops = filteredStops();
   el.rows.innerHTML = "";
@@ -235,6 +405,9 @@ function render() {
     const src = sourceLabel(stop);
     const srcClass = sourceClass(stop);
 
+    const bk = getBookkeepingEntry(stop);
+    const checkedAttr = bk.billed ? "checked" : "";
+
     tr.innerHTML = `
       <td>${stop.transport_number || "-"}</td>
       <td>${TYPE_LABELS[stop.stop_type] || stop.stop_type || "-"}</td>
@@ -249,7 +422,36 @@ function render() {
       <td>${stop.billable_blocks || 0}</td>
       <td>${euro(stop.fee_eur)}</td>
       <td>${statusLabel}</td>
+      <td><input class="bookkeeping-input" data-bk="cola" value="${bk.colaNumber || ""}" placeholder="z.B. 0346…" /></td>
+      <td><input type="checkbox" data-bk="billed" ${checkedAttr} /></td>
+      <td><input class="bookkeeping-input" data-bk="surcharge" value="${bk.surchargeId || ""}" placeholder="Zuschlags-ID" /></td>
     `;
+
+    tr.querySelectorAll("input[data-bk]").forEach((input) => {
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("keydown", (event) => event.stopPropagation());
+    });
+
+    const colaInput = tr.querySelector('input[data-bk="cola"]');
+    const billedInput = tr.querySelector('input[data-bk="billed"]');
+    const surchargeInput = tr.querySelector('input[data-bk="surcharge"]');
+
+    if (colaInput) {
+      colaInput.addEventListener("input", () => {
+        bk.colaNumber = String(colaInput.value || "").trim();
+      });
+    }
+    if (billedInput) {
+      billedInput.addEventListener("change", () => {
+        bk.billed = Boolean(billedInput.checked);
+      });
+    }
+    if (surchargeInput) {
+      surchargeInput.addEventListener("input", () => {
+        bk.surchargeId = String(surchargeInput.value || "").trim();
+      });
+    }
+
     tr.addEventListener("click", () => openStopDetailModal(stop));
     tr.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -272,6 +474,7 @@ function ruleParams() {
 
 function applyResult(data) {
   currentStops = data.stops || [];
+  ensureBookkeepingEntries(currentStops);
   el.transportCount.textContent = data.summary.transport_count;
   el.stopCount.textContent = data.summary.stop_count;
   el.chargeableCount.textContent = data.summary.chargeable_count;
@@ -345,13 +548,13 @@ async function load() {
   const hasGps = Boolean(gps["x-sixfold-url"]);
   setStatus(
     hasGps
-      ? "Lade Transporte aus Event Management + GPS-Abgleich …"
-      : "Lade Transporte aus Event Management …",
+      ? "Lade Transporte aus Export + GPS-Abgleich …"
+      : "Lade Transporte aus Export …",
   );
   el.loadBtn.disabled = true;
 
   try {
-    const baseUrl = `/api/billing/live?${ruleParams().toString()}`;
+    const baseUrl = `/api/billing?${ruleParams().toString()}`;
     const url = baseUrl + sixfoldParams();
     const res = await fetch(url, {
       headers: gps,
@@ -384,16 +587,14 @@ async function upload() {
     params.set("name", file.name);
     const gps = sixfoldHeaders();
     const headers = { "Content-Type": "application/octet-stream", ...gps };
-    const baseUrl = `/api/billing/live-upload?${params.toString()}`;
+    const baseUrl = `/api/billing/upload?${params.toString()}`;
     const url = baseUrl + sixfoldParams();
     if (gps["x-sixfold-url"]) {
       setStatus(
-        `Lade „${file.name}" hoch, lese Event Management + GPS und rechne ab …`,
+        `Lade „${file.name}" hoch, gleiche mit Sixfold ab und rechne ab …`,
       );
     } else {
-      setStatus(
-        `Lade „${file.name}" hoch, lese Event Management und rechne ab …`,
-      );
+      setStatus(`Lade „${file.name}" hoch und rechne ab …`);
     }
     const res = await fetch(url, {
       method: "POST",
@@ -544,20 +745,51 @@ el.fileInput.addEventListener("change", () => {
 });
 el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
 el.filterMode.addEventListener("change", render);
+if (el.bookkeepingExportBtn) {
+  el.bookkeepingExportBtn.addEventListener("click", exportBookkeeping);
+}
 if (el.closeStopDetailModalBtn) {
   el.closeStopDetailModalBtn.addEventListener("click", closeStopDetailModal);
 }
 if (el.closeStopDetailModalBtn2) {
   el.closeStopDetailModalBtn2.addEventListener("click", closeStopDetailModal);
 }
+if (el.openJustificationBtn) {
+  el.openJustificationBtn.addEventListener("click", openJustificationModal);
+}
+if (el.copyJustificationBtn) {
+  el.copyJustificationBtn.addEventListener("click", copyJustificationText);
+}
+if (el.closeJustificationModalBtn) {
+  el.closeJustificationModalBtn.addEventListener(
+    "click",
+    closeJustificationModal,
+  );
+}
+if (el.closeJustificationModalBtn2) {
+  el.closeJustificationModalBtn2.addEventListener(
+    "click",
+    closeJustificationModal,
+  );
+}
 if (el.stopDetailModal) {
   el.stopDetailModal.addEventListener("click", (event) => {
     if (event.target === el.stopDetailModal) closeStopDetailModal();
   });
 }
+if (el.justificationModal) {
+  el.justificationModal.addEventListener("click", (event) => {
+    if (event.target === el.justificationModal) closeJustificationModal();
+  });
+}
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeStopDetailModal();
+  if (event.key !== "Escape") return;
+  if (el.justificationModal && !el.justificationModal.hidden) {
+    closeJustificationModal();
+    return;
+  }
+  closeStopDetailModal();
 });
 
 // Beim Öffnen direkt laden.
-load();
+setStatus("Bereit. Bitte Export-Datei wählen und abrechnen.");

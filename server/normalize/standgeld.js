@@ -32,7 +32,7 @@ const DEFAULT_CONFIG = Object.freeze({
   blockRateEur: 30, // 30 EUR je angefangenem Block
   maxFeeEur: 650, // Obergrenze: mehr als 650 EUR wird nie abgerechnet
   maxPlausibleMinutes: 1440, // > 24 h Standzeit = unplausibel -> Prueffall
-  rebookingGapMinutes: 180, // GPS-Ankunft >= 3 h vor Fenster -> Umbuchungs-/Pausefall
+  rebookingGapMinutes: 360, // GPS-Ankunft >= 6 h vor Fenster -> Umbuchungs-/Pausefall
 });
 
 const REASON = Object.freeze({

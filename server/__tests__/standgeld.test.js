@@ -206,18 +206,18 @@ test("Standzeit > 12h mit Ruhezeit ergibt niedrige Gebühr (nicht 650 EUR Deckel
 });
 
 test("Umbuchung/Pause: GPS-Ankunft weit vor Fenster -> ab Ankunft zaehlen + Prueffall", () => {
-  // Fenster 06:00 (umgebucht), GPS-Ankunft 4h frueher (02:00), Abfahrt 09:00.
-  // Ohne Sonderregel wuerde ab 06:00 gezaehlt (3h). Mit GPS-Beleg ab 02:00 (7h).
+  // Fenster 06:00 (umgebucht), GPS-Ankunft 6h frueher (00:00), Abfahrt 09:00.
+  // Ohne Sonderregel wuerde ab 06:00 gezaehlt (3h). Mit GPS-Beleg ab 00:00 (9h).
   const r = computeStandgeld(
     stop({
-      arrival_time: "2026-07-16T02:00:00.000Z",
+      arrival_time: "2026-07-16T00:00:00.000Z",
       departure_time: "2026-07-16T09:00:00.000Z",
       arrival_gps_verified: true,
     }),
   );
   assert.equal(r.rebooking_suspected, true);
-  assert.equal(r.count_start, "2026-07-16T02:00:00.000Z");
-  assert.equal(r.counted_standing_minutes, 420); // 7h ab echter Ankunft
+  assert.equal(r.count_start, "2026-07-16T00:00:00.000Z");
+  assert.equal(r.counted_standing_minutes, 540); // 9h ab echter Ankunft
   assert.equal(r.needs_review, true); // Prueffall
   assert.equal(r.chargeable, true);
 });
@@ -237,7 +237,7 @@ test("Umbuchung/Pause: OHNE GPS bleibt es beim Fenster (konservativ)", () => {
 });
 
 test("Umbuchung/Pause: GPS-Ankunft nur knapp vor Fenster (unter Schwelle) -> Fenster", () => {
-  // GPS-Ankunft nur 1h vor Fenster (< 3h Schwelle) -> normale Fruehankunft, kein
+  // GPS-Ankunft nur 1h vor Fenster (< 6h Schwelle) -> normale Fruehankunft, kein
   // Umbuchungsfall. Ab Fenster zaehlen.
   const r = computeStandgeld(
     stop({

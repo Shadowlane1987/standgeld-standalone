@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const axios = require("axios");
+const XLSX = require("xlsx");
 const dotenv = require("dotenv");
 
 const { loadTransporeonExport } = require("./tools/readTransporeonExport");
@@ -1926,6 +1927,42 @@ app.post(
     }
   },
 );
+
+app.post("/api/billing/bookkeeping-export", (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!rows.length) {
+      return res.status(400).json({
+        error: "Keine Buchungsdaten übergeben.",
+      });
+    }
+
+    const exportRows = rows.map((row) => ({
+      "Transport-NR. (Cola Nr.)": String(row.cola_number || "").trim(),
+      "Betrag €": Number(row.amount_eur || 0),
+      "Zuschlags ID": String(row.surcharge_id || "").trim(),
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 24 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Buchungsjournal");
+
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const filename = `standgeld_buchungsjournal_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ error: error.message || "Buchungs-Export fehlgeschlagen." });
+  }
+});
 
 app.post("/api/sixfold/standgeld", async (req, res) => {
   try {
