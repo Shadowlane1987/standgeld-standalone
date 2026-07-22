@@ -13,6 +13,7 @@ const el = {
   blockRateEur: document.getElementById("blockRateEur"),
   triggerMinutes: document.getElementById("triggerMinutes"),
   lateArrivalGraceEnabled: document.getElementById("lateArrivalGraceEnabled"),
+  lateArrivalGraceToggle: document.getElementById("lateArrivalGraceToggle"),
   lateArrivalGraceMinutes: document.getElementById("lateArrivalGraceMinutes"),
   loadBtn: document.getElementById("loadBtn"),
   fileInput: document.getElementById("fileInput"),
@@ -234,11 +235,24 @@ function persistRuleSettings() {
   });
 }
 
+function syncLateArrivalGraceToggle() {
+  if (!el.lateArrivalGraceToggle || !el.lateArrivalGraceEnabled) return;
+  const enabled = Boolean(el.lateArrivalGraceEnabled.checked);
+  el.lateArrivalGraceToggle.textContent = enabled
+    ? "Verspätungsregel: Ein"
+    : "Verspätungsregel: Aus";
+  el.lateArrivalGraceToggle.setAttribute(
+    "aria-pressed",
+    enabled ? "true" : "false",
+  );
+}
+
 async function persistRuleSettingsAndReload() {
   persistRuleSettings();
+  syncLateArrivalGraceToggle();
   if (currentImportId) {
     try {
-      await load();
+      await load(true);
     } catch (_error) {
       // load() setzt den Status selbst
     }
@@ -255,6 +269,7 @@ function restoreRuleSettings() {
   if (el.lateArrivalGraceMinutes && stored.lateArrivalGraceMinutes != null) {
     el.lateArrivalGraceMinutes.value = String(stored.lateArrivalGraceMinutes);
   }
+  syncLateArrivalGraceToggle();
 }
 
 function writeSixfoldStorage(value) {
@@ -865,7 +880,7 @@ function sixfoldParams() {
   return query ? `&${query}` : "";
 }
 
-async function load() {
+async function load(forceRecalc = false) {
   const gps = sixfoldHeaders();
   const hasGps = Boolean(gps["x-sixfold-url"]);
   const importId = String(
@@ -888,6 +903,9 @@ async function load() {
   try {
     const params = ruleParams();
     params.set("importId", importId);
+    if (forceRecalc) {
+      params.set("forceRecalc", "1");
+    }
     const baseUrl = `/api/billing/export?${params.toString()}`;
     const url = baseUrl + sixfoldParams();
     const res = await fetch(url, {
@@ -1248,6 +1266,12 @@ if (el.lateArrivalGraceEnabled) {
     "change",
     persistRuleSettingsAndReload,
   );
+}
+if (el.lateArrivalGraceToggle && el.lateArrivalGraceEnabled) {
+  el.lateArrivalGraceToggle.addEventListener("click", () => {
+    el.lateArrivalGraceEnabled.checked = !el.lateArrivalGraceEnabled.checked;
+    el.lateArrivalGraceEnabled.dispatchEvent(new Event("change"));
+  });
 }
 if (el.lateArrivalGraceMinutes) {
   el.lateArrivalGraceMinutes.addEventListener("input", persistRuleSettings);

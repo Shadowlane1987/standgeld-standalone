@@ -5,8 +5,9 @@
  *
  * Regeln:
  * 1. Freizeit: 2 h (120 min) sind frei.
- * 2. Zaehlbeginn IMMER ab Zeitfenster; bei spaeterer Ankunft ab Ankunftszeit.
- *    Wartezeit VOR dem Fenster wird NIE gezaehlt -> count_start = max(Fenster, Ankunft).
+ * 2. Normalfall: Zaehlbeginn ab Zeitfenster; bei spaeterer Ankunft ab Ankunftszeit.
+ *    Mit aktivierter Verspätungsregel und Ankunft innerhalb der Grace-Zeit startet
+ *    die Zaehlung erst 3 h nach Ankunft.
  * 3. Ausloese-Schwelle: erst ab 10 min ueber der Freizeit wird abgerechnet
  *    (2 h 09 = 0 EUR, ab 2 h 10 = erste Stufe).
  * 4. Danach je ANGEFANGENE 30 min = 30 EUR (aufgerundete Bloecke).
@@ -129,10 +130,14 @@ function computeStandgeld(input = {}, config = {}) {
 
   // Regel 2: Zaehlbeginn ab Fenster, bei Spaetankunft ab Ankunft.
   // Wartezeit vor dem Fenster wird nie gezaehlt - AUSSER im Umbuchungsfall.
-  const lateGraceStartMs =
-    lateGraceEnabled && arrivedLate
-      ? windowStart + lateGraceMinutes * 60000
-      : windowStart;
+  const lateGraceApplies =
+    lateGraceEnabled &&
+    arrivedLate &&
+    arrival - windowStart <= lateGraceMinutes * 60000;
+
+  const lateGraceStartMs = lateGraceApplies
+    ? arrival + 180 * 60000
+    : windowStart;
 
   const countStartMs = rebookingSuspected
     ? arrival
@@ -224,6 +229,7 @@ function computeStandgeld(input = {}, config = {}) {
     rebooking_suspected: rebookingSuspected,
     late_arrival_grace_enabled: lateGraceEnabled,
     late_arrival_grace_minutes: lateGraceMinutes,
+    late_arrival_grace_applied: lateGraceApplies,
   });
 }
 

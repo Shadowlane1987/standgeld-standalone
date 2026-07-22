@@ -117,6 +117,11 @@ function billingCacheKey(req) {
   return Buffer.from(JSON.stringify(keyData)).toString("base64url");
 }
 
+function shouldForceRecalc(req) {
+  const value = String(req.query.forceRecalc || req.query.recalc || "").trim();
+  return value === "1" || value.toLowerCase() === "true";
+}
+
 function loadCachedBillingResult(importId, cacheKey) {
   const cached = importStore.getBillingResult(importId, cacheKey);
   return cached && cached.result ? cached.result : null;
@@ -1762,8 +1767,9 @@ app.get("/api/billing/export", async (req, res) => {
     const config = parseBillingConfig(req);
     const importId = String(req.query.importId || "").trim();
     const cacheKey = billingCacheKey(req);
+    const forceRecalc = shouldForceRecalc(req);
 
-    if (importId) {
+    if (importId && !forceRecalc) {
       const cachedResult = loadCachedBillingResult(importId, cacheKey);
       if (cachedResult) {
         return res.json({
@@ -1870,8 +1876,9 @@ app.get("/api/billing/live", async (req, res) => {
     const config = parseBillingConfig(req);
     const importId = String(req.query.importId || "").trim();
     const cacheKey = billingCacheKey(req);
+    const forceRecalc = shouldForceRecalc(req);
 
-    if (importId) {
+    if (importId && !forceRecalc) {
       const cachedResult = loadCachedBillingResult(importId, cacheKey);
       if (cachedResult) {
         return res.json({
