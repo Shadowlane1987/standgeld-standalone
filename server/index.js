@@ -1938,7 +1938,7 @@ app.post("/api/billing/bookkeeping-export", (req, res) => {
     }
 
     const exportRows = rows.map((row) => ({
-      "Transport-NR. (Cola Nr.)": String(row.cola_number || "").trim(),
+      "Transport-NR. (Cola Nr.)": String(row.transport_number || "").trim(),
       "Betrag €": Number(row.amount_eur || 0),
       "Zuschlags ID": String(row.surcharge_id || "").trim(),
     }));

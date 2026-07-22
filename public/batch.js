@@ -210,26 +210,21 @@ function billedMinutes(stop) {
 function buildJustificationText(stop) {
   if (!stop) return "";
 
-  const typeLabel = TYPE_LABELS[stop.stop_type] || stop.stop_type || "-";
   const arrivalUsed = isoToLocal(stop.arrival_time_used);
   const departureUsed = isoToLocal(stop.departure_time_used);
-  const windowLocal = stop.window_local || "-";
-  const standing = minutesToHours(stop.counted_standing_minutes);
+  const standing = minutesToHours(
+    standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
+      stop.counted_standing_minutes,
+  );
   const freeText = minutesToHours(stop.free_minutes || 120);
   const billedText = minutesToHours(billedMinutes(stop));
-  const amount = euro(stop.fee_eur);
-  const source = sourceLabel(stop);
 
   return [
-    `Transport: ${stop.transport_number || "-"} (${typeLabel})`,
-    `Zeitfenster: ${windowLocal}`,
-    `Ankunft (verwendet): ${arrivalUsed}`,
-    `Abfahrt (verwendet): ${departureUsed}`,
-    `Standzeit ab Zählbeginn: ${standing}`,
-    `Freie Zeit: ${freeText}`,
+    `Ankunft: ${arrivalUsed}`,
+    `Abfahrt: ${departureUsed}`,
+    `Standzeit: ${standing}`,
+    `2h frei: ${freeText}`,
     `Abgerechnete Zeit: ${billedText}`,
-    `Betrag: ${amount}`,
-    `Quelle der verwendeten Zeiten: ${source}`,
   ].join("\n");
 }
 
@@ -309,9 +304,7 @@ function getBookkeepingEntry(stop) {
   const key = stopKey(stop);
   if (!bookkeepingByKey.has(key)) {
     bookkeepingByKey.set(key, {
-      colaNumber: String(stop.delivery_number || "").trim(),
-      billed: Boolean(stop.fee_eur > 0),
-      surchargeId: "",
+      billed: false,
     });
   }
   return bookkeepingByKey.get(key);
@@ -328,9 +321,9 @@ function buildBookkeepingRows(onlyMarked) {
     if (onlyMarked && !entry.billed) continue;
 
     rows.push({
-      cola_number: entry.colaNumber || "",
+      transport_number: String(stop.transport_number || "").trim(),
       amount_eur: Number(stop.fee_eur || 0),
-      surcharge_id: entry.surchargeId || "",
+      surcharge_id: "",
     });
   }
   return rows;
@@ -422,9 +415,7 @@ function render() {
       <td>${stop.billable_blocks || 0}</td>
       <td>${euro(stop.fee_eur)}</td>
       <td>${statusLabel}</td>
-      <td><input class="bookkeeping-input" data-bk="cola" value="${bk.colaNumber || ""}" placeholder="z.B. 0346…" /></td>
       <td><input type="checkbox" data-bk="billed" ${checkedAttr} /></td>
-      <td><input class="bookkeeping-input" data-bk="surcharge" value="${bk.surchargeId || ""}" placeholder="Zuschlags-ID" /></td>
     `;
 
     tr.querySelectorAll("input[data-bk]").forEach((input) => {
@@ -432,23 +423,10 @@ function render() {
       input.addEventListener("keydown", (event) => event.stopPropagation());
     });
 
-    const colaInput = tr.querySelector('input[data-bk="cola"]');
     const billedInput = tr.querySelector('input[data-bk="billed"]');
-    const surchargeInput = tr.querySelector('input[data-bk="surcharge"]');
-
-    if (colaInput) {
-      colaInput.addEventListener("input", () => {
-        bk.colaNumber = String(colaInput.value || "").trim();
-      });
-    }
     if (billedInput) {
       billedInput.addEventListener("change", () => {
         bk.billed = Boolean(billedInput.checked);
-      });
-    }
-    if (surchargeInput) {
-      surchargeInput.addEventListener("input", () => {
-        bk.surchargeId = String(surchargeInput.value || "").trim();
       });
     }
 
