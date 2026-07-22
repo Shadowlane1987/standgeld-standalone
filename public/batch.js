@@ -7,8 +7,6 @@ const el = {
   triggerMinutes: document.getElementById("triggerMinutes"),
   loadBtn: document.getElementById("loadBtn"),
   fileInput: document.getElementById("fileInput"),
-  sixfoldDateFrom: document.getElementById("sixfoldDateFrom"),
-  sixfoldDateTo: document.getElementById("sixfoldDateTo"),
   uploadBtn: document.getElementById("uploadBtn"),
   sixfoldUrl: document.getElementById("sixfoldUrl"),
   sixfoldToken: document.getElementById("sixfoldToken"),
@@ -497,11 +495,6 @@ function sixfoldHeaders() {
 
 function sixfoldParams() {
   const params = new URLSearchParams();
-  const from = String(el.sixfoldDateFrom?.value || "").trim();
-  const to = String(el.sixfoldDateTo?.value || "").trim();
-
-  if (from) params.set("sixfoldDateFrom", from);
-  if (to) params.set("sixfoldDateTo", to);
 
   // Harte Voreinstellung: keine Teil-Abrechnung mit Luecken.
   params.set("allowPartialLive", "0");
@@ -510,18 +503,7 @@ function sixfoldParams() {
   return query ? `&${query}` : "";
 }
 
-function validateDateScope() {
-  const from = String(el.sixfoldDateFrom?.value || "").trim();
-  const to = String(el.sixfoldDateTo?.value || "").trim();
-  if (from && to && from > to) {
-    setStatus("Datumsbereich ungültig: 'von' ist später als 'bis'.", "error");
-    return false;
-  }
-  return true;
-}
-
 async function load() {
-  if (!validateDateScope()) return;
   const gps = sixfoldHeaders();
   const hasGps = Boolean(gps["x-sixfold-url"]);
   setStatus(
@@ -549,7 +531,6 @@ async function load() {
 }
 
 async function upload() {
-  if (!validateDateScope()) return;
   const file = el.fileInput.files && el.fileInput.files[0];
   if (!file) {
     setStatus("Bitte zuerst eine Excel-Datei auswählen.", "error");
