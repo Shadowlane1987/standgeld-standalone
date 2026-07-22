@@ -420,6 +420,73 @@ textarea {
   background: rgba(29, 78, 216, 0.12);
 }
 
+.time-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.time-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.time-hint {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #6b6258;
+}
+
+.time-chip-neutral {
+  background: rgba(115, 103, 90, 0.08);
+  color: #4e463d;
+}
+
+.time-chip-muted {
+  background: rgba(115, 103, 90, 0.1);
+  color: #6b6258;
+}
+
+.time-chip-match {
+  background: rgba(14, 92, 74, 0.12);
+  color: #0a4a3c;
+  box-shadow: inset 0 0 0 1px rgba(14, 92, 74, 0.14);
+}
+
+.time-chip-shift {
+  background: rgba(180, 99, 20, 0.14);
+  color: #8a4f16;
+  box-shadow: inset 0 0 0 1px rgba(180, 99, 20, 0.18);
+}
+
+.time-chip-late {
+  background: rgba(29, 78, 216, 0.12);
+  color: #1d4ed8;
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.16);
+}
+
+.time-chip-alert {
+  background: rgba(185, 28, 28, 0.12);
+  color: #b91c1c;
+  box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.16);
+}
+
+.time-chip-gps {
+  background: rgba(22, 121, 79, 0.12);
+  color: #0f5f3f;
+}
+
+.time-chip-xp {
+  background: rgba(176, 105, 28, 0.13);
+  color: #8a4f16;
+}
+
 .actions-row {
   margin-top: 10px;
 }

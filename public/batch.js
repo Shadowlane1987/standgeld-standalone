@@ -394,6 +394,70 @@ function normalizeDetailValue(value) {
   return String(value || "").trim();
 }
 
+function isSameTimestamp(left, right) {
+  const normalizedLeft = String(left || "").trim();
+  const normalizedRight = String(right || "").trim();
+  return (
+    normalizedLeft && normalizedRight && normalizedLeft === normalizedRight
+  );
+}
+
+function sourceTone(source) {
+  return String(source || "XP").toUpperCase() === "GPS"
+    ? "time-chip-gps"
+    : "time-chip-xp";
+}
+
+function timeContext(stop) {
+  const startAtWindow = isSameTimestamp(stop.count_start, stop.window_start);
+  if (stop.rebooking_suspected) {
+    return {
+      windowClass: "time-chip-muted",
+      startClass: "time-chip-alert",
+      windowHint: "Fenster",
+      startHint: "Prüffall GPS-Start",
+    };
+  }
+  if (stop.late_arrival_grace_applied) {
+    return {
+      windowClass: "time-chip-muted",
+      startClass: "time-chip-late",
+      windowHint: "Fenster",
+      startHint: "3h frei ab Ankunft",
+    };
+  }
+  if (startAtWindow) {
+    return {
+      windowClass: "time-chip-match",
+      startClass: "time-chip-match",
+      windowHint: "Fenster = Start",
+      startHint: "Fenster = Start",
+    };
+  }
+  if (stop.arrived_late) {
+    return {
+      windowClass: "time-chip-muted",
+      startClass: "time-chip-shift",
+      windowHint: "Fenster",
+      startHint: "ab Ankunft",
+    };
+  }
+  return {
+    windowClass: "time-chip-neutral",
+    startClass: "time-chip-neutral",
+    windowHint: "Fenster",
+    startHint: "Start",
+  };
+}
+
+function timeCellHtml(value, toneClass, hint) {
+  const text = value || "-";
+  const chip = toneClass ? ` time-chip ${toneClass}` : "";
+  const suffix =
+    hint && text !== "-" ? `<span class="time-hint">${hint}</span>` : "";
+  return `<span class="time-stack"><span class="${chip.trim()}">${text}</span>${suffix}</span>`;
+}
+
 function detailRowHtml(label, xpValue, gpsValue, usedValue) {
   const xp = detailCell(xpValue);
   const gps = detailCell(gpsValue);
@@ -461,6 +525,7 @@ function openStopDetailModal(stop) {
 
   const source = sourceLabel(stop);
   const kfz = plateCheckLabel(stop);
+  const context = timeContext(stop);
   const usedStanding = minutesToHours(
     standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
       stop.counted_standing_minutes,
@@ -494,6 +559,8 @@ function openStopDetailModal(stop) {
   const gpsDeparture = isoToLocal(stop.gps_departure_time);
   const usedArrival = arrivalUsed;
   const usedDeparture = departureUsed;
+  const usedArrivalWithSource = `${usedArrival}${usedArrival !== "-" ? ` (${arrivalSrc})` : ""}`;
+  const usedDepartureWithSource = `${usedDeparture}${usedDeparture !== "-" ? ` (${departureSrc})` : ""}`;
 
   const xpStanding = minutesToHours(
     standingMinutesFromIso(stop.xp_arrival_time, stop.xp_departure_time),
@@ -503,10 +570,20 @@ function openStopDetailModal(stop) {
   );
 
   el.stopDetailRows.innerHTML =
-    detailRowHtml("Ankunft", xpArrival, gpsArrival, usedArrival) +
-    detailRowHtml("Abfahrt", xpDeparture, gpsDeparture, usedDeparture) +
+    detailRowHtml("Ankunft", xpArrival, gpsArrival, usedArrivalWithSource) +
+    detailRowHtml(
+      "Abfahrt",
+      xpDeparture,
+      gpsDeparture,
+      usedDepartureWithSource,
+    ) +
     detailRowHtml("Standzeit (Ist)", xpStanding, gpsStanding, usedStanding) +
-    detailRowHtml("Standzeit ab Zählbeginn", "-", "-", countedStanding) +
+    detailRowHtml(
+      "Standzeit ab Zählbeginn",
+      "-",
+      "-",
+      `${countedStanding}${stop.late_arrival_grace_applied ? " · 3h-Regel" : ""}`,
+    ) +
     detailRowHtml("Freigrenze", "-", "-", freeWindow) +
     detailRowHtml("Über Frei", "-", "-", overFreeStanding) +
     fallbackStatusRowHtml(stop);
@@ -725,6 +802,7 @@ function render() {
 
     const src = sourceLabel(stop);
     const srcClass = sourceClass(stop);
+    const context = timeContext(stop);
 
     const bk = getBookkeepingEntry(stop);
     const checkedAttr = bk.billed ? "checked" : "";
@@ -734,10 +812,10 @@ function render() {
       <td>${plateCheckLabel(stop)}</td>
       <td>${TYPE_LABELS[stop.stop_type] || stop.stop_type || "-"}</td>
       <td><span class="${srcClass}">${src}</span></td>
-      <td>${usedBoundaryLabel(stop.arrival_time_used, stop.arrival_source)}</td>
-      <td>${usedBoundaryLabel(stop.departure_time_used, stop.departure_source)}</td>
-      <td>${isoToLocal(stop.count_start)}</td>
-      <td>${stop.window_local || "-"}</td>
+      <td>${timeCellHtml(usedBoundaryLabel(stop.arrival_time_used, stop.arrival_source), sourceTone(stop.arrival_source), stop.arrival_source || "XP")}</td>
+      <td>${timeCellHtml(usedBoundaryLabel(stop.departure_time_used, stop.departure_source), sourceTone(stop.departure_source), stop.departure_source || "XP")}</td>
+      <td>${timeCellHtml(isoToLocal(stop.count_start), context.startClass, context.startHint)}</td>
+      <td>${timeCellHtml(stop.window_local || "-", context.windowClass, context.windowHint)}</td>
       <td>${minutesToHours(stop.counted_standing_minutes)}</td>
       <td>${minutesToHours(stop.minutes_over_free)}</td>
       <td>${euro(stop.fee_eur)}</td>
