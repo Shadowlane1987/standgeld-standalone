@@ -6,8 +6,8 @@
  * Regeln:
  * 1. Freizeit: 2 h (120 min) sind frei.
  * 2. Normalfall: Zaehlbeginn ab Zeitfenster; bei spaeterer Ankunft ab Ankunftszeit.
- *    Mit aktivierter Verspätungsregel und Ankunft innerhalb der Grace-Zeit startet
- *    die Zaehlung erst 3 h nach Ankunft.
+ *    Mit aktivierter Verspätungsregel und Ankunft innerhalb der Grace-Zeit gilt
+ *    stattdessen 3 h freie Zeit ab der Ankunft.
  * 3. Ausloese-Schwelle: erst ab 10 min ueber der Freizeit wird abgerechnet
  *    (2 h 09 = 0 EUR, ab 2 h 10 = erste Stufe).
  * 4. Danach je ANGEFANGENE 30 min = 30 EUR (aufgerundete Bloecke).
@@ -135,13 +135,11 @@ function computeStandgeld(input = {}, config = {}) {
     arrivedLate &&
     arrival - windowStart <= lateGraceMinutes * 60000;
 
-  const lateGraceStartMs = lateGraceApplies
-    ? arrival + 180 * 60000
-    : windowStart;
-
-  const countStartMs = rebookingSuspected
-    ? arrival
-    : Math.max(lateGraceStartMs, arrival);
+  const freeMinutesForCharge = lateGraceApplies ? 180 : cfg.freeMinutes;
+  const countStartMs =
+    rebookingSuspected || lateGraceApplies
+      ? arrival
+      : Math.max(windowStart, arrival);
   const countStart = new Date(countStartMs).toISOString();
 
   let countedMinutes = Math.round((departure - countStartMs) / 60000);
@@ -171,7 +169,7 @@ function computeStandgeld(input = {}, config = {}) {
       arrived_late: arrivedLate,
       count_start: countStart,
       counted_standing_minutes: countedMinutes,
-      minutes_over_free: Math.max(0, countedMinutes - cfg.freeMinutes),
+      minutes_over_free: Math.max(0, countedMinutes - freeMinutesForCharge),
       effective_standing_minutes: effectiveMinutes,
       rest_time_deducted: restTimeDeducted,
       billable_blocks: 0,
@@ -184,7 +182,7 @@ function computeStandgeld(input = {}, config = {}) {
     });
   }
 
-  const rawOverrun = effectiveMinutes - cfg.freeMinutes;
+  const rawOverrun = effectiveMinutes - freeMinutesForCharge;
 
   let reason;
   let blocks = 0;
