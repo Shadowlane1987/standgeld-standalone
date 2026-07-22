@@ -28,12 +28,15 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
 const importStore = new ImportStore();
+const APP_DATA_DIR = process.env.APP_DATA_DIR
+  ? path.resolve(process.env.APP_DATA_DIR)
+  : path.join(process.cwd(), "data");
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 const EXCLUDE_FROM_TOTAL_AMOUNT_EUR = 450;
-const UNLOAD_WINDOWS_DIR = path.join(process.cwd(), "data", "imports");
+const UNLOAD_WINDOWS_DIR = path.join(APP_DATA_DIR, "imports");
 const UNLOAD_WINDOWS_FILE = path.join(
   UNLOAD_WINDOWS_DIR,
   "unload_windows.xlsx",
@@ -1410,8 +1413,7 @@ app.post(
 // Batch-Abrechnung aller Transporte aus dem Transporeon-Excel-Export.
 // Liefert Zeitfenster + Standgeld je Stopp (Laden/Entladen) fuer ALLE Transporte.
 const EXPORT_XLSX_PATH = path.join(
-  process.cwd(),
-  "data",
+  APP_DATA_DIR,
   "captures",
   "transporeon_export.xlsx",
 );

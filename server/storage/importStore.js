@@ -3,7 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 
-const DEFAULT_ROOT = path.join(__dirname, "..", "..", "data", "imports");
+const APP_DATA_DIR = process.env.APP_DATA_DIR
+  ? path.resolve(process.env.APP_DATA_DIR)
+  : path.join(process.cwd(), "data");
+const DEFAULT_ROOT = path.join(APP_DATA_DIR, "imports");
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });

@@ -35,6 +35,24 @@ Falls du statt Blueprint den Web-Service manuell anlegen willst:
 - Start Command: `npm start`
 - Health Check Path: `/api/health`
 
+### Wichtiger Hinweis zu gespeicherten Uploads
+
+Damit hochgeladene Excel-Dateien (Importe, Entladezeitfenster-Fallback) nach
+Neustarts und Deploys erhalten bleiben, muss ein persistenter Speicher genutzt
+werden.
+
+- Die App nutzt den Datenpfad aus `APP_DATA_DIR`.
+- Ohne `APP_DATA_DIR` wird lokal standardmaessig `./data` verwendet.
+- Auf Render sollte `APP_DATA_DIR=/var/data` gesetzt sein und ein Persistent
+  Disk auf `/var/data` gemountet werden.
+
+Verwendete Persistenzpfade:
+
+- `${APP_DATA_DIR}/imports/files`
+- `${APP_DATA_DIR}/imports/meta`
+- `${APP_DATA_DIR}/imports/unload_windows.xlsx`
+- `${APP_DATA_DIR}/captures/transporeon_export.xlsx` (Default-Pfad fuer Export)
+
 ## API Payload (Beispiel)
 
 ```json
