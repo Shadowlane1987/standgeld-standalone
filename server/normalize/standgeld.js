@@ -69,6 +69,7 @@ function toEpoch(isoString) {
  */
 function computeStandgeld(input = {}, config = {}) {
   const cfg = { ...DEFAULT_CONFIG, ...config };
+  let effectiveFreeMinutes = cfg.freeMinutes;
 
   const arrival = toEpoch(input.arrival_time);
   const departure = toEpoch(input.departure_time);
@@ -81,7 +82,7 @@ function computeStandgeld(input = {}, config = {}) {
     arrival_time: input.arrival_time ?? null,
     departure_time: input.departure_time ?? null,
     window_start: input.window_start ?? null,
-    free_minutes: cfg.freeMinutes,
+    free_minutes: effectiveFreeMinutes,
     block_minutes: cfg.blockMinutes,
     block_rate_eur: cfg.blockRateEur,
     max_fee_eur: cfg.maxFeeEur,
@@ -134,6 +135,7 @@ function computeStandgeld(input = {}, config = {}) {
   const lateGraceApplies = lateGraceEnabled && arrivedLate;
 
   const freeMinutesForCharge = lateGraceApplies ? 180 : cfg.freeMinutes;
+  effectiveFreeMinutes = freeMinutesForCharge;
   const countStartMs =
     rebookingSuspected || lateGraceApplies
       ? arrival
@@ -208,6 +210,7 @@ function computeStandgeld(input = {}, config = {}) {
 
   return Object.freeze({
     ...base,
+    free_minutes: effectiveFreeMinutes,
     arrived_late: arrivedLate,
     count_start: countStart,
     counted_standing_minutes: countedMinutes,
