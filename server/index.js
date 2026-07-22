@@ -75,6 +75,15 @@ function parseBillingConfig(req) {
     config.blockRateEur = Number(req.query.blockRateEur);
   if (req.query.triggerMinutes)
     config.triggerMinutes = Number(req.query.triggerMinutes);
+  if (req.query.lateArrivalGraceEnabled) {
+    config.lateArrivalGraceEnabled =
+      req.query.lateArrivalGraceEnabled === "1" ||
+      req.query.lateArrivalGraceEnabled === "true";
+  }
+  if (req.query.lateArrivalGraceMinutes)
+    config.lateArrivalGraceMinutes = Number(
+      req.query.lateArrivalGraceMinutes,
+    );
   return config;
 }
 

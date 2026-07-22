@@ -12,6 +12,8 @@ const el = {
   blockMinutes: document.getElementById("blockMinutes"),
   blockRateEur: document.getElementById("blockRateEur"),
   triggerMinutes: document.getElementById("triggerMinutes"),
+  lateArrivalGraceEnabled: document.getElementById("lateArrivalGraceEnabled"),
+  lateArrivalGraceMinutes: document.getElementById("lateArrivalGraceMinutes"),
   loadBtn: document.getElementById("loadBtn"),
   fileInput: document.getElementById("fileInput"),
   unloadWindowFileInput: document.getElementById("unloadWindowFileInput"),
@@ -200,6 +202,47 @@ function readSixfoldStorage() {
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (_error) {
     return {};
+  }
+}
+
+function readRuleStorage() {
+  try {
+    const raw = window.localStorage.getItem("standgeld.batch.rules.v1");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function writeRuleStorage(value) {
+  try {
+    window.localStorage.setItem(
+      "standgeld.batch.rules.v1",
+      JSON.stringify(value),
+    );
+  } catch (_error) {
+    // ignore storage write errors
+  }
+}
+
+function persistRuleSettings() {
+  writeRuleStorage({
+    lateArrivalGraceEnabled: Boolean(el.lateArrivalGraceEnabled?.checked),
+    lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes?.value || 45),
+  });
+}
+
+function restoreRuleSettings() {
+  const stored = readRuleStorage();
+  if (el.lateArrivalGraceEnabled) {
+    el.lateArrivalGraceEnabled.checked = Boolean(
+      stored.lateArrivalGraceEnabled,
+    );
+  }
+  if (el.lateArrivalGraceMinutes && stored.lateArrivalGraceMinutes != null) {
+    el.lateArrivalGraceMinutes.value = String(stored.lateArrivalGraceMinutes);
   }
 }
 
@@ -670,12 +713,20 @@ function render() {
 }
 
 function ruleParams() {
+  const lateArrivalGraceEnabled = Boolean(el.lateArrivalGraceEnabled?.checked);
+  const lateArrivalGraceMinutes = Number(
+    el.lateArrivalGraceMinutes?.value || 45,
+  );
   return new URLSearchParams({
     scope: APP_SCOPE,
     freeMinutes: el.freeMinutes.value,
     blockMinutes: el.blockMinutes.value,
     blockRateEur: el.blockRateEur.value,
     triggerMinutes: el.triggerMinutes.value,
+    lateArrivalGraceEnabled: lateArrivalGraceEnabled ? "1" : "0",
+    lateArrivalGraceMinutes: String(
+      Number.isFinite(lateArrivalGraceMinutes) ? lateArrivalGraceMinutes : 45,
+    ),
   });
 }
 
@@ -1181,6 +1232,13 @@ if (el.unloadWindowFileInput) {
 if (el.uploadUnloadWindowsBtn) {
   el.uploadUnloadWindowsBtn.addEventListener("click", uploadUnloadWindows);
 }
+if (el.lateArrivalGraceEnabled) {
+  el.lateArrivalGraceEnabled.addEventListener("change", persistRuleSettings);
+}
+if (el.lateArrivalGraceMinutes) {
+  el.lateArrivalGraceMinutes.addEventListener("input", persistRuleSettings);
+  el.lateArrivalGraceMinutes.addEventListener("change", persistRuleSettings);
+}
 if (el.sixfoldUrl) {
   el.sixfoldUrl.addEventListener("input", persistSixfoldCredentials);
   el.sixfoldUrl.addEventListener("change", persistSixfoldCredentials);
@@ -1238,6 +1296,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 restoreSixfoldCredentials();
+restoreRuleSettings();
 
 refreshImports("", true)
   .then(async () => {

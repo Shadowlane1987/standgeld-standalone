@@ -33,6 +33,8 @@ const DEFAULT_CONFIG = Object.freeze({
   maxFeeEur: 650, // Obergrenze: mehr als 650 EUR wird nie abgerechnet
   maxPlausibleMinutes: 1440, // > 24 h Standzeit = unplausibel -> Prueffall
   rebookingGapMinutes: 360, // GPS-Ankunft >= 6 h vor Fenster -> Umbuchungs-/Pausefall
+  lateArrivalGraceEnabled: false,
+  lateArrivalGraceMinutes: 45,
 });
 
 const REASON = Object.freeze({
@@ -105,6 +107,13 @@ function computeStandgeld(input = {}, config = {}) {
   }
 
   const arrivedLate = arrival > windowStart;
+  const lateGraceEnabled = Boolean(cfg.lateArrivalGraceEnabled);
+  const lateGraceMinutes = Math.max(
+    0,
+    Number.isFinite(Number(cfg.lateArrivalGraceMinutes))
+      ? Number(cfg.lateArrivalGraceMinutes)
+      : DEFAULT_CONFIG.lateArrivalGraceMinutes,
+  );
 
   // Sonderfall Umbuchung/Pause: Geht ein LKW in die Pause, wird das Zeitfenster
   // umgebucht (neues, spaeteres Fenster). Die echte Standzeit begann aber schon
@@ -120,9 +129,14 @@ function computeStandgeld(input = {}, config = {}) {
 
   // Regel 2: Zaehlbeginn ab Fenster, bei Spaetankunft ab Ankunft.
   // Wartezeit vor dem Fenster wird nie gezaehlt - AUSSER im Umbuchungsfall.
+  const lateGraceStartMs =
+    lateGraceEnabled && arrivedLate
+      ? windowStart + lateGraceMinutes * 60000
+      : windowStart;
+
   const countStartMs = rebookingSuspected
     ? arrival
-    : Math.max(windowStart, arrival);
+    : Math.max(lateGraceStartMs, arrival);
   const countStart = new Date(countStartMs).toISOString();
 
   let countedMinutes = Math.round((departure - countStartMs) / 60000);
@@ -208,6 +222,8 @@ function computeStandgeld(input = {}, config = {}) {
     // ODER wenn wegen Umbuchung ab der GPS-Ankunft statt ab dem Fenster gezaehlt wird.
     needs_review: Boolean(input.needs_review) || rebookingSuspected,
     rebooking_suspected: rebookingSuspected,
+    late_arrival_grace_enabled: lateGraceEnabled,
+    late_arrival_grace_minutes: lateGraceMinutes,
   });
 }
 

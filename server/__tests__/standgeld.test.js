@@ -79,6 +79,35 @@ test("Spaetankunft: Zaehlung ab Ankunft, nicht ab Fenster", () => {
   assert.equal(r.fee_eur, 30);
 });
 
+test("Verspaetungsregel aktiv: 45 Minuten Schonfrist nach Fenster", () => {
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T06:20:00.000Z",
+      departure_time: "2026-07-16T09:00:00.000Z",
+    }),
+    { lateArrivalGraceEnabled: true, lateArrivalGraceMinutes: 45 },
+  );
+  assert.equal(r.arrived_late, true);
+  assert.equal(r.late_arrival_grace_enabled, true);
+  assert.equal(r.late_arrival_grace_minutes, 45);
+  assert.equal(r.count_start, "2026-07-16T06:45:00.000Z");
+  assert.equal(r.counted_standing_minutes, 135);
+});
+
+test("Verspaetungsregel deaktiviert: alte Zaehlregel bleibt", () => {
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T06:20:00.000Z",
+      departure_time: "2026-07-16T09:00:00.000Z",
+    }),
+    { lateArrivalGraceEnabled: false, lateArrivalGraceMinutes: 45 },
+  );
+  assert.equal(r.arrived_late, true);
+  assert.equal(r.late_arrival_grace_enabled, false);
+  assert.equal(r.count_start, "2026-07-16T06:20:00.000Z");
+  assert.equal(r.counted_standing_minutes, 160);
+});
+
 test("Fruehankunft: Wartezeit vor dem Fenster wird NICHT gezaehlt", () => {
   const r = computeStandgeld(
     stop({
