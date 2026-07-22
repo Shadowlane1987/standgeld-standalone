@@ -68,30 +68,44 @@ class ImportStore {
     }
 
     this.init();
-    const id = generateImportId();
     const ext = path.extname(String(fileName || "").trim()) || ".xlsx";
-    const storedFileName = `${id}${ext}`;
-    const filePath = path.join(this.filesDir, storedFileName);
-    const importedAt = new Date().toISOString();
     const summary = summarizeTransports(transports);
 
-    fs.writeFileSync(filePath, buffer, { flag: "wx" });
+    let lastError = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const id = generateImportId();
+      const storedFileName = `${id}${ext}`;
+      const filePath = path.join(this.filesDir, storedFileName);
+      const metaPath = path.join(this.metaDir, `${id}.json`);
+      const importedAt = new Date().toISOString();
 
-    const meta = {
-      id,
-      file_name: String(fileName || storedFileName).trim() || storedFileName,
-      stored_file_name: storedFileName,
-      imported_at: importedAt,
-      ...summary,
-    };
+      try {
+        fs.writeFileSync(filePath, buffer, { flag: "wx" });
 
-    fs.writeFileSync(
-      path.join(this.metaDir, `${id}.json`),
-      JSON.stringify(meta, null, 2),
-      { flag: "wx" },
+        const meta = {
+          id,
+          file_name:
+            String(fileName || storedFileName).trim() || storedFileName,
+          stored_file_name: storedFileName,
+          imported_at: importedAt,
+          ...summary,
+        };
+
+        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), {
+          flag: "wx",
+        });
+        return meta;
+      } catch (error) {
+        lastError = error;
+        if (error && error.code !== "EEXIST") {
+          throw error;
+        }
+      }
+    }
+
+    throw new Error(
+      `Import-ID konnte nicht eindeutig erzeugt werden: ${lastError?.message || "unbekannter Fehler"}`,
     );
-
-    return meta;
   }
 
   listImports() {

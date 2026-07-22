@@ -58,6 +58,7 @@ let activeDetailStop = null;
 let currentImportId = "";
 let currentImports = [];
 const bookkeepingByKey = new Map();
+const BOOKKEEPING_STORAGE_KEY = "standgeld.bookkeeping.v1";
 
 const REASON_LABELS = {
   chargeable: "Abrechenbar",
@@ -88,7 +89,15 @@ function formatImportTimestamp(isoValue) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   });
+}
+
+function shortImportId(value) {
+  const id = String(value || "").trim();
+  if (!id) return "";
+  const parts = id.split("-");
+  return parts[parts.length - 1] || id.slice(-6);
 }
 
 function importIdFromUrl() {
@@ -149,6 +158,69 @@ function clearResults() {
   if (el.rows) el.rows.innerHTML = "";
   if (el.resultPanel) el.resultPanel.hidden = true;
   activeDetailStop = null;
+}
+
+function readBookkeepingStorage() {
+  try {
+    const raw = window.localStorage.getItem(BOOKKEEPING_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function writeBookkeepingStorage(storage) {
+  try {
+    window.localStorage.setItem(
+      BOOKKEEPING_STORAGE_KEY,
+      JSON.stringify(storage || {}),
+    );
+  } catch (_error) {
+    // ignore storage write errors
+  }
+}
+
+function loadBookkeepingForImport(importId) {
+  bookkeepingByKey.clear();
+  const id = String(importId || "").trim();
+  if (!id) return;
+
+  const storage = readBookkeepingStorage();
+  const entries = storage[id];
+  if (!entries || typeof entries !== "object") return;
+
+  for (const [key, value] of Object.entries(entries)) {
+    bookkeepingByKey.set(key, {
+      billed: Boolean(value && value.billed),
+    });
+  }
+}
+
+function persistBookkeepingForCurrentImport() {
+  const id = String(currentImportId || "").trim();
+  if (!id) return;
+
+  const storage = readBookkeepingStorage();
+  const snapshot = {};
+  for (const [key, entry] of bookkeepingByKey.entries()) {
+    snapshot[key] = {
+      billed: Boolean(entry && entry.billed),
+    };
+  }
+  storage[id] = snapshot;
+  writeBookkeepingStorage(storage);
+}
+
+function removeBookkeepingForImport(importId) {
+  const id = String(importId || "").trim();
+  if (!id) return;
+
+  const storage = readBookkeepingStorage();
+  if (!Object.prototype.hasOwnProperty.call(storage, id)) return;
+  delete storage[id];
+  writeBookkeepingStorage(storage);
 }
 
 function euro(value) {
@@ -507,6 +579,7 @@ function render() {
     if (billedInput) {
       billedInput.addEventListener("change", () => {
         bk.billed = Boolean(billedInput.checked);
+        persistBookkeepingForCurrentImport();
       });
     }
 
@@ -544,6 +617,7 @@ function setImportOptions(imports, preferredId = "") {
     option.textContent = "Keine gespeicherten Importe";
     el.importSelect.appendChild(option);
     currentImportId = "";
+    loadBookkeepingForImport("");
     syncImportWorkspace();
     return;
   }
@@ -552,18 +626,21 @@ function setImportOptions(imports, preferredId = "") {
     const option = document.createElement("option");
     option.value = item.id;
     const importedAt = formatImportTimestamp(item.imported_at);
+    const shortId = shortImportId(item.id);
     const dateRange =
       item.unload_date_from && item.unload_date_to
         ? ` · ${item.unload_date_from} bis ${item.unload_date_to}`
         : "";
     option.textContent =
       `${item.file_name} (${item.transport_count || 0})${dateRange}` +
+      (shortId ? ` · #${shortId}` : "") +
       (importedAt ? ` · ${importedAt}` : "");
     if (item.id === targetId) option.selected = true;
     el.importSelect.appendChild(option);
   }
 
   currentImportId = el.importSelect.value || targetId;
+  loadBookkeepingForImport(currentImportId);
   setImportIdInUrl(currentImportId, true);
   syncImportWorkspace();
 }
@@ -765,6 +842,8 @@ async function deleteSelectedImport() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
+    removeBookkeepingForImport(importId);
+
     const remaining = await refreshImports("", true);
     const nextImportId = String(el.importSelect?.value || "").trim();
     if (importId !== nextImportId) {
@@ -918,10 +997,16 @@ function renderSelectiveResult(data) {
 el.loadBtn.addEventListener("click", load);
 el.uploadBtn.addEventListener("click", upload);
 if (el.importSelect) {
-  el.importSelect.addEventListener("change", () => {
+  el.importSelect.addEventListener("change", async () => {
     currentImportId = String(el.importSelect.value || "").trim();
     setImportIdInUrl(currentImportId, true);
     syncImportWorkspace();
+    if (currentImportId) {
+      await load();
+    } else {
+      clearResults();
+      setStatus("Bitte einen gespeicherten Import auswählen.", "info");
+    }
   });
 }
 if (el.refreshImportsBtn) {
