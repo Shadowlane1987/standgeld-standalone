@@ -69,6 +69,7 @@ let currentStops = [];
 let activeDetailStop = null;
 let currentImportId = "";
 let currentImports = [];
+let lateArrivalGraceEnabledState = false;
 const bookkeepingByKey = new Map();
 const BOOKKEEPING_STORAGE_KEY = `standgeld.bookkeeping.${APP_SCOPE}.v1`;
 const SIXFOLD_STORAGE_KEY = "standgeld.sixfold.credentials.v1";
@@ -230,14 +231,14 @@ function writeRuleStorage(value) {
 
 function persistRuleSettings() {
   writeRuleStorage({
-    lateArrivalGraceEnabled: Boolean(el.lateArrivalGraceEnabled?.checked),
+    lateArrivalGraceEnabled: lateArrivalGraceEnabledState,
     lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes?.value || 45),
   });
 }
 
 function syncLateArrivalGraceToggle() {
-  if (!el.lateArrivalGraceToggle || !el.lateArrivalGraceEnabled) return;
-  const enabled = Boolean(el.lateArrivalGraceEnabled.checked);
+  if (!el.lateArrivalGraceToggle) return;
+  const enabled = lateArrivalGraceEnabledState;
   el.lateArrivalGraceToggle.textContent = enabled
     ? "Verspätungsregel: Ein"
     : "Verspätungsregel: Aus";
@@ -261,11 +262,7 @@ async function persistRuleSettingsAndReload() {
 
 function restoreRuleSettings() {
   const stored = readRuleStorage();
-  if (el.lateArrivalGraceEnabled) {
-    el.lateArrivalGraceEnabled.checked = Boolean(
-      stored.lateArrivalGraceEnabled,
-    );
-  }
+  lateArrivalGraceEnabledState = Boolean(stored.lateArrivalGraceEnabled);
   if (el.lateArrivalGraceMinutes && stored.lateArrivalGraceMinutes != null) {
     el.lateArrivalGraceMinutes.value = String(stored.lateArrivalGraceMinutes);
   }
@@ -739,7 +736,7 @@ function render() {
 }
 
 function ruleParams() {
-  const lateArrivalGraceEnabled = Boolean(el.lateArrivalGraceEnabled?.checked);
+  const lateArrivalGraceEnabled = lateArrivalGraceEnabledState;
   const lateArrivalGraceMinutes = Number(
     el.lateArrivalGraceMinutes?.value || 45,
   );
@@ -1261,16 +1258,10 @@ if (el.unloadWindowFileInput) {
 if (el.uploadUnloadWindowsBtn) {
   el.uploadUnloadWindowsBtn.addEventListener("click", uploadUnloadWindows);
 }
-if (el.lateArrivalGraceEnabled) {
-  el.lateArrivalGraceEnabled.addEventListener(
-    "change",
-    persistRuleSettingsAndReload,
-  );
-}
-if (el.lateArrivalGraceToggle && el.lateArrivalGraceEnabled) {
+if (el.lateArrivalGraceToggle) {
   el.lateArrivalGraceToggle.addEventListener("click", () => {
-    el.lateArrivalGraceEnabled.checked = !el.lateArrivalGraceEnabled.checked;
-    el.lateArrivalGraceEnabled.dispatchEvent(new Event("change"));
+    lateArrivalGraceEnabledState = !lateArrivalGraceEnabledState;
+    persistRuleSettingsAndReload();
   });
 }
 if (el.lateArrivalGraceMinutes) {

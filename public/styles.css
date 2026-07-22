@@ -76,6 +76,28 @@ body {
   box-shadow: var(--shadow);
 }
 
+.rule-toggle-corner {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 2;
+}
+
+.rule-toggle-chip {
+  width: auto;
+  min-width: 0;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: var(--shadow-sm);
+}
+
+.rule-toggle-chip:hover {
+  transform: none;
+}
+
 .panel + .panel {
   transition: box-shadow 180ms ease;
 }
