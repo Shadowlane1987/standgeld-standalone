@@ -949,6 +949,31 @@ td input[type="checkbox"][data-bk] {
   color: var(--ink);
 }
 
+.fallback-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.fallback-status-replaced {
+  background: rgba(22, 121, 79, 0.16);
+  color: #0f5f3f;
+}
+
+.fallback-status-neutral {
+  background: rgba(176, 105, 28, 0.14);
+  color: #8a4f16;
+}
+
+.fallback-status-missing {
+  background: rgba(185, 28, 28, 0.14);
+  color: #b91c1c;
+}
+
 @media (max-width: 1100px) {
   .grid-4 {
     grid-template-columns: repeat(2, minmax(0, 1fr));

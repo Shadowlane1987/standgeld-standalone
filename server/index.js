@@ -342,15 +342,23 @@ async function fetchSixfoldGpsSimple(url, sessionCookie, timeWindow = {}) {
   }
 
   async function fetchTourPlateMap() {
-    const fromTimeIso = timeWindow?.fromTime
+    let fromTimeIso = timeWindow?.fromTime
       ? new Date(timeWindow.fromTime).toISOString()
       : null;
-    const toTimeIso = timeWindow?.toTime
+    let toTimeIso = timeWindow?.toTime
       ? new Date(timeWindow.toTime).toISOString()
       : null;
 
+    // Fallback fuer Aufrufe ohne explizites Zeitfenster (z. B. selektiver Match).
+    // Sonst bleibt das Kennzeichen-Mapping immer leer.
     if (!fromTimeIso || !toTimeIso) {
-      return new Map();
+      const now = new Date();
+      const from = new Date(now);
+      const to = new Date(now);
+      from.setDate(from.getDate() - 180);
+      to.setDate(to.getDate() + 30);
+      fromTimeIso = from.toISOString();
+      toTimeIso = to.toISOString();
     }
 
     const plateByKey = new Map();
@@ -445,7 +453,7 @@ async function fetchSixfoldGpsSimple(url, sessionCookie, timeWindow = {}) {
 
   try {
     const tours = [];
-    const plateByKey = new Map();
+    const plateByKey = await fetchTourPlateMap();
     let after = null;
     let pageCount = 0;
 
@@ -1468,6 +1476,12 @@ function extractLocalDate(value) {
   return m ? m[1] : null;
 }
 
+function hasValidLocalWindowDateTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$/.test(text);
+}
+
 // Filtert Transporte nach Entladedatum (aus dem Entlade-Stopp).
 // Bereich ist inklusiv: from <= datum <= to.
 function filterTransportsByUnloadDate(transports, fromDate, toDate) {
@@ -1555,6 +1569,7 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
   if (!unloadWindowIndex || typeof unloadWindowIndex.get !== "function") {
     return {
       fallback_available: false,
+      fallback_window_rows: 0,
       fallback_candidates: 0,
       fallback_applied: 0,
       fallback_unresolved: 0,
@@ -1567,21 +1582,36 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
   for (const transport of list) {
     const unload = transport?.unloading;
     if (!unload) continue;
-    if (String(unload.window_local || "").trim()) continue;
+
+    // Nur ersetzen, wenn am Entlade-Stopp kein gueltiges Zeitfenster vorhanden ist.
+    if (hasValidLocalWindowDateTime(unload.window_local)) {
+      unload.unload_window_fallback_applied = false;
+      unload.unload_window_fallback_reason = "already_present";
+      continue;
+    }
 
     candidates += 1;
     const ladenummer = transportNumberToLadenummer(transport.transport_number);
     const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
     const unloadStart = windowStartForStop(windowRow, "UNLOADING");
     const localDate = localDateForUnloadWindowFallback(transport);
-    if (!unloadStart || !localDate) continue;
+    if (!unloadStart || !localDate) {
+      unload.unload_window_fallback_applied = false;
+      unload.unload_window_fallback_reason = !unloadStart
+        ? "no_matching_excel_window"
+        : "missing_anchor_date";
+      continue;
+    }
 
     unload.window_local = `${localDate} ${unloadStart}`;
+    unload.unload_window_fallback_applied = true;
+    unload.unload_window_fallback_reason = "applied";
     applied += 1;
   }
 
   return {
     fallback_available: true,
+    fallback_window_rows: unloadWindowIndex.size || 0,
     fallback_candidates: candidates,
     fallback_applied: applied,
     fallback_unresolved: Math.max(0, candidates - applied),

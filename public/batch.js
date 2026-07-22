@@ -306,6 +306,33 @@ function detailRowHtml(label, xpValue, gpsValue, usedValue) {
   `;
 }
 
+function fallbackStatusRowHtml(stop) {
+  if (!stop || stop.stop_type !== "UNLOADING") return "";
+
+  const replaced = Boolean(stop.unload_window_fallback_applied);
+  const hasWindow = String(stop.window_local || "").trim().length > 0;
+
+  let statusClass = "fallback-status-neutral";
+  let statusText = "Nicht ersetzt";
+
+  if (replaced) {
+    statusClass = "fallback-status-replaced";
+    statusText = "Ersetzt";
+  } else if (!hasWindow) {
+    statusClass = "fallback-status-missing";
+    statusText = "Fehlt weiterhin";
+  }
+
+  return `
+    <tr>
+      <td>Entladezeitfenster</td>
+      <td>-</td>
+      <td>-</td>
+      <td class="detail-used"><span class="fallback-status ${statusClass}">${statusText}</span></td>
+    </tr>
+  `;
+}
+
 function openStopDetailModal(stop) {
   if (!el.stopDetailModal || !stop) return;
   activeDetailStop = stop;
@@ -353,7 +380,8 @@ function openStopDetailModal(stop) {
     detailRowHtml("Abfahrt", xpDeparture, gpsDeparture, usedDeparture) +
     detailRowHtml("Standzeit (Ist)", xpStanding, gpsStanding, usedStanding) +
     detailRowHtml("Standzeit ab Zählbeginn", "-", "-", countedStanding) +
-    detailRowHtml("2h frei", "-", "-", freeStanding);
+    detailRowHtml("2h frei", "-", "-", freeStanding) +
+    fallbackStatusRowHtml(stop);
 
   el.stopDetailModal.hidden = false;
 }
@@ -565,17 +593,17 @@ function render() {
 
     tr.innerHTML = `
       <td>${stop.transport_number || "-"}</td>
+      <td>${plateCheckLabel(stop)}</td>
       <td>${TYPE_LABELS[stop.stop_type] || stop.stop_type || "-"}</td>
-      <td>${stop.window_local || "-"}</td>
+      <td><span class="${srcClass}">${src}</span></td>
       <td>${stop.arrival_local || "-"}</td>
       <td>${stop.departure_local || "-"}</td>
-      <td><span class="${srcClass}">${src}</span></td>
-      <td>${plateCheckLabel(stop)}</td>
       <td>${isoToLocal(stop.count_start)}</td>
+      <td>${stop.window_local || "-"}</td>
       <td>${minutesToHours(stop.counted_standing_minutes)}</td>
       <td>${minutesToHours(stop.minutes_over_free)}</td>
-      <td>${stop.billable_blocks || 0}</td>
       <td>${euro(stop.fee_eur)}</td>
+      <td>${stop.billable_blocks || 0}</td>
       <td>${statusLabel}</td>
       <td><input type="checkbox" data-bk="billed" ${checkedAttr} /></td>
     `;
@@ -700,10 +728,18 @@ function applyResult(data) {
     typeof data.summary.mixed_source_count === "number"
       ? ` · Mix-Stopps: ${data.summary.mixed_source_count}`
       : "";
-  const fallbackNote =
-    typeof data.summary.fallback_applied === "number"
-      ? ` · Entladefenster ersetzt: ${data.summary.fallback_applied}/${data.summary.fallback_candidates || 0}`
-      : "";
+  let fallbackNote = "";
+  if (typeof data.summary.fallback_applied === "number") {
+    if (!data.summary.fallback_available) {
+      fallbackNote =
+        " · Entladefenster-Fallback: keine Datei fuer diesen Bereich";
+    } else if ((data.summary.fallback_candidates || 0) === 0) {
+      fallbackNote =
+        " · Entladefenster-Fallback: keine fehlenden Entladefenster";
+    } else {
+      fallbackNote = ` · Entladefenster ersetzt: ${data.summary.fallback_applied}/${data.summary.fallback_candidates || 0}`;
+    }
+  }
   setStatus(
     `${data.summary.transport_count} Transporte · ${data.summary.stop_count} Positionen${gpsNote}${filterNote}${mixNote}${fallbackNote}.`,
     "success",

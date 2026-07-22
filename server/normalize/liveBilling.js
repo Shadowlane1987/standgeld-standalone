@@ -221,6 +221,14 @@ function billFromLiveData(transports, xpEvents, options = {}) {
         Object.freeze({
           ...fee,
           window_local: stop.window_local,
+          unload_window_fallback_applied:
+            stopType === "UNLOADING"
+              ? Boolean(stop.unload_window_fallback_applied)
+              : false,
+          unload_window_fallback_reason:
+            stopType === "UNLOADING"
+              ? String(stop.unload_window_fallback_reason || "") || null
+              : null,
           arrival_local: xpEntry?.arrival?.local || null,
           departure_local: xpEntry?.departure?.local || null,
           timezone:
