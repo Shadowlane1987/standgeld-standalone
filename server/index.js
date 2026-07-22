@@ -81,9 +81,7 @@ function parseBillingConfig(req) {
       req.query.lateArrivalGraceEnabled === "true";
   }
   if (req.query.lateArrivalGraceMinutes)
-    config.lateArrivalGraceMinutes = Number(
-      req.query.lateArrivalGraceMinutes,
-    );
+    config.lateArrivalGraceMinutes = Number(req.query.lateArrivalGraceMinutes);
   return config;
 }
 
@@ -1876,29 +1874,6 @@ app.get("/api/billing/live", async (req, res) => {
 
     const filteredTransports = filterTransportsByUnloadDate(
       transports,
-
-          persistBillingResult(importId, {
-            file: filePath,
-            generated_at: new Date().toISOString(),
-            gps: gpsInfo,
-            transporeon_live: {
-              fetched: true,
-              requested_transport_count: filteredTransports.length,
-              available_transport_count: liveResult.availableTransportCount,
-              matched_transport_count: liveResult.matchedTransports.length,
-              missing_transport_count: liveResult.missingTransportNumbers.length,
-              failure_count: liveResult.failures.length,
-            },
-            summary: {
-              ...result.summary,
-              ...filterMeta,
-              ...unloadFallbackMeta,
-              total_fee_display: formatEuro(result.summary.total_fee_eur),
-            },
-            stops: result.stops,
-            live_failures: liveResult.failures,
-            missing_transports: liveResult.missingTransportNumbers,
-          });
       sixfoldDateFrom,
       sixfoldDateTo,
     );
