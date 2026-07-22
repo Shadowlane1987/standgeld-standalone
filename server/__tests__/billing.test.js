@@ -171,3 +171,26 @@ test("runBilling: ohne Bereich werden alle Stopps abgerechnet", () => {
   assert.equal(result.summary.selected_count, 1);
   assert.equal(result.summary.total_fee_eur, 30);
 });
+
+test("runBilling: Prueffaelle sind abrechenbar markiert, aber nicht in Gesamtsumme", () => {
+  const excelIndex = buildWindowIndex([
+    { ladenummer: "6622395", ladezeit_start: "06:00", entladezeit_start: null },
+    { ladenummer: "6622559", ladezeit_start: "06:00", entladezeit_start: null },
+  ]);
+
+  const stops = [
+    loadingStop(), // 30 EUR, kein Prueffall
+    loadingStop({
+      transport_number: "4B_20260726_0006622559",
+      departure_local: "2026-07-16 09:00",
+      departure_time: "2026-07-16T07:00:00.000Z",
+      needs_review: true,
+    }), // 60 EUR, Prueffall
+  ];
+
+  const result = runBilling({ stops, excelIndex });
+
+  assert.equal(result.summary.chargeable_count, 2);
+  assert.equal(result.summary.review_count, 1);
+  assert.equal(result.summary.total_fee_eur, 30);
+});

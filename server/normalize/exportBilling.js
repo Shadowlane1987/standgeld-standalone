@@ -317,7 +317,11 @@ function billFromExport(transports, options = {}) {
   const rebookingSuspectedCount = stops.filter(
     (s) => s.rebooking_suspected,
   ).length;
-  const totalFee = stops.reduce((sum, s) => sum + (s.fee_eur || 0), 0);
+  // Prueffaelle bleiben sichtbar/abrechenbar markiert, gehen aber nicht in die Gesamtsumme.
+  const totalFee = stops.reduce(
+    (sum, s) => sum + (s.needs_review ? 0 : s.fee_eur || 0),
+    0,
+  );
 
   return {
     stops,

@@ -256,7 +256,8 @@ function runBilling(params = {}) {
   let chargeableCount = 0;
   let reviewCount = 0;
   for (const item of selected) {
-    totalFee += item.fee_eur || 0;
+    // Prueffaelle bleiben abrechenbar markiert, werden aber nicht aufsummiert.
+    totalFee += item.needs_review ? 0 : item.fee_eur || 0;
     if (item.chargeable) chargeableCount += 1;
     if (item.needs_review) reviewCount += 1;
   }

@@ -266,7 +266,11 @@ function billFromLiveData(transports, xpEvents, options = {}) {
   const rebookingSuspectedCount = stops.filter(
     (stop) => stop.rebooking_suspected,
   ).length;
-  const totalFee = stops.reduce((sum, stop) => sum + (stop.fee_eur || 0), 0);
+  // Prueffaelle bleiben sichtbar/abrechenbar markiert, gehen aber nicht in die Gesamtsumme.
+  const totalFee = stops.reduce(
+    (sum, stop) => sum + (stop.needs_review ? 0 : stop.fee_eur || 0),
+    0,
+  );
 
   return {
     stops,
