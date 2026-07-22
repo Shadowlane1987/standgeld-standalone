@@ -546,8 +546,8 @@ function openStopDetailModal(stop) {
   el.stopDetailMeta.textContent =
     `Zeitfenster: ${windowLocal} · Zählbeginn: ${countStartLocal} · ` +
     `Quelle: ${source} · KFZ: ${kfz} · ` +
-    `Ankunft (genutzt): ${arrivalUsed} (${arrivalSrc}) · ` +
-    `Abfahrt (genutzt): ${departureUsed} (${departureSrc}) · ` +
+    `Ankunft genutzt: ${arrivalUsed} ${arrivalSrc} · ` +
+    `Abfahrt genutzt: ${departureUsed} ${departureSrc} · ` +
     `Ist-Standzeit: ${usedStanding} · Ab Zählbeginn: ${countedStanding} · ` +
     `Frei: ${freeWindow} · Über Frei: ${overFreeStanding}` +
     amountNote +
@@ -559,8 +559,8 @@ function openStopDetailModal(stop) {
   const gpsDeparture = isoToLocal(stop.gps_departure_time);
   const usedArrival = arrivalUsed;
   const usedDeparture = departureUsed;
-  const usedArrivalWithSource = `${usedArrival}${usedArrival !== "-" ? ` (${arrivalSrc})` : ""}`;
-  const usedDepartureWithSource = `${usedDeparture}${usedDeparture !== "-" ? ` (${departureSrc})` : ""}`;
+  const usedArrivalWithSource = `${usedArrival}${usedArrival !== "-" ? ` ${arrivalSrc}` : ""}`;
+  const usedDepartureWithSource = `${usedDeparture}${usedDeparture !== "-" ? ` ${departureSrc}` : ""}`;
 
   const xpStanding = minutesToHours(
     standingMinutesFromIso(stop.xp_arrival_time, stop.xp_departure_time),
@@ -604,25 +604,26 @@ function billedMinutes(stop) {
 function buildJustificationText(stop) {
   if (!stop) return "";
 
-  const arrivalUsed = isoToLocal(stop.arrival_time_used);
   const departureUsed = isoToLocal(stop.departure_time_used);
-  const arrivalSrc = stop.arrival_source || "XP";
-  const departureSrc = stop.departure_source || "XP";
-  const standing = minutesToHours(
-    standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
-      stop.counted_standing_minutes,
-  );
-  const freeText = minutesToHours(stop.free_minutes || 120);
-  const overFreeText = minutesToHours(stop.minutes_over_free || 0);
-  const billedText = minutesToHours(billedMinutes(stop));
+  const countStartLocal = isoToLocal(stop.count_start);
+  const windowLocal = stop.window_local || isoToLocal(stop.window_start);
+  const countedStanding = minutesToHours(stop.counted_standing_minutes);
+  const freeMinutes = Number(stop.free_minutes || 120);
+  const freeLabel = freeMinutes >= 180 ? "3h frei" : "2h frei";
+  const freeText = minutesToHours(freeMinutes);
+  const startAtWindow = isSameTimestamp(stop.count_start, stop.window_start);
+  const arrivalText = startAtWindow
+    ? `${windowLocal} Zeitfenster`
+    : `${countStartLocal} Ankunft`;
+  const standingLabel = startAtWindow
+    ? "Standzeit ab Zeitfenster"
+    : "Standzeit ab Ankunft";
 
   return [
-    `Ankunft (genutzt): ${arrivalUsed} (${arrivalSrc})`,
-    `Abfahrt (genutzt): ${departureUsed} (${departureSrc})`,
-    `Standzeit: ${standing}`,
-    `Freigrenze: ${freeText}`,
-    `Über Frei: ${overFreeText}`,
-    `Abzurechnende Zeit (exakt): ${billedText}`,
+    `Ankunft: ${arrivalText}`,
+    `Abfahrt: ${departureUsed}`,
+    `${standingLabel}: ${countedStanding}`,
+    `${freeLabel}: ${freeText}`,
     `Abrechenbare Summe: ${euro(stop.fee_eur)}`,
   ].join("\n");
 }
@@ -630,7 +631,7 @@ function buildJustificationText(stop) {
 function usedBoundaryLabel(iso, source) {
   const local = isoToLocal(iso);
   if (local === "-") return "-";
-  return `${local} (${source || "XP"})`;
+  return `${local} ${source || "XP"}`;
 }
 
 function openJustificationModal() {
