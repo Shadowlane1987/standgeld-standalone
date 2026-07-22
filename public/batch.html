@@ -50,18 +50,23 @@
               min="0"
           /></label>
           <label
-            >&nbsp;<button id="loadBtn" type="button">
-              Alle Transporte laden
+            >&nbsp;<button id="loadBtn" type="button" disabled>
+              Gespeicherten Import laden
             </button></label
           >
         </div>
-        <div class="grid grid-5">
+        <div class="grid grid-4">
           <label class="upload-label"
             >Excel-Export hochladen<input
               id="fileInput"
               type="file"
               accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           /></label>
+          <label
+            >Gespeicherter Import<select id="importSelect">
+              <option value="">Keine gespeicherten Importe</option>
+            </select></label
+          >
           <label
             >Sixfold Fleet-Timeline-Link<input
               id="sixfoldUrl"
@@ -75,16 +80,17 @@
               autocomplete="off"
               placeholder="sessionToken-Wert"
           /></label>
-          <label
-            >&nbsp;<button id="uploadBtn" type="button" disabled>
-              Abrechnen
-            </button></label
-          >
-          <label
-            >&nbsp;<button id="selectiveSearchBtn" type="button" disabled>
-              Suchen & Abgleichen
-            </button></label
-          >
+        </div>
+        <div class="actions-row bookkeeping-toolbar">
+          <button id="uploadBtn" type="button" disabled>
+            Hochladen, speichern & abrechnen
+          </button>
+          <button id="refreshImportsBtn" type="button" class="btn-secondary">
+            Importe aktualisieren
+          </button>
+          <button id="selectiveSearchBtn" type="button" class="btn-secondary" disabled>
+            Suchen & Abgleichen
+          </button>
         </div>
         <p id="status" class="status">Bereit.</p>
       </section>

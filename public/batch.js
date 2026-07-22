@@ -7,6 +7,8 @@ const el = {
   triggerMinutes: document.getElementById("triggerMinutes"),
   loadBtn: document.getElementById("loadBtn"),
   fileInput: document.getElementById("fileInput"),
+  importSelect: document.getElementById("importSelect"),
+  refreshImportsBtn: document.getElementById("refreshImportsBtn"),
   uploadBtn: document.getElementById("uploadBtn"),
   sixfoldUrl: document.getElementById("sixfoldUrl"),
   sixfoldToken: document.getElementById("sixfoldToken"),
@@ -48,6 +50,7 @@ const el = {
 
 let currentStops = [];
 let activeDetailStop = null;
+let currentImportId = "";
 const bookkeepingByKey = new Map();
 
 const REASON_LABELS = {
@@ -448,6 +451,50 @@ function ruleParams() {
   });
 }
 
+function setImportOptions(imports, preferredId = "") {
+  if (!el.importSelect) return;
+  const list = Array.isArray(imports) ? imports : [];
+  const targetId = preferredId || currentImportId || list[0]?.id || "";
+
+  el.importSelect.innerHTML = "";
+  if (!list.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Keine gespeicherten Importe";
+    el.importSelect.appendChild(option);
+    currentImportId = "";
+    el.loadBtn.disabled = true;
+    return;
+  }
+
+  for (const item of list) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    const dateRange =
+      item.unload_date_from && item.unload_date_to
+        ? ` · ${item.unload_date_from} bis ${item.unload_date_to}`
+        : "";
+    option.textContent = `${item.file_name} (${item.transport_count || 0})${dateRange}`;
+    if (item.id === targetId) option.selected = true;
+    el.importSelect.appendChild(option);
+  }
+
+  currentImportId = el.importSelect.value || targetId;
+  el.loadBtn.disabled = !currentImportId;
+}
+
+async function refreshImports(preferredId = "", silent = false) {
+  const res = await fetch("/api/imports");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  setImportOptions(data.imports || [], preferredId);
+  if (!silent) {
+    const count = Array.isArray(data.imports) ? data.imports.length : 0;
+    setStatus(`${count} gespeicherte Importe verfügbar.`, "success");
+  }
+  return data.imports || [];
+}
+
 function applyResult(data) {
   currentStops = data.stops || [];
   ensureBookkeepingEntries(currentStops);
@@ -506,15 +553,27 @@ function sixfoldParams() {
 async function load() {
   const gps = sixfoldHeaders();
   const hasGps = Boolean(gps["x-sixfold-url"]);
+  const importId = String(
+    currentImportId || el.importSelect?.value || "",
+  ).trim();
+  if (!importId) {
+    setStatus(
+      "Bitte zuerst einen gespeicherten Import auswählen oder hochladen.",
+      "error",
+    );
+    return;
+  }
   setStatus(
     hasGps
-      ? "Lade Transporte aus Export + GPS-Abgleich …"
-      : "Lade Transporte aus Export …",
+      ? "Lade gespeicherten Import + GPS-Abgleich …"
+      : "Lade gespeicherten Import …",
   );
   el.loadBtn.disabled = true;
 
   try {
-    const baseUrl = `/api/billing?${ruleParams().toString()}`;
+    const params = ruleParams();
+    params.set("importId", importId);
+    const baseUrl = `/api/billing/export?${params.toString()}`;
     const url = baseUrl + sixfoldParams();
     const res = await fetch(url, {
       headers: gps,
@@ -564,6 +623,14 @@ async function upload() {
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
     applyResult(data);
+    currentImportId = String(data.import?.id || "").trim() || currentImportId;
+    await refreshImports(currentImportId, true);
+    if (currentImportId) {
+      setStatus(
+        `Import gespeichert und abgerechnet: ${data.import?.file_name || file.name}`,
+        "success",
+      );
+    }
   } catch (error) {
     setStatus(error.message || "Fehler beim Hochladen", "error");
   } finally {
@@ -697,6 +764,24 @@ function renderSelectiveResult(data) {
 
 el.loadBtn.addEventListener("click", load);
 el.uploadBtn.addEventListener("click", upload);
+if (el.importSelect) {
+  el.importSelect.addEventListener("change", () => {
+    currentImportId = String(el.importSelect.value || "").trim();
+    el.loadBtn.disabled = !currentImportId;
+  });
+}
+if (el.refreshImportsBtn) {
+  el.refreshImportsBtn.addEventListener("click", async () => {
+    try {
+      await refreshImports(currentImportId);
+    } catch (error) {
+      setStatus(
+        error.message || "Importe konnten nicht geladen werden.",
+        "error",
+      );
+    }
+  });
+}
 el.fileInput.addEventListener("change", () => {
   const hasFile = el.fileInput.files && el.fileInput.files.length;
   el.uploadBtn.disabled = !hasFile;
@@ -750,5 +835,10 @@ document.addEventListener("keydown", (event) => {
   closeStopDetailModal();
 });
 
-// Beim Öffnen direkt laden.
-setStatus("Bereit. Bitte Export-Datei wählen und abrechnen.");
+refreshImports("", true)
+  .then(() => {
+    setStatus("Bereit. Excel hochladen oder gespeicherten Import auswählen.");
+  })
+  .catch(() => {
+    setStatus("Bereit. Excel hochladen oder gespeicherten Import auswählen.");
+  });

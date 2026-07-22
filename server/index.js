@@ -18,11 +18,13 @@ const {
   loadTransporeonExportFromBuffer,
 } = require("./tools/readTransporeonExport");
 const { fetchLiveVisibilityEvents } = require("./services/transporeonLive");
+const { ImportStore } = require("./storage/importStore");
 
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
+const importStore = new ImportStore();
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
@@ -43,6 +45,34 @@ function formatEuro(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(value || 0));
+}
+
+function parseBillingConfig(req) {
+  const config = {};
+  if (req.query.freeMinutes) config.freeMinutes = Number(req.query.freeMinutes);
+  if (req.query.blockMinutes)
+    config.blockMinutes = Number(req.query.blockMinutes);
+  if (req.query.blockRateEur)
+    config.blockRateEur = Number(req.query.blockRateEur);
+  if (req.query.triggerMinutes)
+    config.triggerMinutes = Number(req.query.triggerMinutes);
+  return config;
+}
+
+function resolveExportFilePath(req, fallbackPath) {
+  const importId = String(req.query.importId || "").trim();
+  if (importId) {
+    const filePath = importStore.resolveImportFile(importId);
+    if (!filePath) {
+      const error = new Error(
+        `Gespeicherter Import nicht gefunden: ${importId}`,
+      );
+      error.statusCode = 404;
+      throw error;
+    }
+    return filePath;
+  }
+  return req.query.file ? String(req.query.file) : fallbackPath;
 }
 
 function formatDateTime(value) {
@@ -1291,6 +1321,20 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: "standgeld-standalone" });
 });
 
+app.get("/api/imports", (_req, res) => {
+  try {
+    res.json({
+      imports: importStore.listImports(),
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({
+        error: error.message || "Importe konnten nicht geladen werden.",
+      });
+  }
+});
+
 // Batch-Abrechnung aller Transporte aus dem Transporeon-Excel-Export.
 // Liefert Zeitfenster + Standgeld je Stopp (Laden/Entladen) fuer ALLE Transporte.
 const EXPORT_XLSX_PATH = path.join(
@@ -1486,22 +1530,14 @@ async function resolveGpsIndexFromHeaders(req, window = {}, debug = false) {
 
 app.get("/api/billing/export", async (req, res) => {
   try {
-    const filePath = req.query.file ? String(req.query.file) : EXPORT_XLSX_PATH;
+    const filePath = resolveExportFilePath(req, EXPORT_XLSX_PATH);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({
         error: `Export-Datei nicht gefunden: ${filePath}`,
       });
     }
 
-    const config = {};
-    if (req.query.freeMinutes)
-      config.freeMinutes = Number(req.query.freeMinutes);
-    if (req.query.blockMinutes)
-      config.blockMinutes = Number(req.query.blockMinutes);
-    if (req.query.blockRateEur)
-      config.blockRateEur = Number(req.query.blockRateEur);
-    if (req.query.triggerMinutes)
-      config.triggerMinutes = Number(req.query.triggerMinutes);
+    const config = parseBillingConfig(req);
 
     const transports = loadTransporeonExport(filePath);
 
@@ -1564,28 +1600,22 @@ app.get("/api/billing/export", async (req, res) => {
       stops: result.stops,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message || "Unbekannter Fehler" });
+    res
+      .status(error.statusCode || 500)
+      .json({ error: error.message || "Unbekannter Fehler" });
   }
 });
 
 app.get("/api/billing/live", async (req, res) => {
   try {
-    const filePath = req.query.file ? String(req.query.file) : EXPORT_XLSX_PATH;
+    const filePath = resolveExportFilePath(req, EXPORT_XLSX_PATH);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({
         error: `Export-Datei nicht gefunden: ${filePath}`,
       });
     }
 
-    const config = {};
-    if (req.query.freeMinutes)
-      config.freeMinutes = Number(req.query.freeMinutes);
-    if (req.query.blockMinutes)
-      config.blockMinutes = Number(req.query.blockMinutes);
-    if (req.query.blockRateEur)
-      config.blockRateEur = Number(req.query.blockRateEur);
-    if (req.query.triggerMinutes)
-      config.triggerMinutes = Number(req.query.triggerMinutes);
+    const config = parseBillingConfig(req);
 
     const transports = loadTransporeonExport(filePath);
     let window = computeTransportsWindow(transports);
@@ -1694,7 +1724,9 @@ app.get("/api/billing/live", async (req, res) => {
       missing_transports: liveResult.missingTransportNumbers,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message || "Unbekannter Fehler" });
+    res
+      .status(error.statusCode || 500)
+      .json({ error: error.message || "Unbekannter Fehler" });
   }
 });
 
@@ -1715,18 +1747,15 @@ app.post(
           .json({ error: "Keine Datei empfangen (leerer Body)." });
       }
 
-      const config = {};
-      if (req.query.freeMinutes)
-        config.freeMinutes = Number(req.query.freeMinutes);
-      if (req.query.blockMinutes)
-        config.blockMinutes = Number(req.query.blockMinutes);
-      if (req.query.blockRateEur)
-        config.blockRateEur = Number(req.query.blockRateEur);
-      if (req.query.triggerMinutes)
-        config.triggerMinutes = Number(req.query.triggerMinutes);
+      const config = parseBillingConfig(req);
 
       // Optionaler GPS-Abgleich ueber Sixfold (Header, siehe Helper).
       const transports = loadTransporeonExportFromBuffer(buffer);
+      const savedImport = importStore.saveImport({
+        buffer,
+        fileName: req.query.name ? String(req.query.name) : "upload.xlsx",
+        transports,
+      });
       const sixfoldDateFrom = req.query.sixfoldDateFrom
         ? String(req.query.sixfoldDateFrom).trim()
         : null;
@@ -1774,6 +1803,7 @@ app.post(
 
       res.json({
         file: req.query.name ? String(req.query.name) : "upload.xlsx",
+        import: savedImport,
         generated_at: new Date().toISOString(),
         gps: gpsInfo,
         summary: {
