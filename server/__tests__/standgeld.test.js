@@ -114,6 +114,22 @@ test("Verspaetungsregel deaktiviert: alte Zaehlregel bleibt", () => {
   assert.equal(r.fee_eur, 90);
 });
 
+test("Verspaetungsregel aktiv: auch ueber 45 Minuten Spaetankunft -> 3 Stunden frei", () => {
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T06:54:00.000Z",
+      departure_time: "2026-07-16T09:24:00.000Z",
+    }),
+    { lateArrivalGraceEnabled: true, lateArrivalGraceMinutes: 45 },
+  );
+  assert.equal(r.arrived_late, true);
+  assert.equal(r.late_arrival_grace_applied, true);
+  assert.equal(r.count_start, "2026-07-16T06:54:00.000Z");
+  assert.equal(r.counted_standing_minutes, 150);
+  assert.equal(r.minutes_over_free, 0);
+  assert.equal(r.fee_eur, 0);
+});
+
 test("Fruehankunft: Wartezeit vor dem Fenster wird NICHT gezaehlt", () => {
   const r = computeStandgeld(
     stop({

@@ -466,17 +466,25 @@ function openStopDetailModal(stop) {
       stop.counted_standing_minutes,
   );
   const countedStanding = minutesToHours(stop.counted_standing_minutes);
-  const freeStanding = minutesToHours(stop.minutes_over_free);
+  const overFreeStanding = minutesToHours(stop.minutes_over_free);
+  const freeWindow = minutesToHours(stop.free_minutes || 120);
   const windowLocal = stop.window_local || "-";
   const countStartLocal = isoToLocal(stop.count_start);
   const rebookingNote = stop.rebooking_suspected
     ? " · ⚠ Umbuchung/Pause erkannt: gezählt ab GPS-Ankunft (Prüffall)"
     : "";
   const amountNote = ` · Abrechenbare Summe: ${euro(stop.fee_eur)}`;
+  const arrivalUsed = isoToLocal(stop.arrival_time_used);
+  const departureUsed = isoToLocal(stop.departure_time_used);
+  const arrivalSrc = stop.arrival_source || "XP";
+  const departureSrc = stop.departure_source || "XP";
   el.stopDetailMeta.textContent =
     `Zeitfenster: ${windowLocal} · Zählbeginn: ${countStartLocal} · ` +
-    `Quelle: ${source} · KFZ: ${kfz} · Ist-Standzeit: ${usedStanding} · ` +
-    `Ab Zählbeginn: ${countedStanding} · 2h frei: ${freeStanding}` +
+    `Quelle: ${source} · KFZ: ${kfz} · ` +
+    `Ankunft (genutzt): ${arrivalUsed} (${arrivalSrc}) · ` +
+    `Abfahrt (genutzt): ${departureUsed} (${departureSrc}) · ` +
+    `Ist-Standzeit: ${usedStanding} · Ab Zählbeginn: ${countedStanding} · ` +
+    `Frei: ${freeWindow} · Über Frei: ${overFreeStanding}` +
     amountNote +
     rebookingNote;
 
@@ -484,8 +492,8 @@ function openStopDetailModal(stop) {
   const xpDeparture = isoToLocal(stop.xp_departure_time);
   const gpsArrival = isoToLocal(stop.gps_arrival_time);
   const gpsDeparture = isoToLocal(stop.gps_departure_time);
-  const usedArrival = isoToLocal(stop.arrival_time_used);
-  const usedDeparture = isoToLocal(stop.departure_time_used);
+  const usedArrival = arrivalUsed;
+  const usedDeparture = departureUsed;
 
   const xpStanding = minutesToHours(
     standingMinutesFromIso(stop.xp_arrival_time, stop.xp_departure_time),
@@ -499,7 +507,8 @@ function openStopDetailModal(stop) {
     detailRowHtml("Abfahrt", xpDeparture, gpsDeparture, usedDeparture) +
     detailRowHtml("Standzeit (Ist)", xpStanding, gpsStanding, usedStanding) +
     detailRowHtml("Standzeit ab Zählbeginn", "-", "-", countedStanding) +
-    detailRowHtml("2h frei", "-", "-", freeStanding) +
+    detailRowHtml("Freigrenze", "-", "-", freeWindow) +
+    detailRowHtml("Über Frei", "-", "-", overFreeStanding) +
     fallbackStatusRowHtml(stop);
 
   el.stopDetailModal.hidden = false;
@@ -520,21 +529,31 @@ function buildJustificationText(stop) {
 
   const arrivalUsed = isoToLocal(stop.arrival_time_used);
   const departureUsed = isoToLocal(stop.departure_time_used);
+  const arrivalSrc = stop.arrival_source || "XP";
+  const departureSrc = stop.departure_source || "XP";
   const standing = minutesToHours(
     standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
       stop.counted_standing_minutes,
   );
   const freeText = minutesToHours(stop.free_minutes || 120);
+  const overFreeText = minutesToHours(stop.minutes_over_free || 0);
   const billedText = minutesToHours(billedMinutes(stop));
 
   return [
-    `Ankunft: ${arrivalUsed}`,
-    `Abfahrt: ${departureUsed}`,
+    `Ankunft (genutzt): ${arrivalUsed} (${arrivalSrc})`,
+    `Abfahrt (genutzt): ${departureUsed} (${departureSrc})`,
     `Standzeit: ${standing}`,
-    `2h frei: ${freeText}`,
+    `Freigrenze: ${freeText}`,
+    `Über Frei: ${overFreeText}`,
     `Abzurechnende Zeit (exakt): ${billedText}`,
     `Abrechenbare Summe: ${euro(stop.fee_eur)}`,
   ].join("\n");
+}
+
+function usedBoundaryLabel(iso, source) {
+  const local = isoToLocal(iso);
+  if (local === "-") return "-";
+  return `${local} (${source || "XP"})`;
 }
 
 function openJustificationModal() {
@@ -715,8 +734,8 @@ function render() {
       <td>${plateCheckLabel(stop)}</td>
       <td>${TYPE_LABELS[stop.stop_type] || stop.stop_type || "-"}</td>
       <td><span class="${srcClass}">${src}</span></td>
-      <td>${stop.arrival_local || "-"}</td>
-      <td>${stop.departure_local || "-"}</td>
+      <td>${usedBoundaryLabel(stop.arrival_time_used, stop.arrival_source)}</td>
+      <td>${usedBoundaryLabel(stop.departure_time_used, stop.departure_source)}</td>
       <td>${isoToLocal(stop.count_start)}</td>
       <td>${stop.window_local || "-"}</td>
       <td>${minutesToHours(stop.counted_standing_minutes)}</td>

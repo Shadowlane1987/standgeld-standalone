@@ -6,8 +6,8 @@
  * Regeln:
  * 1. Freizeit: 2 h (120 min) sind frei.
  * 2. Normalfall: Zaehlbeginn ab Zeitfenster; bei spaeterer Ankunft ab Ankunftszeit.
- *    Mit aktivierter Verspätungsregel und Ankunft innerhalb der Grace-Zeit gilt
- *    stattdessen 3 h freie Zeit ab der Ankunft.
+ *    Mit aktivierter Verspätungsregel gilt bei Spaetankunft stattdessen
+ *    3 h freie Zeit ab der Ankunft.
  * 3. Ausloese-Schwelle: erst ab 10 min ueber der Freizeit wird abgerechnet
  *    (2 h 09 = 0 EUR, ab 2 h 10 = erste Stufe).
  * 4. Danach je ANGEFANGENE 30 min = 30 EUR (aufgerundete Bloecke).
@@ -130,10 +130,8 @@ function computeStandgeld(input = {}, config = {}) {
 
   // Regel 2: Zaehlbeginn ab Fenster, bei Spaetankunft ab Ankunft.
   // Wartezeit vor dem Fenster wird nie gezaehlt - AUSSER im Umbuchungsfall.
-  const lateGraceApplies =
-    lateGraceEnabled &&
-    arrivedLate &&
-    arrival - windowStart <= lateGraceMinutes * 60000;
+  // Mit aktivierter Verspaetungsregel gilt fuer alle Spaetankuenfte 3h frei.
+  const lateGraceApplies = lateGraceEnabled && arrivedLate;
 
   const freeMinutesForCharge = lateGraceApplies ? 180 : cfg.freeMinutes;
   const countStartMs =
