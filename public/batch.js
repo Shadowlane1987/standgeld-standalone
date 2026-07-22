@@ -68,6 +68,7 @@ let currentImportId = "";
 let currentImports = [];
 const bookkeepingByKey = new Map();
 const BOOKKEEPING_STORAGE_KEY = `standgeld.bookkeeping.${APP_SCOPE}.v1`;
+const SIXFOLD_STORAGE_KEY = "standgeld.sixfold.credentials.v1";
 
 const REASON_LABELS = {
   chargeable: "Abrechenbar",
@@ -188,6 +189,42 @@ function writeBookkeepingStorage(storage) {
     );
   } catch (_error) {
     // ignore storage write errors
+  }
+}
+
+function readSixfoldStorage() {
+  try {
+    const raw = window.localStorage.getItem(SIXFOLD_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function writeSixfoldStorage(value) {
+  try {
+    window.localStorage.setItem(SIXFOLD_STORAGE_KEY, JSON.stringify(value));
+  } catch (_error) {
+    // ignore storage write errors
+  }
+}
+
+function persistSixfoldCredentials() {
+  writeSixfoldStorage({
+    url: String(el.sixfoldUrl?.value || "").trim(),
+    token: String(el.sixfoldToken?.value || "").trim(),
+  });
+}
+
+function restoreSixfoldCredentials() {
+  const stored = readSixfoldStorage();
+  if (el.sixfoldUrl && stored.url) {
+    el.sixfoldUrl.value = String(stored.url);
+  }
+  if (el.sixfoldToken && stored.token) {
+    el.sixfoldToken.value = String(stored.token);
   }
 }
 
@@ -1144,6 +1181,14 @@ if (el.unloadWindowFileInput) {
 if (el.uploadUnloadWindowsBtn) {
   el.uploadUnloadWindowsBtn.addEventListener("click", uploadUnloadWindows);
 }
+if (el.sixfoldUrl) {
+  el.sixfoldUrl.addEventListener("input", persistSixfoldCredentials);
+  el.sixfoldUrl.addEventListener("change", persistSixfoldCredentials);
+}
+if (el.sixfoldToken) {
+  el.sixfoldToken.addEventListener("input", persistSixfoldCredentials);
+  el.sixfoldToken.addEventListener("change", persistSixfoldCredentials);
+}
 el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
 el.filterMode.addEventListener("change", render);
 if (el.bookkeepingExportBtn) {
@@ -1191,6 +1236,8 @@ document.addEventListener("keydown", (event) => {
   }
   closeStopDetailModal();
 });
+
+restoreSixfoldCredentials();
 
 refreshImports("", true)
   .then(async () => {
