@@ -192,33 +192,45 @@ class ImportStore {
     return true;
   }
 
-  saveBillingResult(importId, result) {
+  saveBillingResult(importId, cacheKey, result) {
     this.init();
     const id = String(importId || "").trim();
     if (!id) return false;
+    const key = String(cacheKey || "default").trim() || "default";
 
     const filePath = path.join(this.resultsDir, `${id}.json`);
-    const payload = {
-      import_id: id,
-      generated_at: new Date().toISOString(),
-      result,
-    };
+    const payload = fs.existsSync(filePath)
+      ? JSON.parse(fs.readFileSync(filePath, "utf8"))
+      : { import_id: id, generated_at: new Date().toISOString(), results: {} };
+
+    if (!payload.results || typeof payload.results !== "object") {
+      payload.results = {};
+    }
+    payload.import_id = id;
+    payload.generated_at = new Date().toISOString();
+    payload.results[key] = result;
+
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), {
       flag: "w",
     });
     return true;
   }
 
-  getBillingResult(importId) {
+  getBillingResult(importId, cacheKey) {
     this.init();
     const id = String(importId || "").trim();
     if (!id) return null;
+    const key = String(cacheKey || "default").trim() || "default";
 
     const filePath = path.join(this.resultsDir, `${id}.json`);
     if (!fs.existsSync(filePath)) return null;
     try {
       const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      return parsed && typeof parsed === "object" ? parsed : null;
+      if (!parsed || typeof parsed !== "object") return null;
+      if (parsed.results && typeof parsed.results === "object") {
+        return parsed.results[key] ? { result: parsed.results[key] } : null;
+      }
+      return parsed.result ? { result: parsed.result } : null;
     } catch (_error) {
       return null;
     }

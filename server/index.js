@@ -101,16 +101,40 @@ function resolveExportFilePath(req, fallbackPath) {
   return req.query.file ? String(req.query.file) : fallbackPath;
 }
 
-function loadCachedBillingResult(importId) {
-  const cached = importStore.getBillingResult(importId);
+function billingCacheKey(req) {
+  const keyData = {
+    scope: scopeFromReq(req),
+    freeMinutes: String(req.query.freeMinutes || ""),
+    blockMinutes: String(req.query.blockMinutes || ""),
+    blockRateEur: String(req.query.blockRateEur || ""),
+    triggerMinutes: String(req.query.triggerMinutes || ""),
+    lateArrivalGraceEnabled: String(req.query.lateArrivalGraceEnabled || ""),
+    lateArrivalGraceMinutes: String(req.query.lateArrivalGraceMinutes || ""),
+    sixfoldDateFrom: String(req.query.sixfoldDateFrom || ""),
+    sixfoldDateTo: String(req.query.sixfoldDateTo || ""),
+    hasSixfoldHeaders: hasSixfoldHeaders(req) ? "1" : "0",
+  };
+  return Buffer.from(JSON.stringify(keyData)).toString("base64url");
+}
+
+function loadCachedBillingResult(importId, cacheKey) {
+  const cached = importStore.getBillingResult(importId, cacheKey);
   return cached && cached.result ? cached.result : null;
 }
 
-function persistBillingResult(importId, result) {
+function hasSixfoldHeaders(req) {
+  return Boolean(
+    String(req.get("x-sixfold-url") || "").trim() &&
+    (String(req.get("x-sixfold-token") || "").trim() ||
+      String(req.get("x-sixfold-cookie") || "").trim()),
+  );
+}
+
+function persistBillingResult(importId, cacheKey, result) {
   const id = String(importId || "").trim();
   if (!id || !result) return;
   try {
-    importStore.saveBillingResult(id, result);
+    importStore.saveBillingResult(id, cacheKey, result);
   } catch (_error) {
     // Cache ist nur Komfort; die eigentliche Abrechnung soll nicht scheitern.
   }
@@ -1737,9 +1761,10 @@ app.get("/api/billing/export", async (req, res) => {
 
     const config = parseBillingConfig(req);
     const importId = String(req.query.importId || "").trim();
+    const cacheKey = billingCacheKey(req);
 
     if (importId) {
-      const cachedResult = loadCachedBillingResult(importId);
+      const cachedResult = loadCachedBillingResult(importId, cacheKey);
       if (cachedResult) {
         return res.json({
           ...cachedResult,
@@ -1800,7 +1825,7 @@ app.get("/api/billing/export", async (req, res) => {
     );
 
     const result = billFromExport(filteredTransports, { config, gpsIndex });
-    persistBillingResult(importId, {
+    persistBillingResult(importId, cacheKey, {
       file: filePath,
       generated_at: new Date().toISOString(),
       gps: gpsInfo,
@@ -1844,9 +1869,10 @@ app.get("/api/billing/live", async (req, res) => {
 
     const config = parseBillingConfig(req);
     const importId = String(req.query.importId || "").trim();
+    const cacheKey = billingCacheKey(req);
 
     if (importId) {
-      const cachedResult = loadCachedBillingResult(importId);
+      const cachedResult = loadCachedBillingResult(importId, cacheKey);
       if (cachedResult) {
         return res.json({
           ...cachedResult,
@@ -2049,7 +2075,7 @@ app.post(
       );
 
       const result = billFromExport(filteredTransports, { config, gpsIndex });
-      persistBillingResult(savedImport.id, {
+      persistBillingResult(savedImport.id, cacheKey, {
         file: req.query.name ? String(req.query.name) : "upload.xlsx",
         import: savedImport,
         generated_at: new Date().toISOString(),
@@ -2187,7 +2213,7 @@ app.post(
         gpsIndex,
       });
 
-      persistBillingResult(savedImport?.id, {
+      persistBillingResult(savedImport?.id, cacheKey, {
         file: req.query.name ? String(req.query.name) : "upload.xlsx",
         import: savedImport,
         generated_at: new Date().toISOString(),

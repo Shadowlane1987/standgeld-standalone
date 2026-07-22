@@ -234,6 +234,17 @@ function persistRuleSettings() {
   });
 }
 
+async function persistRuleSettingsAndReload() {
+  persistRuleSettings();
+  if (currentImportId) {
+    try {
+      await load();
+    } catch (_error) {
+      // load() setzt den Status selbst
+    }
+  }
+}
+
 function restoreRuleSettings() {
   const stored = readRuleStorage();
   if (el.lateArrivalGraceEnabled) {
@@ -1233,11 +1244,17 @@ if (el.uploadUnloadWindowsBtn) {
   el.uploadUnloadWindowsBtn.addEventListener("click", uploadUnloadWindows);
 }
 if (el.lateArrivalGraceEnabled) {
-  el.lateArrivalGraceEnabled.addEventListener("change", persistRuleSettings);
+  el.lateArrivalGraceEnabled.addEventListener(
+    "change",
+    persistRuleSettingsAndReload,
+  );
 }
 if (el.lateArrivalGraceMinutes) {
   el.lateArrivalGraceMinutes.addEventListener("input", persistRuleSettings);
-  el.lateArrivalGraceMinutes.addEventListener("change", persistRuleSettings);
+  el.lateArrivalGraceMinutes.addEventListener(
+    "change",
+    persistRuleSettingsAndReload,
+  );
 }
 if (el.sixfoldUrl) {
   el.sixfoldUrl.addEventListener("input", persistSixfoldCredentials);
