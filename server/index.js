@@ -94,6 +94,21 @@ function resolveExportFilePath(req, fallbackPath) {
   return req.query.file ? String(req.query.file) : fallbackPath;
 }
 
+function loadCachedBillingResult(importId) {
+  const cached = importStore.getBillingResult(importId);
+  return cached && cached.result ? cached.result : null;
+}
+
+function persistBillingResult(importId, result) {
+  const id = String(importId || "").trim();
+  if (!id || !result) return;
+  try {
+    importStore.saveBillingResult(id, result);
+  } catch (_error) {
+    // Cache ist nur Komfort; die eigentliche Abrechnung soll nicht scheitern.
+  }
+}
+
 function formatDateTime(value) {
   const date = value instanceof Date ? value : toDate(value);
   if (!date || Number.isNaN(date.getTime())) return "-";
@@ -1714,6 +1729,17 @@ app.get("/api/billing/export", async (req, res) => {
     }
 
     const config = parseBillingConfig(req);
+    const importId = String(req.query.importId || "").trim();
+
+    if (importId) {
+      const cachedResult = loadCachedBillingResult(importId);
+      if (cachedResult) {
+        return res.json({
+          ...cachedResult,
+          cached: true,
+        });
+      }
+    }
 
     const transports = loadTransporeonExport(filePath);
 
@@ -1767,6 +1793,18 @@ app.get("/api/billing/export", async (req, res) => {
     );
 
     const result = billFromExport(filteredTransports, { config, gpsIndex });
+    persistBillingResult(importId, {
+      file: filePath,
+      generated_at: new Date().toISOString(),
+      gps: gpsInfo,
+      summary: {
+        ...result.summary,
+        ...filterMeta,
+        ...unloadFallbackMeta,
+        total_fee_display: formatEuro(result.summary.total_fee_eur),
+      },
+      stops: result.stops,
+    });
 
     res.json({
       file: filePath,
@@ -1798,6 +1836,17 @@ app.get("/api/billing/live", async (req, res) => {
     }
 
     const config = parseBillingConfig(req);
+    const importId = String(req.query.importId || "").trim();
+
+    if (importId) {
+      const cachedResult = loadCachedBillingResult(importId);
+      if (cachedResult) {
+        return res.json({
+          ...cachedResult,
+          cached: true,
+        });
+      }
+    }
 
     const transports = loadTransporeonExport(filePath);
     let window = computeTransportsWindow(transports);
@@ -1818,6 +1867,29 @@ app.get("/api/billing/live", async (req, res) => {
 
     const filteredTransports = filterTransportsByUnloadDate(
       transports,
+
+          persistBillingResult(importId, {
+            file: filePath,
+            generated_at: new Date().toISOString(),
+            gps: gpsInfo,
+            transporeon_live: {
+              fetched: true,
+              requested_transport_count: filteredTransports.length,
+              available_transport_count: liveResult.availableTransportCount,
+              matched_transport_count: liveResult.matchedTransports.length,
+              missing_transport_count: liveResult.missingTransportNumbers.length,
+              failure_count: liveResult.failures.length,
+            },
+            summary: {
+              ...result.summary,
+              ...filterMeta,
+              ...unloadFallbackMeta,
+              total_fee_display: formatEuro(result.summary.total_fee_eur),
+            },
+            stops: result.stops,
+            live_failures: liveResult.failures,
+            missing_transports: liveResult.missingTransportNumbers,
+          });
       sixfoldDateFrom,
       sixfoldDateTo,
     );
@@ -1993,6 +2065,19 @@ app.post(
       );
 
       const result = billFromExport(filteredTransports, { config, gpsIndex });
+      persistBillingResult(savedImport.id, {
+        file: req.query.name ? String(req.query.name) : "upload.xlsx",
+        import: savedImport,
+        generated_at: new Date().toISOString(),
+        gps: gpsInfo,
+        summary: {
+          ...result.summary,
+          ...filterMeta,
+          ...unloadFallbackMeta,
+          total_fee_display: formatEuro(result.summary.total_fee_eur),
+        },
+        stops: result.stops,
+      });
 
       res.json({
         file: req.query.name ? String(req.query.name) : "upload.xlsx",
@@ -2116,6 +2201,30 @@ app.post(
       const result = billFromLiveData(filteredTransports, liveResult.events, {
         config,
         gpsIndex,
+      });
+
+      persistBillingResult(savedImport?.id, {
+        file: req.query.name ? String(req.query.name) : "upload.xlsx",
+        import: savedImport,
+        generated_at: new Date().toISOString(),
+        gps: gpsInfo,
+        transporeon_live: {
+          fetched: true,
+          requested_transport_count: filteredTransports.length,
+          available_transport_count: liveResult.availableTransportCount,
+          matched_transport_count: liveResult.matchedTransports.length,
+          missing_transport_count: liveResult.missingTransportNumbers.length,
+          failure_count: liveResult.failures.length,
+        },
+        summary: {
+          ...result.summary,
+          ...filterMeta,
+          ...unloadFallbackMeta,
+          total_fee_display: formatEuro(result.summary.total_fee_eur),
+        },
+        stops: result.stops,
+        live_failures: liveResult.failures,
+        missing_transports: liveResult.missingTransportNumbers,
       });
 
       if (!allowPartialLive && result.summary.xp_missing_count > 0) {

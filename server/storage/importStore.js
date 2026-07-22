@@ -7,6 +7,7 @@ const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
 const DEFAULT_ROOT = path.join(APP_DATA_DIR, "imports");
+const DEFAULT_RESULTS_ROOT = path.join(APP_DATA_DIR, "import-results");
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -67,11 +68,13 @@ class ImportStore {
     this.root = options.root || DEFAULT_ROOT;
     this.filesDir = path.join(this.root, "files");
     this.metaDir = path.join(this.root, "meta");
+    this.resultsDir = options.resultsRoot || DEFAULT_RESULTS_ROOT;
   }
 
   init() {
     ensureDir(this.filesDir);
     ensureDir(this.metaDir);
+    ensureDir(this.resultsDir);
   }
 
   saveImport({ buffer, fileName, transports, scope }) {
@@ -181,7 +184,44 @@ class ImportStore {
       fs.unlinkSync(metaPath);
     }
 
+    const resultPath = path.join(this.resultsDir, `${meta.id}.json`);
+    if (fs.existsSync(resultPath)) {
+      fs.unlinkSync(resultPath);
+    }
+
     return true;
+  }
+
+  saveBillingResult(importId, result) {
+    this.init();
+    const id = String(importId || "").trim();
+    if (!id) return false;
+
+    const filePath = path.join(this.resultsDir, `${id}.json`);
+    const payload = {
+      import_id: id,
+      generated_at: new Date().toISOString(),
+      result,
+    };
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), {
+      flag: "w",
+    });
+    return true;
+  }
+
+  getBillingResult(importId) {
+    this.init();
+    const id = String(importId || "").trim();
+    if (!id) return null;
+
+    const filePath = path.join(this.resultsDir, `${id}.json`);
+    if (!fs.existsSync(filePath)) return null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (_error) {
+      return null;
+    }
   }
 }
 
