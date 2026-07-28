@@ -25,10 +25,11 @@ const el = {
   dateSort: document.getElementById("dateSort"),
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
-  resultMeta: document.getElementById("resultMeta"),
   rows: document.getElementById("rows"),
   surchargeModal: document.getElementById("surchargeModal"),
   surchargeTitle: document.getElementById("surchargeTitle"),
+  surchargeMeta: document.getElementById("surchargeMeta"),
+  surchargeDetailRows: document.getElementById("surchargeDetailRows"),
   surchargeText: document.getElementById("surchargeText"),
   copySurchargeBtn: document.getElementById("copySurchargeBtn"),
   closeSurchargeModalBtn: document.getElementById("closeSurchargeModalBtn"),
@@ -875,6 +876,24 @@ function compactSingleWindowValue(startValue, endValue) {
   return "-";
 }
 
+function detailCell(text) {
+  return text || "-";
+}
+
+function detailRowHtml(field, xp, gps, used) {
+  const valueXp = detailCell(xp);
+  const valueGps = detailCell(gps);
+  const valueUsed = detailCell(used);
+  return `
+    <tr>
+      <td>${field}</td>
+      <td>${valueXp}</td>
+      <td>${valueGps}</td>
+      <td class="detail-used">${valueUsed}</td>
+    </tr>
+  `;
+}
+
 function excelSingleWindowValue(stop) {
   const raw = String(stop?.excel_window_display || "").trim();
   if (!raw) return "-";
@@ -949,6 +968,10 @@ function buildSurchargeDescription(stop) {
   const windowText = resolveWindowDisplay(stop);
   const effective = formatMinutesAsHours(stop.effective_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
+  const amount = Number(stop.amount_eur || 0).toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+  });
 
   return [
     `Ankunft: ${arrival}`,
@@ -956,11 +979,38 @@ function buildSurchargeDescription(stop) {
     `Abfahrt: ${departure}`,
     `Effektive Standzeit: ${effective}`,
     `Abzurechnende Standzeit: ${billable}`,
+    `Abrechenbare Summe: ${amount}`,
   ].join("\n");
 }
 
 function openSurchargeModal(stop) {
   el.surchargeTitle.textContent = "Zuschlagstext";
+  const arrival = compactDateTimeDisplay(stop.arrival_display);
+  const departure = compactDateTimeDisplay(stop.departure_display);
+  const windowText = resolveWindowDisplay(stop);
+  const source = getTimeWindowSource(stop).label;
+  const effective = formatMinutesAsHours(stop.effective_minutes);
+  const billable = formatMinutesAsHours(stop.billable_minutes);
+  const freeWindow = formatMinutesAsHours(
+    stop.free_minutes || el.freeMinutes.value || 120,
+  );
+  const amount = Number(stop.amount_eur || 0).toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+  });
+
+  if (el.surchargeMeta) {
+    el.surchargeMeta.textContent = `Zeitfenster: ${windowText} · Quelle: ${source} · Abrechenbare Summe: ${amount}`;
+  }
+  if (el.surchargeDetailRows) {
+    el.surchargeDetailRows.innerHTML =
+      detailRowHtml("Ankunft", arrival, "-", arrival) +
+      detailRowHtml("Abfahrt", departure, "-", departure) +
+      detailRowHtml("Standzeit (Ist)", effective, "-", effective) +
+      detailRowHtml("Standzeit ab Zählbeginn", "-", "-", effective) +
+      detailRowHtml("Freigrenze", "-", "-", freeWindow) +
+      detailRowHtml("Über Frei", "-", "-", billable);
+  }
   el.surchargeText.value = buildSurchargeDescription(stop);
   el.surchargeModal.hidden = false;
 }
@@ -1010,12 +1060,6 @@ async function run() {
     el.amount.textContent = data.summary?.amount_display || "-";
     el.positions.textContent = String(data.summary?.billed_positions || 0);
     el.units.textContent = String(data.summary?.units || 0);
-    el.resultMeta.textContent =
-      `Neu berechnet: ${data.summary?.recalculated_positions || 0} | ` +
-      `Zeitfenster-Matches: ${data.summary?.time_window_matches || 0}/${data.summary?.time_window_rows || 0} | ` +
-      `>14h entfernt: ${data.summary?.removed_long_stand_positions || 0} | ` +
-      `>=${data.summary?.excluded_from_total_threshold_eur || 450} EUR nicht in Summe: ${data.summary?.excluded_from_total_positions || 0}`;
-
     latestStops = Array.isArray(data.stops) ? data.stops : [];
     restoreBookkeepingEntries(latestStops);
     ensureBookkeepingEntries(latestStops);
