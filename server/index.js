@@ -102,8 +102,18 @@ function resolveExportFilePath(req, fallbackPath) {
 }
 
 function billingCacheKey(req) {
+  const scope = scopeFromReq(req);
+  let unloadWindowsMtime = "";
+  try {
+    const wf = unloadWindowsFileForScope(scope);
+    if (fs.existsSync(wf)) {
+      unloadWindowsMtime = String(fs.statSync(wf).mtimeMs);
+    }
+  } catch (_error) {
+    // ignore
+  }
   const keyData = {
-    scope: scopeFromReq(req),
+    scope,
     freeMinutes: String(req.query.freeMinutes || ""),
     blockMinutes: String(req.query.blockMinutes || ""),
     blockRateEur: String(req.query.blockRateEur || ""),
@@ -113,6 +123,7 @@ function billingCacheKey(req) {
     sixfoldDateFrom: String(req.query.sixfoldDateFrom || ""),
     sixfoldDateTo: String(req.query.sixfoldDateTo || ""),
     hasSixfoldHeaders: hasSixfoldHeaders(req) ? "1" : "0",
+    unloadWindowsMtime,
   };
   return Buffer.from(JSON.stringify(keyData)).toString("base64url");
 }

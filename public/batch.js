@@ -1088,7 +1088,7 @@ async function uploadUnloadWindows() {
     );
 
     if (currentImportId) {
-      await load();
+      await load(true);
     }
   } catch (error) {
     setStatus(
