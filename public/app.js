@@ -1022,7 +1022,12 @@ function buildSurchargeDescription(stop) {
 }
 
 function openSurchargeModal(stop) {
-  el.surchargeTitle.textContent = "Zuschlagstext";
+  const transportId = String(
+    stop.transport_number || stop.tour_id || "",
+  ).trim();
+  el.surchargeTitle.textContent = transportId
+    ? `Transport ${transportId}`
+    : "Zuschlagstext";
   const arrival = compactDateTimeDisplay(stop.arrival_display);
   const departure = compactDateTimeDisplay(stop.departure_display);
   const windowText = resolveWindowDisplay(stop);
