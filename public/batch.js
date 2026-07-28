@@ -945,9 +945,17 @@ function applyResult(data) {
         " · Entladefenster-Fallback: keine Datei fuer diesen Bereich";
     } else if ((data.summary.fallback_candidates || 0) === 0) {
       fallbackNote =
-        " · Entladefenster-Fallback: keine fehlenden Entladefenster";
+        " · Entladefenster-Fallback: keine Entlade-Stopps im Import";
     } else {
-      fallbackNote = ` · Entladefenster ersetzt: ${data.summary.fallback_applied}/${data.summary.fallback_candidates || 0}`;
+      const overridden = Number(data.summary.fallback_overridden_existing || 0);
+      const matched = Number(data.summary.fallback_already_matching || 0);
+      fallbackNote = ` · Entladefenster aus Excel: ${data.summary.fallback_applied}/${data.summary.fallback_candidates || 0}`;
+      if (overridden > 0) {
+        fallbackNote += ` (davon ${overridden} vorhandene TP-Fenster ueberschrieben)`;
+      }
+      if (matched > 0) {
+        fallbackNote += ` (${matched} bereits identisch)`;
+      }
     }
   }
   setStatus(

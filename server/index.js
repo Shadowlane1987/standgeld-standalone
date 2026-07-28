@@ -1525,19 +1525,24 @@ app.get("/api/windows/debug", (req, res) => {
           const ladenummer = transportNumberToLadenummer(t.transport_number);
           const found = ladenummer ? winIndex.get(ladenummer) : null;
           const unload = t.unloading;
+          const hasWindow = hasValidLocalWindowDateTime(unload?.window_local);
           return {
             transport_number: t.transport_number,
             ladenummer,
             match: Boolean(found),
             entladezeit: found?.entladezeit_start || null,
-            hat_window: Boolean(unload?.window_local),
+            hat_window: hasWindow,
             window_local: unload?.window_local || null,
+            would_override_existing: Boolean(found) && hasWindow,
+            would_fill_missing: Boolean(found) && !hasWindow,
           };
         });
         matchTest = {
           total: results.length,
           matched: results.filter((r) => r.match).length,
-          would_apply: results.filter((r) => r.match && !r.hat_window).length,
+          would_apply: results.filter((r) => r.match).length,
+          would_fill_missing: results.filter((r) => r.would_fill_missing).length,
+          would_override_existing: results.filter((r) => r.would_override_existing).length,
           sample_no_match: results.filter((r) => !r.match).slice(0, 10),
           sample_match: results.filter((r) => r.match).slice(0, 10),
         };
@@ -1702,28 +1707,34 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
       fallback_candidates: 0,
       fallback_applied: 0,
       fallback_unresolved: 0,
+      fallback_overridden_existing: 0,
+      fallback_already_matching: 0,
     };
   }
 
   let candidates = 0;
   let applied = 0;
+  let overriddenExisting = 0;
+  let alreadyMatching = 0;
 
   for (const transport of list) {
     const unload = transport?.unloading;
     if (!unload) continue;
 
-    // Nur ersetzen, wenn am Entlade-Stopp kein gueltiges Zeitfenster vorhanden ist.
-    if (hasValidLocalWindowDateTime(unload.window_local)) {
-      unload.unload_window_fallback_applied = false;
-      unload.unload_window_fallback_reason = "already_present";
-      continue;
-    }
-
     candidates += 1;
+    const hadExistingWindow = hasValidLocalWindowDateTime(unload.window_local);
+    const previousWindow = String(unload.window_local || "").trim();
     const ladenummer = transportNumberToLadenummer(transport.transport_number);
     const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
     const unloadStart = windowStartForStop(windowRow, "UNLOADING");
     const localDate = localDateForUnloadWindowFallback(transport);
+
+    if (hadExistingWindow && !unloadStart) {
+      unload.unload_window_fallback_applied = false;
+      unload.unload_window_fallback_reason = "existing_window_kept_no_excel_match";
+      continue;
+    }
+
     if (!unloadStart || !localDate) {
       unload.unload_window_fallback_applied = false;
       unload.unload_window_fallback_reason = !unloadStart
@@ -1734,7 +1745,18 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
 
     unload.window_local = `${localDate} ${unloadStart}`;
     unload.unload_window_fallback_applied = true;
-    unload.unload_window_fallback_reason = "applied";
+    if (hadExistingWindow) {
+      if (previousWindow === unload.window_local) {
+        unload.unload_window_fallback_reason = "already_matching_excel_window";
+        alreadyMatching += 1;
+      } else {
+        unload.unload_window_fallback_reason = "excel_overrode_existing_window";
+        unload.unload_window_previous = previousWindow || null;
+        overriddenExisting += 1;
+      }
+    } else {
+      unload.unload_window_fallback_reason = "applied_missing_window";
+    }
     applied += 1;
   }
 
@@ -1744,6 +1766,8 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
     fallback_candidates: candidates,
     fallback_applied: applied,
     fallback_unresolved: Math.max(0, candidates - applied),
+    fallback_overridden_existing: overriddenExisting,
+    fallback_already_matching: alreadyMatching,
   };
 }
 
