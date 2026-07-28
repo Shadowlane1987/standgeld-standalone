@@ -938,6 +938,10 @@ td input[type="checkbox"][data-bk] {
   animation: modal-rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+.detail-card {
+  width: min(1060px, 96vw);
+}
+
 @keyframes modal-fade {
   from {
     opacity: 0;
@@ -975,13 +979,14 @@ td input[type="checkbox"][data-bk] {
 }
 
 .detail-meta {
-  margin: 14px 0 16px;
-  padding: 12px 14px;
+  margin: 10px 0 12px;
+  padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: rgba(14, 92, 74, 0.05);
   color: var(--ink-soft);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
+  line-height: 1.6;
 }
 
 .detail-table-wrap {
@@ -1007,6 +1012,36 @@ td input[type="checkbox"][data-bk] {
 
 .justification-card {
   max-width: 760px;
+}
+
+.justification-inline {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.justification-inline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.justification-inline-head h4 {
+  margin: 0;
+  font-family: "Fraunces", serif;
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.justification-inline textarea {
+  width: 100%;
+  min-height: 110px;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  resize: none;
 }
 
 #justificationText {

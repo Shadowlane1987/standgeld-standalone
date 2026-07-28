@@ -53,16 +53,8 @@ const el = {
   stopDetailRows: document.getElementById("stopDetailRows"),
   closeStopDetailModalBtn: document.getElementById("closeStopDetailModalBtn"),
   closeStopDetailModalBtn2: document.getElementById("closeStopDetailModalBtn2"),
-  openJustificationBtn: document.getElementById("openJustificationBtn"),
-  justificationModal: document.getElementById("justificationModal"),
   justificationText: document.getElementById("justificationText"),
   copyJustificationBtn: document.getElementById("copyJustificationBtn"),
-  closeJustificationModalBtn: document.getElementById(
-    "closeJustificationModalBtn",
-  ),
-  closeJustificationModalBtn2: document.getElementById(
-    "closeJustificationModalBtn2",
-  ),
 };
 
 let currentStops = [];
@@ -544,12 +536,8 @@ function openStopDetailModal(stop) {
   const arrivalSrc = stop.arrival_source || "XP";
   const departureSrc = stop.departure_source || "XP";
   el.stopDetailMeta.textContent =
-    `Zeitfenster: ${windowLocal} · Zählbeginn: ${countStartLocal} · ` +
-    `Quelle: ${source} · KFZ: ${kfz} · ` +
-    `Ankunft genutzt: ${arrivalUsed} ${arrivalSrc} · ` +
-    `Abfahrt genutzt: ${departureUsed} ${departureSrc} · ` +
-    `Ist-Standzeit: ${usedStanding} · Ab Zählbeginn: ${countedStanding} · ` +
-    `Frei: ${freeWindow} · Über Frei: ${overFreeStanding}` +
+    `Zeitfenster: ${windowLocal} · Quelle: ${source}` +
+    (kfz !== "-" ? ` · KFZ: ${kfz}` : "") +
     amountNote +
     rebookingNote;
 
@@ -589,6 +577,9 @@ function openStopDetailModal(stop) {
     fallbackStatusRowHtml(stop);
 
   el.stopDetailModal.hidden = false;
+  if (el.justificationText) {
+    el.justificationText.value = buildJustificationText(stop);
+  }
 }
 
 function closeStopDetailModal() {
@@ -627,34 +618,22 @@ function usedBoundaryLabel(iso, source) {
   return `${local} ${source || "XP"}`;
 }
 
-function openJustificationModal() {
-  if (!el.justificationModal || !el.justificationText || !activeDetailStop) {
-    return;
-  }
-  el.justificationText.value = buildJustificationText(activeDetailStop);
-  el.justificationModal.hidden = false;
-}
-
-function closeJustificationModal() {
-  if (!el.justificationModal) return;
-  el.justificationModal.hidden = true;
-}
-
-async function copyJustificationText() {
+function copyJustificationText() {
   const text = String(el.justificationText?.value || "").trim();
   if (!text) return;
-
-  try {
-    await navigator.clipboard.writeText(text);
-    setStatus("Begründung in Zwischenablage kopiert.", "success");
-  } catch {
-    if (el.justificationText) {
-      el.justificationText.focus();
-      el.justificationText.select();
-      document.execCommand("copy");
+  navigator.clipboard
+    .writeText(text)
+    .then(() => {
       setStatus("Begründung in Zwischenablage kopiert.", "success");
-    }
-  }
+    })
+    .catch(() => {
+      if (el.justificationText) {
+        el.justificationText.focus();
+        el.justificationText.select();
+        document.execCommand("copy");
+        setStatus("Begründung in Zwischenablage kopiert.", "success");
+      }
+    });
 }
 
 function filteredStops() {
@@ -1397,40 +1376,16 @@ if (el.closeStopDetailModalBtn) {
 if (el.closeStopDetailModalBtn2) {
   el.closeStopDetailModalBtn2.addEventListener("click", closeStopDetailModal);
 }
-if (el.openJustificationBtn) {
-  el.openJustificationBtn.addEventListener("click", openJustificationModal);
-}
 if (el.copyJustificationBtn) {
   el.copyJustificationBtn.addEventListener("click", copyJustificationText);
-}
-if (el.closeJustificationModalBtn) {
-  el.closeJustificationModalBtn.addEventListener(
-    "click",
-    closeJustificationModal,
-  );
-}
-if (el.closeJustificationModalBtn2) {
-  el.closeJustificationModalBtn2.addEventListener(
-    "click",
-    closeJustificationModal,
-  );
 }
 if (el.stopDetailModal) {
   el.stopDetailModal.addEventListener("click", (event) => {
     if (event.target === el.stopDetailModal) closeStopDetailModal();
   });
 }
-if (el.justificationModal) {
-  el.justificationModal.addEventListener("click", (event) => {
-    if (event.target === el.justificationModal) closeJustificationModal();
-  });
-}
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (el.justificationModal && !el.justificationModal.hidden) {
-    closeJustificationModal();
-    return;
-  }
   closeStopDetailModal();
 });
 

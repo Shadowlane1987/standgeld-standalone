@@ -235,7 +235,7 @@
       </section>
 
       <section id="stopDetailModal" class="modal" hidden>
-        <div class="modal-card">
+        <div class="modal-card detail-card">
           <div class="modal-head">
             <h3 id="stopDetailTitle">Tour-Details</h3>
             <button
@@ -263,45 +263,22 @@
             </table>
           </div>
 
+          <div class="justification-inline">
+            <div class="justification-inline-head">
+              <h4>Begründung</h4>
+              <button
+                id="copyJustificationBtn"
+                type="button"
+                class="btn-secondary"
+              >
+                Text kopieren
+              </button>
+            </div>
+            <textarea id="justificationText" rows="5" readonly></textarea>
+          </div>
+
           <div class="modal-actions">
-            <button
-              id="openJustificationBtn"
-              type="button"
-              class="btn-secondary"
-            >
-              Begründung
-            </button>
             <button id="closeStopDetailModalBtn2" type="button">
-              Schließen
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section id="justificationModal" class="modal" hidden>
-        <div class="modal-card justification-card">
-          <div class="modal-head">
-            <h3>Begründung für Zuschlagsmanagement</h3>
-            <button
-              id="closeJustificationModalBtn"
-              class="modal-close"
-              type="button"
-            >
-              Schließen
-            </button>
-          </div>
-
-          <textarea id="justificationText" rows="9" readonly></textarea>
-
-          <div class="modal-actions">
-            <button
-              id="copyJustificationBtn"
-              type="button"
-              class="btn-secondary"
-            >
-              Text kopieren
-            </button>
-            <button id="closeJustificationModalBtn2" type="button">
               Schließen
             </button>
           </div>
