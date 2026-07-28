@@ -962,10 +962,53 @@ function formatMinutesAsHours(minutesValue) {
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
+function formatDateTimeForText(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "-") return "-";
+
+  const direct = new Date(text);
+  if (!Number.isNaN(direct.getTime())) {
+    const local = direct.toLocaleString("de-DE", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return local.replace(", ", " / ");
+  }
+
+  const withYear = text.match(/^(\d{2}\.\d{2}\.\d{4}),\s*(\d{2}:\d{2})$/);
+  if (withYear) return `${withYear[1]} / ${withYear[2]}`;
+
+  const shortDate = text.match(/^(\d{2}\.\d{2})\.?[,]?\s*(\d{2}:\d{2})$/);
+  if (shortDate) return `${shortDate[1]}. / ${shortDate[2]}`;
+
+  return text;
+}
+
+function resolveWindowTextForSurcharge(stop) {
+  const slotText = formatDateTimeForText(stop?.slot_begin_display);
+  if (slotText !== "-") return slotText;
+
+  const excelRaw = String(stop?.excel_window_display || "").trim();
+  if (excelRaw) {
+    if (/^\d{1,2}\.\d{2}$/.test(excelRaw)) return excelRaw.replace(".", ":");
+    if (/^\d{1,2}:\d{2}$/.test(excelRaw)) return excelRaw;
+    return formatDateTimeForText(excelRaw);
+  }
+
+  return resolveWindowDisplay(stop);
+}
+
 function buildSurchargeDescription(stop) {
-  const arrival = stop.arrival_display || "-";
-  const departure = stop.departure_display || "-";
-  const windowText = resolveWindowDisplay(stop);
+  const arrival = formatDateTimeForText(
+    stop.arrival_time || stop.arrival_display,
+  );
+  const departure = formatDateTimeForText(
+    stop.departure_time || stop.departure_display,
+  );
+  const windowText = resolveWindowTextForSurcharge(stop);
   const effective = formatMinutesAsHours(stop.effective_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
 
