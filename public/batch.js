@@ -793,9 +793,15 @@ function render() {
       <td>${timeCellHtml(usedBoundaryLabel(stop.arrival_time_used, stop.arrival_source), sourceTone(stop.arrival_source), stop.arrival_source || "XP")}</td>
       <td>${timeCellHtml(usedBoundaryLabel(stop.departure_time_used, stop.departure_source), sourceTone(stop.departure_source), stop.departure_source || "XP")}</td>
       <td>${timeCellHtml(isoToLocal(stop.count_start), context.startClass, context.startHint)}</td>
-      <td>${stop.unload_window_fallback_applied
-        ? timeCellHtml(stop.window_local || "-", "time-chip-excel", "Excel")
-        : timeCellHtml(stop.window_local || "-", context.windowClass, context.windowHint)}</td>
+      <td>${
+        stop.unload_window_fallback_applied
+          ? timeCellHtml(stop.window_local || "-", "time-chip-excel", "Excel")
+          : timeCellHtml(
+              stop.window_local || "-",
+              context.windowClass,
+              context.windowHint,
+            )
+      }</td>
       <td>${minutesToHours(stop.counted_standing_minutes)}</td>
       <td>${minutesToHours(stop.minutes_over_free)}</td>
       <td>${euro(stop.fee_eur)}</td>
@@ -1089,10 +1095,22 @@ async function uploadUnloadWindows() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-    setStatus(
-      `Entladezeitfenster importiert (${data.windows_count || 0} Zeilen).`,
-      "success",
-    );
+    const count = data.windows_count || 0;
+    const ohneZeit = data.debug?.ohne_entladezeit || 0;
+    const infoTeile = [`${count} Zeilen erkannt`];
+    if (ohneZeit > 0) infoTeile.push(`${ohneZeit} ohne Entladezeit`);
+    if (count === 0) {
+      const sample = data.debug?.sample_ladenummern;
+      setStatus(
+        `Entladezeitfenster hochgeladen, aber 0 Zeilen erkannt. Bitte prüfe die Spaltenüberschriften deiner Excel (erwartet: Ladenummer, Entladezeit). Gefundene Rohdaten: ${sample ? JSON.stringify(sample) : "keine"}`,
+        "error",
+      );
+    } else {
+      setStatus(
+        `Entladezeitfenster importiert: ${infoTeile.join(", ")}.`,
+        "success",
+      );
+    }
 
     if (currentImportId) {
       await load(true);

@@ -1471,13 +1471,24 @@ app.post(
       ensureParentDir(unloadWindowsFile);
       fs.writeFileSync(unloadWindowsFile, buffer);
 
+      const sampleLadenummern = parsed.windows
+        .slice(0, 5)
+        .map((w) => w.ladenummer);
+      const sampleEntladezeiten = parsed.windows
+        .slice(0, 5)
+        .map((w) => ({ ladenummer: w.ladenummer, entladezeit: w.entladezeit_raw, parsed: w.entladezeit_start }));
+      const missingEntladezeit = parsed.windows.filter((w) => !w.entladezeit_start).length;
+
       return res.json({
         ok: true,
         scope,
-        windows_count: Array.isArray(parsed.windows)
-          ? parsed.windows.length
-          : 0,
+        windows_count: Array.isArray(parsed.windows) ? parsed.windows.length : 0,
         stored_file: path.relative(process.cwd(), unloadWindowsFile),
+        debug: {
+          sample_ladenummern: sampleLadenummern,
+          sample_entladezeiten: sampleEntladezeiten,
+          ohne_entladezeit: missingEntladezeit,
+        },
       });
     } catch (error) {
       return res.status(400).json({
@@ -1488,7 +1499,63 @@ app.post(
   },
 );
 
-// Batch-Abrechnung aller Transporte aus dem Transporeon-Excel-Export.
+app.get("/api/windows/debug", (req, res) => {
+  try {
+    const scope = scopeFromReq(req);
+    const importId = String(req.query.importId || "").trim();
+    const winIndex = loadPersistedUnloadWindowIndex(scope);
+
+    if (!winIndex) {
+      return res.json({ error: "Keine Entladezeitfenster-Excel hochgeladen.", scope });
+    }
+
+    const allEntries = [...winIndex.entries()].map(([k, v]) => ({
+      ladenummer: k,
+      entladezeit_raw: v.entladezeit_raw,
+      entladezeit_start: v.entladezeit_start,
+      entladestelle: v.entladestelle,
+    }));
+
+    let matchTest = null;
+    if (importId) {
+      const filePath = importStore.resolveImportFile(importId);
+      if (filePath && fs.existsSync(filePath)) {
+        const transports = loadTransporeonExport(filePath);
+        const results = transports.map((t) => {
+          const ladenummer = transportNumberToLadenummer(t.transport_number);
+          const found = ladenummer ? winIndex.get(ladenummer) : null;
+          const unload = t.unloading;
+          return {
+            transport_number: t.transport_number,
+            ladenummer,
+            match: Boolean(found),
+            entladezeit: found?.entladezeit_start || null,
+            hat_window: Boolean(unload?.window_local),
+            window_local: unload?.window_local || null,
+          };
+        });
+        matchTest = {
+          total: results.length,
+          matched: results.filter((r) => r.match).length,
+          would_apply: results.filter((r) => r.match && !r.hat_window).length,
+          sample_no_match: results.filter((r) => !r.match).slice(0, 10),
+          sample_match: results.filter((r) => r.match).slice(0, 10),
+        };
+      }
+    }
+
+    return res.json({
+      scope,
+      windows_count: winIndex.size,
+      sample: allEntries.slice(0, 20),
+      match_test: matchTest,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+ aus dem Transporeon-Excel-Export.
 // Liefert Zeitfenster + Standgeld je Stopp (Laden/Entladen) fuer ALLE Transporte.
 const EXPORT_XLSX_PATH = path.join(
   APP_DATA_DIR,
