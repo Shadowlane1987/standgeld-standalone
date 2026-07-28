@@ -1476,13 +1476,21 @@ app.post(
         .map((w) => w.ladenummer);
       const sampleEntladezeiten = parsed.windows
         .slice(0, 5)
-        .map((w) => ({ ladenummer: w.ladenummer, entladezeit: w.entladezeit_raw, parsed: w.entladezeit_start }));
-      const missingEntladezeit = parsed.windows.filter((w) => !w.entladezeit_start).length;
+        .map((w) => ({
+          ladenummer: w.ladenummer,
+          entladezeit: w.entladezeit_raw,
+          parsed: w.entladezeit_start,
+        }));
+      const missingEntladezeit = parsed.windows.filter(
+        (w) => !w.entladezeit_start,
+      ).length;
 
       return res.json({
         ok: true,
         scope,
-        windows_count: Array.isArray(parsed.windows) ? parsed.windows.length : 0,
+        windows_count: Array.isArray(parsed.windows)
+          ? parsed.windows.length
+          : 0,
         stored_file: path.relative(process.cwd(), unloadWindowsFile),
         debug: {
           sample_ladenummern: sampleLadenummern,
@@ -1506,7 +1514,10 @@ app.get("/api/windows/debug", (req, res) => {
     const winIndex = loadPersistedUnloadWindowIndex(scope);
 
     if (!winIndex) {
-      return res.json({ error: "Keine Entladezeitfenster-Excel hochgeladen.", scope });
+      return res.json({
+        error: "Keine Entladezeitfenster-Excel hochgeladen.",
+        scope,
+      });
     }
 
     const allEntries = [...winIndex.entries()].map(([k, v]) => ({
@@ -1541,8 +1552,11 @@ app.get("/api/windows/debug", (req, res) => {
           total: results.length,
           matched: results.filter((r) => r.match).length,
           would_apply: results.filter((r) => r.match).length,
-          would_fill_missing: results.filter((r) => r.would_fill_missing).length,
-          would_override_existing: results.filter((r) => r.would_override_existing).length,
+          would_fill_missing: results.filter((r) => r.would_fill_missing)
+            .length,
+          would_override_existing: results.filter(
+            (r) => r.would_override_existing,
+          ).length,
           sample_no_match: results.filter((r) => !r.match).slice(0, 10),
           sample_match: results.filter((r) => r.match).slice(0, 10),
         };
@@ -1560,7 +1574,6 @@ app.get("/api/windows/debug", (req, res) => {
   }
 });
 
- aus dem Transporeon-Excel-Export.
 // Liefert Zeitfenster + Standgeld je Stopp (Laden/Entladen) fuer ALLE Transporte.
 const EXPORT_XLSX_PATH = path.join(
   APP_DATA_DIR,
@@ -1731,7 +1744,8 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
 
     if (hadExistingWindow && !unloadStart) {
       unload.unload_window_fallback_applied = false;
-      unload.unload_window_fallback_reason = "existing_window_kept_no_excel_match";
+      unload.unload_window_fallback_reason =
+        "existing_window_kept_no_excel_match";
       continue;
     }
 
