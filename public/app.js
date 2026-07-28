@@ -968,10 +968,6 @@ function buildSurchargeDescription(stop) {
   const windowText = resolveWindowDisplay(stop);
   const effective = formatMinutesAsHours(stop.effective_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
-  const amount = Number(stop.amount_eur || 0).toLocaleString("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  });
 
   return [
     `Ankunft: ${arrival}`,
@@ -979,7 +975,6 @@ function buildSurchargeDescription(stop) {
     `Abfahrt: ${departure}`,
     `Effektive Standzeit: ${effective}`,
     `Abzurechnende Standzeit: ${billable}`,
-    `Abrechenbare Summe: ${amount}`,
   ].join("\n");
 }
 
