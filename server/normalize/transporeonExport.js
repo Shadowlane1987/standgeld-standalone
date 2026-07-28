@@ -29,6 +29,29 @@ const { EVENT_CATEGORY, normalizeEventRow } = require("./events");
 const EXPORT_SOURCE = "TP XP Service Account";
 const EXPORT_TIMEZONE = "Europe/Berlin";
 
+function isWindowHeader(header) {
+  return header.startsWith("gebucht ab") || header.startsWith("booked from");
+}
+
+function isArrivalHeader(header) {
+  return header.startsWith("ankunft") || header.startsWith("arrival");
+}
+
+function isDepartureHeader(header) {
+  return header.startsWith("abfahrt") || header.startsWith("departure");
+}
+
+function isSecondBookingHeader(header) {
+  return (
+    header.includes("zweite") ||
+    header.includes("2. buchung") ||
+    header.includes("second booking") ||
+    header.includes("second stop") ||
+    header.includes("entladen") ||
+    header.includes("unload")
+  );
+}
+
 // Header-Erkennung ueber Teilstrings (robust gegen Zusatz-Suffixe/Sprache-Reste).
 const COLUMN_MATCHERS = Object.freeze({
   transport_number: (h) => h === "transportnr." || h.startsWith("transportnr"),
@@ -36,12 +59,12 @@ const COLUMN_MATCHERS = Object.freeze({
     h.includes("kfz-kennz") ||
     h.includes("kennzeichen") ||
     h.includes("license"),
-  load_window: (h) => h.startsWith("gebucht ab") && !h.includes("zweite"),
-  load_arrival: (h) => h.startsWith("ankunft") && !h.includes("zweite"),
-  load_departure: (h) => h.startsWith("abfahrt") && !h.includes("zweite"),
-  unload_window: (h) => h.startsWith("gebucht ab") && h.includes("zweite"),
-  unload_arrival: (h) => h.startsWith("ankunft") && h.includes("zweite"),
-  unload_departure: (h) => h.startsWith("abfahrt") && h.includes("zweite"),
+  load_window: (h) => isWindowHeader(h) && !isSecondBookingHeader(h),
+  load_arrival: (h) => isArrivalHeader(h) && !isSecondBookingHeader(h),
+  load_departure: (h) => isDepartureHeader(h) && !isSecondBookingHeader(h),
+  unload_window: (h) => isWindowHeader(h) && isSecondBookingHeader(h),
+  unload_arrival: (h) => isArrivalHeader(h) && isSecondBookingHeader(h),
+  unload_departure: (h) => isDepartureHeader(h) && isSecondBookingHeader(h),
 });
 
 function normHeader(value) {
@@ -76,13 +99,43 @@ function locateHeader(rows) {
   for (let i = 0; i < list.length; i += 1) {
     const row = list[i] || [];
     const columns = {};
+    const windowCols = [];
+    const arrivalCols = [];
+    const departureCols = [];
     for (let c = 0; c < row.length; c += 1) {
       const h = normHeader(row[c]);
       if (!h) continue;
+
+      if (isWindowHeader(h)) windowCols.push(c);
+      if (isArrivalHeader(h)) arrivalCols.push(c);
+      if (isDepartureHeader(h)) departureCols.push(c);
+
       for (const [key, match] of Object.entries(COLUMN_MATCHERS)) {
         if (columns[key] == null && match(h)) columns[key] = c;
       }
     }
+
+    // Fallback fuer Exporte ohne klaren "Zweite Buchung"-Text:
+    // 1. Vorkommen = Laden, 2. Vorkommen = Entladen.
+    if (columns.load_window == null && windowCols.length > 0) {
+      columns.load_window = windowCols[0];
+    }
+    if (columns.unload_window == null && windowCols.length > 1) {
+      columns.unload_window = windowCols[1];
+    }
+    if (columns.load_arrival == null && arrivalCols.length > 0) {
+      columns.load_arrival = arrivalCols[0];
+    }
+    if (columns.unload_arrival == null && arrivalCols.length > 1) {
+      columns.unload_arrival = arrivalCols[1];
+    }
+    if (columns.load_departure == null && departureCols.length > 0) {
+      columns.load_departure = departureCols[0];
+    }
+    if (columns.unload_departure == null && departureCols.length > 1) {
+      columns.unload_departure = departureCols[1];
+    }
+
     if (columns.transport_number != null && columns.load_window != null) {
       return { headerIndex: i, columns };
     }
