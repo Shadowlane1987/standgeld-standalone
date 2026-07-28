@@ -1375,6 +1375,11 @@ function calcStop(stop, rules) {
   }
 
   const billableStart = slotBegin && slotBegin > arrival ? slotBegin : arrival;
+  const arrivedLate = Boolean(slotBegin && arrival > slotBegin);
+  const lateGraceApplies = Boolean(
+    rules.lateArrivalGraceEnabled && arrivedLate,
+  );
+  const freeMinutesForCharge = lateGraceApplies ? 180 : rules.freeMinutes;
   const effectiveMinutes = Math.max(
     0,
     Math.round((departure - arrival) / 60000),
@@ -1384,7 +1389,10 @@ function calcStop(stop, rules) {
     Math.round((departure - billableStart) / 60000),
   );
 
-  const billableAfterFree = Math.max(0, rawBillableMinutes - rules.freeMinutes);
+  const billableAfterFree = Math.max(
+    0,
+    rawBillableMinutes - freeMinutesForCharge,
+  );
   const billedUnits = Math.ceil(billableAfterFree / rules.unitMinutes);
   const rawAmount = billedUnits * rules.unitPrice;
   const amount = Math.min(rules.capEur, rawAmount);
@@ -1395,6 +1403,8 @@ function calcStop(stop, rules) {
     billable_minutes: billableAfterFree,
     billed_units: billedUnits,
     amount_eur: amount,
+    free_minutes: freeMinutesForCharge,
+    late_arrival_grace_applied: lateGraceApplies,
     threshold_reached: amount >= rules.thresholdEur,
     // GPS ist nur Zusatz-Info. Die gesetzten (XP-)Zeiten werden IMMER abgerechnet.
     gps_verified: Boolean(stop?.gps?.gps_connected),
@@ -1474,13 +1484,11 @@ app.post(
       const sampleLadenummern = parsed.windows
         .slice(0, 5)
         .map((w) => w.ladenummer);
-      const sampleEntladezeiten = parsed.windows
-        .slice(0, 5)
-        .map((w) => ({
-          ladenummer: w.ladenummer,
-          entladezeit: w.entladezeit_raw,
-          parsed: w.entladezeit_start,
-        }));
+      const sampleEntladezeiten = parsed.windows.slice(0, 5).map((w) => ({
+        ladenummer: w.ladenummer,
+        entladezeit: w.entladezeit_raw,
+        parsed: w.entladezeit_start,
+      }));
       const missingEntladezeit = parsed.windows.filter(
         (w) => !w.entladezeit_start,
       ).length;
@@ -2441,12 +2449,23 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
     const rulesRaw = req.body?.rules || {};
     const intervalMinutes =
       Number(rulesRaw.intervalMinutes ?? rulesRaw.unitMinutes ?? 30) || 30;
+    const lateArrivalGraceEnabled =
+      rulesRaw.lateArrivalGraceEnabled === true ||
+      String(rulesRaw.lateArrivalGraceEnabled || "")
+        .trim()
+        .toLowerCase() === "true" ||
+      String(rulesRaw.lateArrivalGraceEnabled || "").trim() === "1";
     const rules = {
       freeMinutes: Math.max(0, Number(rulesRaw.freeMinutes ?? 120) || 120),
       unitMinutes: Math.max(1, intervalMinutes),
       unitPrice: Math.max(0, Number(rulesRaw.unitPrice ?? 30) || 30),
       thresholdEur: Math.max(0, Number(rulesRaw.thresholdEur ?? 30) || 30),
       capEur: Math.max(0, Number(rulesRaw.capEur ?? 650) || 650),
+      lateArrivalGraceEnabled,
+      lateArrivalGraceMinutes: Math.max(
+        0,
+        Number(rulesRaw.lateArrivalGraceMinutes ?? 45) || 45,
+      ),
     };
 
     const url = String(req.body?.url || "").trim();

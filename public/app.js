@@ -14,6 +14,8 @@ const el = {
   unitPrice: document.getElementById("unitPrice"),
   thresholdEur: document.getElementById("thresholdEur"),
   capEur: document.getElementById("capEur"),
+  lateArrivalGraceMinutes: document.getElementById("lateArrivalGraceMinutes"),
+  lateArrivalGraceToggle: document.getElementById("lateArrivalGraceToggle"),
   runBtn: document.getElementById("runBtn"),
   status: document.getElementById("status"),
   resultPanel: document.getElementById("resultPanel"),
@@ -21,6 +23,8 @@ const el = {
   positions: document.getElementById("positions"),
   units: document.getElementById("units"),
   dateSort: document.getElementById("dateSort"),
+  bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
+  bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
   resultMeta: document.getElementById("resultMeta"),
   rows: document.getElementById("rows"),
   surchargeModal: document.getElementById("surchargeModal"),
@@ -33,8 +37,186 @@ const el = {
 
 let importedTimeWindows = [];
 let latestStops = [];
+let lateArrivalGraceEnabledState = false;
+const bookkeepingByKey = new Map();
 const URL_STORAGE_KEY = "standgeld.sixfoldUrl";
 const SESSION_TOKEN_STORAGE_KEY = "standgeld.sessionToken";
+const SINGLE_RULES_STORAGE_KEY = "standgeld.single.rules.v1";
+const SINGLE_BOOKKEEPING_STORAGE_KEY = "standgeld.single.bookkeeping.v1";
+
+function stopKey(stop) {
+  return [
+    String(stop.transport_number || "").trim(),
+    String(stop.type || "").trim(),
+    String(stop.arrival_time || "").trim(),
+    String(stop.departure_time || "").trim(),
+    String(stop.rule_start_display || "").trim(),
+  ].join("|");
+}
+
+function readSingleBookkeepingStorage() {
+  try {
+    const raw = localStorage.getItem(SINGLE_BOOKKEEPING_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function writeSingleBookkeepingStorage(storage) {
+  try {
+    localStorage.setItem(
+      SINGLE_BOOKKEEPING_STORAGE_KEY,
+      JSON.stringify(storage || {}),
+    );
+  } catch (_error) {
+    // ignore
+  }
+}
+
+function getBookkeepingEntry(stop) {
+  const key = stopKey(stop);
+  if (!bookkeepingByKey.has(key)) {
+    bookkeepingByKey.set(key, { billed: false });
+  }
+  return bookkeepingByKey.get(key);
+}
+
+function ensureBookkeepingEntries(stops) {
+  for (const stop of stops || []) getBookkeepingEntry(stop);
+}
+
+function restoreBookkeepingEntries(stops) {
+  bookkeepingByKey.clear();
+  const storage = readSingleBookkeepingStorage();
+  for (const stop of stops || []) {
+    const key = stopKey(stop);
+    bookkeepingByKey.set(key, {
+      billed: Boolean(storage[key]?.billed),
+    });
+  }
+}
+
+function persistBookkeepingEntries() {
+  const storage = {};
+  for (const [key, entry] of bookkeepingByKey.entries()) {
+    storage[key] = { billed: Boolean(entry?.billed) };
+  }
+  writeSingleBookkeepingStorage(storage);
+}
+
+function buildBookkeepingRows(onlyMarked) {
+  const rows = [];
+  for (const stop of latestStops || []) {
+    const entry = getBookkeepingEntry(stop);
+    if (onlyMarked && !entry.billed) continue;
+    rows.push({
+      transport_number: String(stop.transport_number || "").trim(),
+      amount_eur: Number(stop.amount_eur || 0),
+      surcharge_id: "",
+    });
+  }
+  return rows;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportBookkeeping() {
+  const onlyMarked = Boolean(el.bookkeepingOnlyMarked?.checked);
+  const rows = buildBookkeepingRows(onlyMarked);
+  if (!rows.length) {
+    setStatus("Keine Positionen für den Buchungs-Export ausgewählt.", "error");
+    return;
+  }
+
+  if (el.bookkeepingExportBtn) el.bookkeepingExportBtn.disabled = true;
+  setStatus("Erstelle Buchungs-Excel …");
+
+  try {
+    const res = await fetch("/api/billing/bookkeeping-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows }),
+    });
+
+    if (!res.ok) {
+      let err = `HTTP ${res.status}`;
+      try {
+        const data = await res.json();
+        err = data.error || err;
+      } catch {
+        // ignore
+      }
+      throw new Error(err);
+    }
+
+    const blob = await res.blob();
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `standgeld_buchungsjournal_${stamp}.xlsx`);
+    setStatus("Buchungs-Excel wurde exportiert.", "success");
+  } catch (error) {
+    setStatus(error.message || "Buchungs-Export fehlgeschlagen.", "error");
+  } finally {
+    if (el.bookkeepingExportBtn) el.bookkeepingExportBtn.disabled = false;
+  }
+}
+
+function writeSingleRuleStorage(value) {
+  try {
+    localStorage.setItem(SINGLE_RULES_STORAGE_KEY, JSON.stringify(value));
+  } catch (_error) {
+    // ignore
+  }
+}
+
+function readSingleRuleStorage() {
+  try {
+    const raw = localStorage.getItem(SINGLE_RULES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function syncLateArrivalGraceToggle() {
+  if (!el.lateArrivalGraceToggle) return;
+  el.lateArrivalGraceToggle.textContent = lateArrivalGraceEnabledState
+    ? "Verspätungsregel: Ein"
+    : "Verspätungsregel: Aus";
+  el.lateArrivalGraceToggle.setAttribute(
+    "aria-pressed",
+    lateArrivalGraceEnabledState ? "true" : "false",
+  );
+}
+
+function persistSingleRuleSettings() {
+  writeSingleRuleStorage({
+    lateArrivalGraceEnabled: lateArrivalGraceEnabledState,
+    lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes?.value || 45),
+  });
+}
+
+function restoreSingleRuleSettings() {
+  const stored = readSingleRuleStorage();
+  lateArrivalGraceEnabledState = Boolean(stored.lateArrivalGraceEnabled);
+  if (el.lateArrivalGraceMinutes && stored.lateArrivalGraceMinutes != null) {
+    el.lateArrivalGraceMinutes.value = String(stored.lateArrivalGraceMinutes);
+  }
+  syncLateArrivalGraceToggle();
+}
 
 function toTimestamp(value) {
   const date = new Date(String(value || "").trim());
@@ -78,6 +260,8 @@ function renderStops(stops) {
   for (const stop of sortedStops) {
     const tr = document.createElement("tr");
     tr.className = "result-row";
+    if (Number(stop.amount_eur || 0) > 0) tr.classList.add("chargeable-row");
+    if (stop.needs_review) tr.classList.add("review-row");
     tr.tabIndex = 0;
     const arrival = compactDateTimeDisplay(stop.arrival_display);
     const departure = compactDateTimeDisplay(stop.departure_display);
@@ -87,6 +271,8 @@ function renderStops(stops) {
     const tracking = getTrackingState(stop);
     const effective = formatMinutesAsHours(stop.effective_minutes);
     const billable = formatMinutesAsHours(stop.billable_minutes);
+    const bk = getBookkeepingEntry(stop);
+    const checkedAttr = bk.billed ? "checked" : "";
     tr.innerHTML = `
       <td>${stop.transport_number || stop.tour_id || "-"}</td>
       <td>${stop.plate || "-"}</td>
@@ -102,7 +288,19 @@ function renderStops(stops) {
       <td>${billable}</td>
       <td>${stop.billed_units || 0}</td>
       <td>${Number(stop.amount_eur || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</td>
+      <td><input type="checkbox" data-bk="billed" ${checkedAttr} /></td>
     `;
+    tr.querySelectorAll("input[data-bk]").forEach((input) => {
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("keydown", (event) => event.stopPropagation());
+    });
+    const billedInput = tr.querySelector('input[data-bk="billed"]');
+    if (billedInput) {
+      billedInput.addEventListener("change", () => {
+        bk.billed = Boolean(billedInput.checked);
+        persistBookkeepingEntries();
+      });
+    }
     tr.addEventListener("click", () => openSurchargeModal(stop));
     tr.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -790,6 +988,8 @@ async function run() {
       unitPrice: Number(el.unitPrice.value || 30),
       thresholdEur: Number(el.thresholdEur.value || 30),
       capEur: Number(el.capEur.value || 650),
+      lateArrivalGraceEnabled: lateArrivalGraceEnabledState,
+      lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes.value || 45),
     },
     timeWindows: importedTimeWindows,
   };
@@ -817,6 +1017,8 @@ async function run() {
       `>=${data.summary?.excluded_from_total_threshold_eur || 450} EUR nicht in Summe: ${data.summary?.excluded_from_total_positions || 0}`;
 
     latestStops = Array.isArray(data.stops) ? data.stops : [];
+    restoreBookkeepingEntries(latestStops);
+    ensureBookkeepingEntries(latestStops);
     renderStops(latestStops);
 
     setStatus("Berechnung erfolgreich.", "success");
@@ -874,5 +1076,29 @@ el.sessionToken.addEventListener("change", () => {
 
 loadPersistedUrl();
 loadPersistedSessionToken();
+restoreSingleRuleSettings();
+
+if (el.lateArrivalGraceToggle) {
+  el.lateArrivalGraceToggle.addEventListener("click", () => {
+    lateArrivalGraceEnabledState = !lateArrivalGraceEnabledState;
+    syncLateArrivalGraceToggle();
+    persistSingleRuleSettings();
+  });
+}
+
+if (el.lateArrivalGraceMinutes) {
+  el.lateArrivalGraceMinutes.addEventListener(
+    "input",
+    persistSingleRuleSettings,
+  );
+  el.lateArrivalGraceMinutes.addEventListener(
+    "change",
+    persistSingleRuleSettings,
+  );
+}
+
+if (el.bookkeepingExportBtn) {
+  el.bookkeepingExportBtn.addEventListener("click", exportBookkeeping);
+}
 
 el.runBtn.addEventListener("click", run);

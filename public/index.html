@@ -15,6 +15,7 @@
           Standgeld pro Transport aus Sixfold-GPS und Zeitfenstern — präzise,
           nachvollziehbar, abrechnungsfertig.
           <a href="/batch.html">Zur Batch-Abrechnung &rarr;</a>
+          <a href="/nahverkehr.html">Zum Nahverkehr &rarr;</a>
         </p>
       </section>
 
@@ -73,8 +74,17 @@
         </div>
         <p id="timeWindowMeta" class="status">Keine Zeitfenster importiert.</p>
 
+        <div class="rule-toggle-corner">
+          <button
+            id="lateArrivalGraceToggle"
+            type="button"
+            class="rule-toggle-chip btn-secondary"
+          >
+            Verspätungsregel: Aus
+          </button>
+        </div>
         <h2>Regeln</h2>
-        <div class="grid grid-5">
+        <div class="grid grid-6">
           <label
             >Frei (Min)
             <input id="freeMinutes" type="number" value="120" min="0" />
@@ -104,12 +114,23 @@
             />
           </label>
           <label
+            >Verspätung nach Fenster (Min)
+            <input
+              id="lateArrivalGraceMinutes"
+              type="number"
+              value="45"
+              min="0"
+            />
+          </label>
+          <label
             >Deckel je Stop (€)
             <input id="capEur" type="number" value="650" min="0" step="0.01" />
           </label>
         </div>
 
-        <button id="runBtn">Berechnen</button>
+        <div class="actions-row bookkeeping-toolbar">
+          <button id="runBtn">Berechnen</button>
+        </div>
         <p id="status" class="status">Bereit.</p>
       </section>
 
@@ -120,7 +141,7 @@
           <div><strong>Positionen:</strong> <span id="positions">-</span></div>
           <div><strong>Takte:</strong> <span id="units">-</span></div>
         </div>
-        <div class="result-toolbar">
+        <div class="result-toolbar bookkeeping-toolbar">
           <label>
             Sortierung
             <select id="dateSort">
@@ -132,6 +153,13 @@
               <option value="rule-start-desc">Standgeld ab absteigend</option>
             </select>
           </label>
+          <label class="checkbox-label">
+            <input id="bookkeepingOnlyMarked" type="checkbox" />
+            Nur als „abgerechnet“ markierte exportieren
+          </label>
+          <button id="bookkeepingExportBtn" type="button">
+            Buchungs-Excel exportieren
+          </button>
         </div>
         <p id="resultMeta" class="status"></p>
 
@@ -153,6 +181,7 @@
                 <th>Abrechenbar</th>
                 <th>Takte</th>
                 <th>Betrag</th>
+                <th>Abgerechnet</th>
               </tr>
             </thead>
             <tbody id="rows"></tbody>
@@ -165,7 +194,7 @@
     </main>
 
     <div id="surchargeModal" class="modal" hidden>
-      <div class="modal-card">
+      <div class="modal-card detail-card">
         <div class="modal-head">
           <h3 id="surchargeTitle">Zuschlagstext</h3>
           <button
@@ -176,19 +205,17 @@
             Schliessen
           </button>
         </div>
-        <p class="status">
-          Text kann direkt in Transporeon bei Zuschlaege eingefuegt werden.
-        </p>
-        <textarea id="surchargeText" rows="10"></textarea>
-        <div class="grid grid-2 actions-row">
-          <button id="copySurchargeBtn" type="button">Text kopieren</button>
-          <button
-            id="closeSurchargeModalBtn2"
-            type="button"
-            class="btn-secondary"
-          >
-            Fertig
-          </button>
+        <div class="justification-inline">
+          <div class="justification-inline-head">
+            <h4>Begründung</h4>
+            <button id="copySurchargeBtn" type="button" class="btn-secondary">
+              Text kopieren
+            </button>
+          </div>
+          <textarea id="surchargeText" rows="10" readonly></textarea>
+        </div>
+        <div class="modal-actions">
+          <button id="closeSurchargeModalBtn2" type="button">Fertig</button>
         </div>
       </div>
     </div>
