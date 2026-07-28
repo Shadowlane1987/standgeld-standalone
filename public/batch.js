@@ -641,6 +641,10 @@ function filteredStops() {
   if (mode === "chargeable") return currentStops.filter((s) => s.fee_eur > 0);
   if (mode === "review") return currentStops.filter((s) => s.needs_review);
   if (mode === "gpsMissing") return currentStops.filter((s) => s.gps_missing);
+  if (mode === "unloadFallback")
+    return currentStops.filter(
+      (s) => s.unload_window_fallback_applied === true && s.fee_eur > 0,
+    );
   return currentStops;
 }
 
@@ -767,6 +771,7 @@ function render() {
     tr.className = "result-row";
     if (stop.needs_review) tr.classList.add("review-row");
     else if (stop.fee_eur > 0) tr.classList.add("chargeable-row");
+    if (stop.unload_window_fallback_applied) tr.classList.add("fallback-row");
     tr.tabIndex = 0;
 
     const statusLabel = stop.needs_review
@@ -788,7 +793,9 @@ function render() {
       <td>${timeCellHtml(usedBoundaryLabel(stop.arrival_time_used, stop.arrival_source), sourceTone(stop.arrival_source), stop.arrival_source || "XP")}</td>
       <td>${timeCellHtml(usedBoundaryLabel(stop.departure_time_used, stop.departure_source), sourceTone(stop.departure_source), stop.departure_source || "XP")}</td>
       <td>${timeCellHtml(isoToLocal(stop.count_start), context.startClass, context.startHint)}</td>
-      <td>${timeCellHtml(stop.window_local || "-", context.windowClass, context.windowHint)}</td>
+      <td>${stop.unload_window_fallback_applied
+        ? timeCellHtml(stop.window_local || "-", "time-chip-excel", "Excel")
+        : timeCellHtml(stop.window_local || "-", context.windowClass, context.windowHint)}</td>
       <td>${minutesToHours(stop.counted_standing_minutes)}</td>
       <td>${minutesToHours(stop.minutes_over_free)}</td>
       <td>${euro(stop.fee_eur)}</td>
