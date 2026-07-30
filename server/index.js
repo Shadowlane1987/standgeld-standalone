@@ -1810,7 +1810,13 @@ function loadPersistedUnloadWindowIndex(scope) {
 // { gpsIndex, gpsInfo } oder { gpsIndex: null, gpsInfo: null } wenn nichts gesetzt.
 // `window` = { fromTime, toTime } (ISO) begrenzt die Sixfold-Abfrage.
 // `debug` = true zeigt Logging für GPS-Matching (z.B. 0/0-Koordinaten-Filter).
-async function resolveGpsIndexFromHeaders(req, window = {}, debug = false) {
+// `options.preferFleetTimeline` priorisiert den engeren Fleet-Timeline-Pfad.
+async function resolveGpsIndexFromHeaders(
+  req,
+  window = {},
+  debug = false,
+  options = {},
+) {
   const sixfoldUrl = String(req.get("x-sixfold-url") || "").trim();
   const sixfoldToken = String(req.get("x-sixfold-token") || "").trim();
   const sixfoldCookieRaw = String(req.get("x-sixfold-cookie") || "").trim();
@@ -1823,14 +1829,49 @@ async function resolveGpsIndexFromHeaders(req, window = {}, debug = false) {
     ? sixfoldCookieRaw
     : `sessionToken=${sixfoldToken}; sixfold_lng=de`;
 
-  // Nutze die VEREINFACHTE fetchSixfoldGpsSimple Funktion (kein Hang!)
-  let sixfoldStops = await fetchSixfoldGpsSimple(
-    sixfoldUrl,
-    sessionCookie,
-    window,
-  );
+  const preferFleetTimeline = options?.preferFleetTimeline === true;
 
-  // Fallback: Wenn der Simple-Loader keine Kennzeichen liefert, hole Stops ueber
+  function mapFleetStopsToSimpleShape(stops) {
+    return (Array.isArray(stops) ? stops : []).map((stop) => ({
+      transport_number: stop?.transport_number || null,
+      license_plate: stop?.plate || null,
+      type: String(stop?.type || "").toUpperCase(),
+      arrival_time: stop?.arrival_time || null,
+      departure_time: stop?.departure_time || null,
+      position: stop?.position || null,
+      gps: stop?.gps || {},
+    }));
+  }
+
+  let loaderMode = preferFleetTimeline ? "fleet" : "simple";
+  let sixfoldStops = [];
+
+  if (preferFleetTimeline) {
+    try {
+      const fleetResult = await fetchFleetTimelineStops(sixfoldUrl, {
+        sessionCookie,
+        fromTime: window.fromTime,
+        toTime: window.toTime,
+      });
+      sixfoldStops = mapFleetStopsToSimpleShape(fleetResult?.stops);
+    } catch (error) {
+      console.warn(
+        `[Sixfold] Fleet-Timeline primär fehlgeschlagen, Fallback auf Simple: ${error.message}`,
+      );
+      loaderMode = "simple-fallback";
+    }
+  }
+
+  if (!sixfoldStops.length) {
+    // Nutze die VEREINFACHTE fetchSixfoldGpsSimple Funktion als Basis/Fallback.
+    sixfoldStops = await fetchSixfoldGpsSimple(
+      sixfoldUrl,
+      sessionCookie,
+      window,
+    );
+  }
+
+  // Bei Simple-Weg: Wenn keine Kennzeichen geliefert werden, hole Stops ueber
   // den robusten Fleet-Timeline-Pfad mit Tour-/Vehicle-Mapping.
   const hasMappedPlate = (sixfoldStops || []).some((stop) =>
     Boolean(String(stop?.license_plate || "").trim()),
@@ -1842,20 +1883,14 @@ async function resolveGpsIndexFromHeaders(req, window = {}, debug = false) {
         fromTime: window.fromTime,
         toTime: window.toTime,
       });
-      const fleetStops = Array.isArray(fleetResult?.stops)
-        ? fleetResult.stops
-        : [];
+      const fleetStops = mapFleetStopsToSimpleShape(fleetResult?.stops);
 
       if (fleetStops.length) {
-        sixfoldStops = fleetStops.map((stop) => ({
-          transport_number: stop?.transport_number || null,
-          license_plate: stop?.plate || null,
-          type: String(stop?.type || "").toUpperCase(),
-          arrival_time: stop?.arrival_time || null,
-          departure_time: stop?.departure_time || null,
-          position: stop?.position || null,
-          gps: stop?.gps || {},
-        }));
+        sixfoldStops = fleetStops;
+        loaderMode =
+          loaderMode === "simple-fallback"
+            ? "simple-fallback+fleet"
+            : "fleet-fallback";
       }
     } catch (error) {
       console.warn(
@@ -1870,6 +1905,7 @@ async function resolveGpsIndexFromHeaders(req, window = {}, debug = false) {
     gpsIndex,
     gpsInfo: {
       fetched: true,
+      loader_mode: loaderMode,
       window_from: window.fromTime || null,
       window_to: window.toTime || null,
       sixfold_stops: sixfoldStops.length,
@@ -1952,6 +1988,9 @@ app.get("/api/billing/export", async (req, res) => {
       req,
       window,
       debug,
+      {
+        preferFleetTimeline: true,
+      },
     );
 
     const result = billFromExport(filteredTransports, { config, gpsIndex });
@@ -2049,6 +2088,9 @@ app.get("/api/billing/live", async (req, res) => {
       req,
       window,
       debug,
+      {
+        preferFleetTimeline: true,
+      },
     );
 
     const liveResult = await fetchLiveVisibilityEvents(
@@ -2203,6 +2245,9 @@ app.post(
         req,
         window,
         debug,
+        {
+          preferFleetTimeline: true,
+        },
       );
 
       const result = billFromExport(filteredTransports, { config, gpsIndex });
@@ -2302,6 +2347,9 @@ app.post(
         req,
         window,
         debug,
+        {
+          preferFleetTimeline: true,
+        },
       );
 
       const liveResult = await fetchLiveVisibilityEvents(

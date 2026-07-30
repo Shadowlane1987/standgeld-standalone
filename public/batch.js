@@ -595,20 +595,21 @@ function billedMinutes(stop) {
 function buildJustificationText(stop) {
   if (!stop) return "";
 
+  const arrivalUsed = isoToLocal(stop.arrival_time_used);
   const departureUsed = isoToLocal(stop.departure_time_used);
-  const countStartLocal = isoToLocal(stop.count_start);
   const windowLocal = stop.window_local || isoToLocal(stop.window_start);
-  const countedStanding = minutesToHours(stop.counted_standing_minutes);
-  const freeMinutes = Number(stop.free_minutes || 120);
-  const freeLabel = freeMinutes >= 180 ? "3h frei" : "2h frei";
-  const startAtWindow = isSameTimestamp(stop.count_start, stop.window_start);
-  const arrivalText = startAtWindow ? windowLocal : countStartLocal;
+  const effectiveStanding = minutesToHours(
+    standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
+      stop.counted_standing_minutes,
+  );
+  const billableStanding = minutesToHours(stop.minutes_over_free);
 
   return [
-    `Ankunft: ${arrivalText}`,
+    `Ankunft: ${arrivalUsed}`,
+    `Zeitfenster: ${windowLocal}`,
     `Abfahrt: ${departureUsed}`,
-    `Standzeit: ${countedStanding}`,
-    freeLabel,
+    `Effektive Standzeit: ${effectiveStanding}`,
+    `Abzurechnende Standzeit: ${billableStanding}`,
   ].join("\n");
 }
 
