@@ -5,7 +5,9 @@ const { chromium } = require("playwright");
 
 const { normalizeTransportNumber } = require("../normalize/exportBilling");
 
-const PROFILE_DIR = path.join(process.cwd(), ".pw-profile");
+const PROFILE_DIR = process.env.PW_SURCHARGE_PROFILE_DIR
+  ? path.resolve(process.env.PW_SURCHARGE_PROFILE_DIR)
+  : path.join(process.cwd(), ".pw-profile-surcharge");
 const START_URL =
   "https://login.transporeon.com/?locale=de&return=AssignedTransportsCarrier";
 const NUMBER_CELL_SELECTORS = [
@@ -15,8 +17,53 @@ const NUMBER_CELL_SELECTORS = [
   'td[class*="gxColumn-number"]',
 ];
 
+let activeContext = null;
+let activeContextLaunch = null;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function isContextUsable(context) {
+  if (!context) return false;
+  try {
+    context.pages();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function closeActiveContext() {
+  if (!activeContext) return;
+  try {
+    await activeContext.close();
+  } catch {
+    // ignore close errors
+  }
+  activeContext = null;
+}
+
+async function getOrCreateContext(options = {}) {
+  if (await isContextUsable(activeContext)) return activeContext;
+
+  if (activeContextLaunch) return activeContextLaunch;
+
+  activeContextLaunch = chromium
+    .launchPersistentContext(options.profileDir || PROFILE_DIR, {
+      headless: Boolean(options.headless),
+      viewport: { width: 1680, height: 980 },
+      locale: "de-DE",
+    })
+    .then((context) => {
+      activeContext = context;
+      return context;
+    })
+    .finally(() => {
+      activeContextLaunch = null;
+    });
+
+  return activeContextLaunch;
 }
 
 function normalizeTransportLoose(value) {
@@ -539,26 +586,36 @@ async function applyTransporeonSurcharges(items, options = {}) {
     ? Number(options.perItemDelayMs)
     : 250;
 
-  const context = await chromium.launchPersistentContext(
-    options.profileDir || PROFILE_DIR,
-    {
-      headless,
-      viewport: { width: 1680, height: 980 },
-      locale: "de-DE",
-    },
-  );
+  const context = await getOrCreateContext({
+    profileDir: options.profileDir,
+    headless,
+  });
 
   try {
-    const page = context.pages()[0] || (await context.newPage());
-    await page.goto(options.startUrl || START_URL, {
-      waitUntil: "domcontentloaded",
+    const pages = context.pages();
+    const pageWithContent = pages.find((pageItem) => {
+      const url = String(pageItem.url() || "").trim();
+      return Boolean(url && url !== "about:blank");
+    });
+    const page = pageWithContent || pages[0] || (await context.newPage());
+
+    let found = await waitForListFrame(context, {
+      timeoutMs: Number.isFinite(options.waitForListInitialTimeoutMs)
+        ? options.waitForListInitialTimeoutMs
+        : 3000,
     });
 
-    const found = await waitForListFrame(context, {
+    if (!found) {
+      await page.goto(options.startUrl || START_URL, {
+        waitUntil: "domcontentloaded",
+      });
+    }
+
+    found = found || (await waitForListFrame(context, {
       timeoutMs: Number.isFinite(options.waitForListTimeoutMs)
         ? options.waitForListTimeoutMs
         : 90000,
-    });
+    }));
 
     if (!found) {
       throw new Error(
@@ -656,9 +713,15 @@ async function applyTransporeonSurcharges(items, options = {}) {
         failure_count: failureCount,
       },
     };
+  } catch (error) {
+    const message = String(error?.message || "");
+    if (message.includes("Target page, context or browser has been closed")) {
+      activeContext = null;
+    }
+    throw error;
   } finally {
     if (!keepBrowserOpen) {
-      await context.close().catch(() => {});
+      await closeActiveContext();
     }
   }
 }
