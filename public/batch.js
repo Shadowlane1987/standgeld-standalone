@@ -801,12 +801,12 @@ function billedMinutes(stop) {
 function buildJustificationText(stop) {
   if (!stop) return "";
 
+  const windowLocal = formatDateTimeForJustification(
+    stop.window_local || stop.window_start,
+  );
   const arrivalUsed = formatDateTimeForJustification(stop.arrival_time_used);
   const departureUsed = formatDateTimeForJustification(
     stop.departure_time_used,
-  );
-  const windowLocal = formatDateTimeForJustification(
-    stop.window_local || stop.window_start,
   );
   const effectiveStanding = minutesToHours(
     standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
@@ -815,10 +815,10 @@ function buildJustificationText(stop) {
   const billableStanding = minutesToHours(stop.minutes_over_free);
 
   return [
-    `Ankunft: ${arrivalUsed}`,
     `Zeitfenster: ${windowLocal}`,
+    `Ankunft: ${arrivalUsed}`,
     `Abfahrt: ${departureUsed}`,
-    `Effektive Standzeit: ${effectiveStanding}`,
+    `Standzeit: ${effectiveStanding}`,
     `Abzurechnende Standzeit: ${billableStanding}`,
   ].join("\n");
 }
