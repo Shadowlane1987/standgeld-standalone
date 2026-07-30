@@ -29,6 +29,8 @@ const el = {
   uploadBtn: document.getElementById("uploadBtn"),
   sixfoldUrl: document.getElementById("sixfoldUrl"),
   sixfoldToken: document.getElementById("sixfoldToken"),
+  sixfoldDateFrom: document.getElementById("sixfoldDateFrom"),
+  sixfoldDateTo: document.getElementById("sixfoldDateTo"),
   selectiveSearchBtn: document.getElementById("selectiveSearchBtn"),
   selectivePanel: document.getElementById("selectivePanel"),
   selectiveResult: document.getElementById("selectiveResult"),
@@ -925,11 +927,19 @@ function render() {
 }
 
 function ruleParams() {
+  const sixfoldDateFrom = String(el.sixfoldDateFrom?.value || "").trim();
+  const sixfoldDateTo = String(el.sixfoldDateTo?.value || "").trim();
+  if (sixfoldDateFrom && sixfoldDateTo && sixfoldDateFrom > sixfoldDateTo) {
+    throw new Error(
+      "Sixfold-Datumsbereich ist ungueltig (Von liegt nach Bis).",
+    );
+  }
+
   const lateArrivalGraceEnabled = lateArrivalGraceEnabledState;
   const lateArrivalGraceMinutes = Number(
     el.lateArrivalGraceMinutes?.value || 45,
   );
-  return new URLSearchParams({
+  const params = new URLSearchParams({
     scope: APP_SCOPE,
     freeMinutes: el.freeMinutes.value,
     blockMinutes: el.blockMinutes.value,
@@ -940,6 +950,11 @@ function ruleParams() {
       Number.isFinite(lateArrivalGraceMinutes) ? lateArrivalGraceMinutes : 45,
     ),
   });
+
+  if (sixfoldDateFrom) params.set("sixfoldDateFrom", sixfoldDateFrom);
+  if (sixfoldDateTo) params.set("sixfoldDateTo", sixfoldDateTo);
+
+  return params;
 }
 
 function setImportOptions(imports, preferredId = "") {
