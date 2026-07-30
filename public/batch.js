@@ -108,6 +108,68 @@ function shortImportId(value) {
   return parts[parts.length - 1] || id.slice(-6);
 }
 
+function batchSelectionKey(ids) {
+  return `batch:${(ids || [])
+    .map((id) => String(id).trim())
+    .filter(Boolean)
+    .join("|")}`;
+}
+
+function isBatchSelection(value) {
+  return String(value || "").startsWith("batch:");
+}
+
+function currentBatchMembers() {
+  const available = new Map(
+    (currentImports || []).map((item) => [String(item.id || "").trim(), item]),
+  );
+  return (currentImportBatchIds || [])
+    .map((id) => available.get(String(id || "").trim()))
+    .filter(Boolean);
+}
+
+function buildBatchMeta(items, selectionId) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!list.length) return null;
+
+  const importedAt = list
+    .map((item) => String(item.imported_at || "").trim())
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const transportCount = list.reduce(
+    (sum, item) => sum + Number(item.transport_count || 0),
+    0,
+  );
+  const fileCount = list.length;
+  const unloadDates = list
+    .flatMap((item) => [item.unload_date_from, item.unload_date_to])
+    .filter(Boolean)
+    .sort();
+
+  return {
+    id: selectionId || String(list[0]?.id || "").trim(),
+    file_name: `Mehrfachimport (${fileCount} Dateien)`,
+    imported_at: importedAt || list[0]?.imported_at || null,
+    transport_count: transportCount,
+    unload_date_from: unloadDates[0] || null,
+    unload_date_to: unloadDates[unloadDates.length - 1] || null,
+    batch_ids: list.map((item) => String(item.id || "").trim()).filter(Boolean),
+    batch_count: fileCount,
+  };
+}
+
+function batchOptionLabel(meta) {
+  if (!meta) return "Mehrfachimport";
+  const importedAt = formatImportTimestamp(meta.imported_at);
+  const range =
+    meta.unload_date_from && meta.unload_date_to
+      ? ` · ${meta.unload_date_from} bis ${meta.unload_date_to}`
+      : "";
+  const importedAtText = importedAt ? ` · ${importedAt}` : "";
+  return `${meta.file_name} (${meta.transport_count || 0})${range}${importedAtText}`;
+}
+
 function importIdFromUrl() {
   const url = new URL(window.location.href);
   return String(url.searchParams.get("import") || "").trim();
@@ -125,6 +187,13 @@ function setImportIdInUrl(importId, replace = true) {
 }
 
 function currentImportMeta() {
+  const batchMembers = currentBatchMembers();
+  if (currentImportBatchIds.length > 1 && batchMembers.length > 1) {
+    return buildBatchMeta(
+      batchMembers,
+      batchSelectionKey(currentImportBatchIds),
+    );
+  }
   return currentImports.find((item) => item.id === currentImportId) || null;
 }
 
@@ -1082,8 +1151,25 @@ function setImportOptions(imports, preferredId = "") {
   if (!el.importSelect) return;
   const list = Array.isArray(imports) ? imports : [];
   const urlImportId = importIdFromUrl();
+  const batchMembers = currentBatchMembers().filter((item) =>
+    list.some((candidate) => candidate.id === item.id),
+  );
+  const batchKey =
+    batchMembers.length > 1
+      ? batchSelectionKey(batchMembers.map((item) => item.id))
+      : "";
   const targetId =
-    preferredId || urlImportId || currentImportId || list[0]?.id || "";
+    preferredId ||
+    urlImportId ||
+    currentImportId ||
+    batchKey ||
+    list[0]?.id ||
+    "";
+
+  if (batchKey) {
+    currentImportBatchIds = batchMembers.map((item) => item.id);
+    currentImportId = batchMembers[0]?.id || currentImportId;
+  }
 
   el.importSelect.innerHTML = "";
   if (!list.length) {
@@ -1097,7 +1183,33 @@ function setImportOptions(imports, preferredId = "") {
     return;
   }
 
-  for (const item of list) {
+  const filteredList =
+    batchMembers.length > 1
+      ? list.filter(
+          (item) => !batchMembers.some((batchItem) => batchItem.id === item.id),
+        )
+      : list;
+
+  if (batchMembers.length > 1) {
+    const option = document.createElement("option");
+    option.value = batchMembers[0]?.id || targetId;
+    option.dataset.batchIds = batchMembers.map((item) => item.id).join("|");
+    option.textContent = batchOptionLabel(
+      buildBatchMeta(
+        batchMembers,
+        batchSelectionKey(batchMembers.map((item) => item.id)),
+      ),
+    );
+    if (
+      batchMembers[0]?.id === targetId ||
+      batchSelectionKey(batchMembers.map((item) => item.id)) === targetId
+    ) {
+      option.selected = true;
+    }
+    el.importSelect.appendChild(option);
+  }
+
+  for (const item of filteredList) {
     const option = document.createElement("option");
     option.value = item.id;
     const importedAt = formatImportTimestamp(item.imported_at);
@@ -1424,22 +1536,33 @@ async function deleteSelectedImport() {
 
   const meta = currentImportMeta();
   const label = meta?.file_name || importId;
+  const batchIds =
+    currentImportBatchIds.length > 1 ? [...currentImportBatchIds] : [importId];
   const ok = window.confirm(
-    `Upload wirklich löschen?\n\n${label}\n(${importId})`,
+    batchIds.length > 1
+      ? `Mehrfachimport wirklich löschen?\n\n${label}\n(${batchIds.length} Dateien)`
+      : `Upload wirklich löschen?\n\n${label}\n(${importId})`,
   );
   if (!ok) return;
 
   if (el.deleteImportBtn) el.deleteImportBtn.disabled = true;
-  setStatus(`Lösche Upload „${label}“…`);
+  setStatus(
+    batchIds.length > 1
+      ? `Lösche Mehrfachimport „${label}“…`
+      : `Lösche Upload „${label}“…`,
+  );
 
   try {
-    const res = await fetch(`/api/imports/${encodeURIComponent(importId)}`, {
-      method: "DELETE",
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    for (const id of batchIds) {
+      const res = await fetch(`/api/imports/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      removeBookkeepingForImport(id);
+    }
 
-    removeBookkeepingForImport(importId);
+    setCurrentImportBatch([]);
 
     const remaining = await refreshImports("", true);
     const nextImportId = String(el.importSelect?.value || "").trim();
@@ -1595,8 +1718,15 @@ el.loadBtn.addEventListener("click", load);
 el.uploadBtn.addEventListener("click", upload);
 if (el.importSelect) {
   el.importSelect.addEventListener("change", async () => {
+    const selectedOption = el.importSelect.selectedOptions?.[0] || null;
     currentImportId = String(el.importSelect.value || "").trim();
-    if (currentImportId) {
+    const batchIds = String(selectedOption?.dataset?.batchIds || "")
+      .split("|")
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+    if (batchIds.length > 1) {
+      setCurrentImportBatch(batchIds);
+    } else if (currentImportId) {
       setCurrentImportBatch([currentImportId]);
     }
     setImportIdInUrl(currentImportId, true);
