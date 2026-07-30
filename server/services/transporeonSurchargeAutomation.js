@@ -8,7 +8,12 @@ const { normalizeTransportNumber } = require("../normalize/exportBilling");
 const PROFILE_DIR = path.join(process.cwd(), ".pw-profile");
 const START_URL =
   "https://login.transporeon.com/?locale=de&return=AssignedTransportsCarrier";
-const NUMBER_CELL = 'td[class*="gxColumn-number"] div.taMJE';
+const NUMBER_CELL_SELECTORS = [
+  'td[class*="gxColumn-number"] div.taMJE',
+  'td[class*="gxColumn-number"] div',
+  'td[class*="gxColumn-number"] span',
+  'td[class*="gxColumn-number"]',
+];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -18,6 +23,10 @@ function normalizeTransportLoose(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   return normalizeTransportNumber(raw) || raw;
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function findListFrame(context) {
@@ -76,6 +85,12 @@ async function scrollListToLoadAllRows(frame) {
 
 async function collectTransportRows(frame) {
   const rows = await frame.evaluate(() => {
+    const selectors = [
+      'td[class*="gxColumn-number"] div.taMJE',
+      'td[class*="gxColumn-number"] div',
+      'td[class*="gxColumn-number"] span',
+      'td[class*="gxColumn-number"]',
+    ];
     const normalizeDigits = (text) => {
       const match = String(text || "")
         .trim()
@@ -83,19 +98,62 @@ async function collectTransportRows(frame) {
       return match ? match[1] : String(text || "").trim();
     };
 
-    const cells = Array.from(
-      document.querySelectorAll('td[class*="gxColumn-number"] div.taMJE'),
-    );
+    const seen = new Set();
+    const out = [];
+    let index = 0;
 
-    return cells.map((cell, index) => {
-      const text = String(cell.textContent || "").trim();
-      const norm = normalizeDigits(text);
-      const last7 = norm.replace(/\D/g, "").slice(-7);
-      return { index, text, norm, last7 };
-    });
+    for (const selector of selectors) {
+      const cells = Array.from(document.querySelectorAll(selector));
+      for (const cell of cells) {
+        const text = String(cell.textContent || "").trim();
+        if (!text) continue;
+        if (!/(\d{10}|\d{7,})/.test(text)) continue;
+        const dedupeKey = text;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+
+        const norm = normalizeDigits(text);
+        const last7 = norm.replace(/\D/g, "").slice(-7);
+        out.push({ index, text, norm, last7 });
+        index += 1;
+      }
+    }
+
+    return out;
   });
 
   return Array.isArray(rows) ? rows : [];
+}
+
+function buildTransportCellLocator(frame, rowText) {
+  const text = String(rowText || "").trim();
+  const exact = new RegExp(`^${escapeRegExp(text)}$`);
+  const prefix = new RegExp(`^${escapeRegExp(text)}`);
+
+  return [
+    frame.locator(NUMBER_CELL_SELECTORS[0], { hasText: exact }).first(),
+    frame.locator(NUMBER_CELL_SELECTORS[1], { hasText: exact }).first(),
+    frame.locator(NUMBER_CELL_SELECTORS[2], { hasText: exact }).first(),
+    frame.locator(NUMBER_CELL_SELECTORS[3], { hasText: exact }).first(),
+    frame.locator(NUMBER_CELL_SELECTORS[1], { hasText: prefix }).first(),
+    frame.locator(NUMBER_CELL_SELECTORS[3], { hasText: prefix }).first(),
+  ];
+}
+
+async function clickTransportCell(frame, rowText) {
+  const locators = buildTransportCellLocator(frame, rowText);
+  for (const locator of locators) {
+    try {
+      if ((await locator.count()) < 1) continue;
+      if (!(await locator.isVisible())) continue;
+      await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+      await locator.click({ timeout: 5000, force: true });
+      return true;
+    } catch {
+      // try next candidate
+    }
+  }
+  return false;
 }
 
 function resolveRowMatch(rows, transportNumber) {
@@ -342,9 +400,12 @@ async function applySurchargeForItem(frame, page, transportRows, item) {
     throw new Error("Transport in aktueller Liste nicht gefunden.");
   }
 
-  const cell = frame.locator(NUMBER_CELL).nth(Number(row.index));
-  await cell.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-  await cell.click({ timeout: 5000, force: true });
+  const clicked = await clickTransportCell(frame, row.text);
+  if (!clicked) {
+    throw new Error(
+      "Transportzeile konnte nicht angeklickt werden (Selektor passt nicht).",
+    );
+  }
   await sleep(250);
 
   const contexts = [frame, page];
@@ -416,7 +477,14 @@ async function applyTransporeonSurcharges(items, options = {}) {
     await scrollListToLoadAllRows(frame);
     await sleep(500);
 
-    const transportRows = await collectTransportRows(frame);
+    let transportRows = await collectTransportRows(frame);
+    for (let attempt = 0; attempt < 2 && !transportRows.length; attempt += 1) {
+      await listPage.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+      await sleep(1000);
+      await scrollListToLoadAllRows(frame);
+      await sleep(500);
+      transportRows = await collectTransportRows(frame);
+    }
     if (!transportRows.length) {
       throw new Error(
         "Keine Transportzeilen gefunden. Bitte Liste in Transporeon laden und erneut starten.",
