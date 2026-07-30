@@ -21,6 +21,9 @@ const { loadZeitfensterFromBuffer } = require("./tools/readZeitfensterExcel");
 const { transportNumberToLadenummer } = require("./normalize/ladenummer");
 const { windowStartForStop } = require("./normalize/zeitfenster");
 const { fetchLiveVisibilityEvents } = require("./services/transporeonLive");
+const {
+  applyTransporeonSurcharges,
+} = require("./services/transporeonSurchargeAutomation");
 const { ImportStore, normalizeScope } = require("./storage/importStore");
 
 dotenv.config();
@@ -2571,6 +2574,75 @@ app.post("/api/billing/bookkeeping-export", (req, res) => {
     res
       .status(500)
       .json({ error: error.message || "Buchungs-Export fehlgeschlagen." });
+  }
+});
+
+app.post("/api/transporeon/surcharges/apply", async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) {
+      return res.status(400).json({
+        error: "Keine Zuschlagsdaten übergeben.",
+      });
+    }
+
+    const prepared = items
+      .map((item) => {
+        const transportNumber = String(item?.transport_number || "").trim();
+        const stopType = String(item?.stop_type || "")
+          .trim()
+          .toUpperCase();
+        const amountEur = Number(item?.amount_eur || 0);
+        const description = String(item?.description || "").trim();
+        const stopKey = String(item?.stop_key || "").trim();
+
+        return {
+          transport_number: transportNumber,
+          stop_type:
+            stopType === "UNLOAD" || stopType === "UNLOADING"
+              ? "UNLOADING"
+              : "LOADING",
+          amount_eur: amountEur,
+          description,
+          stop_key: stopKey,
+        };
+      })
+      .filter(
+        (item) =>
+          item.transport_number &&
+          Number.isFinite(item.amount_eur) &&
+          item.amount_eur > 0,
+      );
+
+    if (!prepared.length) {
+      return res.status(400).json({
+        error: "Keine gültigen Zuschlagsdaten übergeben.",
+      });
+    }
+
+    const result = await applyTransporeonSurcharges(prepared, {
+      dryRun:
+        req.body?.dryRun === true ||
+        String(req.body?.dryRun || "") === "1" ||
+        String(req.body?.dryRun || "").toLowerCase() === "true",
+      keepBrowserOpen:
+        req.body?.keepBrowserOpen === true ||
+        String(req.body?.keepBrowserOpen || "") === "1" ||
+        String(req.body?.keepBrowserOpen || "").toLowerCase() === "true",
+      headless:
+        req.body?.headless === true ||
+        String(req.body?.headless || "") === "1" ||
+        String(req.body?.headless || "").toLowerCase() === "true",
+    });
+
+    return res.json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Automatischer Zuschlagslauf fehlgeschlagen.",
+    });
   }
 });
 

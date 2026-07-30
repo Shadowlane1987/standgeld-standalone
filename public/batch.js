@@ -46,6 +46,8 @@ const el = {
   filterMode: document.getElementById("filterMode"),
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
+  transporeonDryRun: document.getElementById("transporeonDryRun"),
+  applyTransporeonBtn: document.getElementById("applyTransporeonBtn"),
   rows: document.getElementById("rows"),
   stopDetailModal: document.getElementById("stopDetailModal"),
   stopDetailTitle: document.getElementById("stopDetailTitle"),
@@ -940,6 +942,106 @@ function buildBookkeepingRows(onlyMarked) {
   return rows;
 }
 
+function buildTransporeonSurchargeRows(onlyMarked) {
+  const rows = [];
+  for (const stop of currentStops || []) {
+    if (!stop || Number(stop.fee_eur || 0) <= 0) continue;
+    if (Boolean(stop.needs_review)) continue;
+
+    const entry = getBookkeepingEntry(stop);
+    if (onlyMarked && !entry.billed) continue;
+
+    rows.push({
+      transport_number: String(stop.transport_number || "").trim(),
+      stop_type: String(stop.stop_type || "")
+        .trim()
+        .toUpperCase(),
+      amount_eur: Number(stop.fee_eur || 0),
+      description: buildJustificationText(stop),
+      stop_key: stopKey(stop),
+    });
+  }
+  return rows;
+}
+
+async function applyTransporeonSurcharges() {
+  const onlyMarked = Boolean(el.bookkeepingOnlyMarked?.checked);
+  const rows = buildTransporeonSurchargeRows(onlyMarked);
+  if (!rows.length) {
+    setStatus(
+      onlyMarked
+        ? "Keine markierten, abrechenbaren Positionen verfügbar."
+        : "Keine abrechenbaren Positionen verfügbar.",
+      "error",
+    );
+    return;
+  }
+
+  const dryRun = Boolean(el.transporeonDryRun?.checked);
+  const confirmText = dryRun
+    ? `Trockenlauf für ${rows.length} Positionen starten?`
+    : `Automatisch ${rows.length} Zuschläge in Transporeon anlegen und Entscheidung einholen?`;
+  if (!window.confirm(confirmText)) return;
+
+  if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = true;
+  setStatus(
+    dryRun
+      ? `Prüfe ${rows.length} Positionen gegen Transporeon-Liste …`
+      : `Beantrage ${rows.length} Zuschläge in Transporeon …`,
+  );
+
+  try {
+    const res = await fetch("/api/transporeon/surcharges/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dryRun,
+        items: rows,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    if (!dryRun && Array.isArray(data.processed)) {
+      const successKeys = new Set(
+        data.processed
+          .filter((item) => item.status === "applied")
+          .map((item) => String(item.stop_key || "").trim())
+          .filter(Boolean),
+      );
+      if (successKeys.size) {
+        for (const stop of currentStops || []) {
+          const key = stopKey(stop);
+          if (!successKeys.has(key)) continue;
+          const entry = getBookkeepingEntry(stop);
+          entry.billed = true;
+        }
+        persistBookkeepingForCurrentImport();
+        render();
+      }
+    }
+
+    const success = Number(data.summary?.success_count || 0);
+    const failure = Number(data.summary?.failure_count || 0);
+    setStatus(
+      dryRun
+        ? `Trockenlauf fertig: ${success} bereit, ${failure} nicht gefunden/fehlerhaft.`
+        : `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.`,
+      failure > 0 ? "info" : "success",
+    );
+  } catch (error) {
+    setStatus(
+      error.message || "Zuschlagslauf konnte nicht gestartet werden.",
+      "error",
+    );
+  } finally {
+    if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = false;
+  }
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1824,6 +1926,9 @@ el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
 el.filterMode.addEventListener("change", render);
 if (el.bookkeepingExportBtn) {
   el.bookkeepingExportBtn.addEventListener("click", exportBookkeeping);
+}
+if (el.applyTransporeonBtn) {
+  el.applyTransporeonBtn.addEventListener("click", applyTransporeonSurcharges);
 }
 if (el.closeStopDetailModalBtn) {
   el.closeStopDetailModalBtn.addEventListener("click", closeStopDetailModal);
