@@ -2620,15 +2620,22 @@ app.post("/api/transporeon/surcharges/apply", async (req, res) => {
       });
     }
 
+    const keepBrowserRaw = String(req.body?.keepBrowserOpen ?? "")
+      .trim()
+      .toLowerCase();
+    const keepBrowserOpen =
+      req.body?.keepBrowserOpen === false ||
+      keepBrowserRaw === "0" ||
+      keepBrowserRaw === "false"
+        ? false
+        : true;
+
     const result = await applyTransporeonSurcharges(prepared, {
       dryRun:
         req.body?.dryRun === true ||
         String(req.body?.dryRun || "") === "1" ||
         String(req.body?.dryRun || "").toLowerCase() === "true",
-      keepBrowserOpen:
-        req.body?.keepBrowserOpen === true ||
-        String(req.body?.keepBrowserOpen || "") === "1" ||
-        String(req.body?.keepBrowserOpen || "").toLowerCase() === "true",
+      keepBrowserOpen,
       headless:
         req.body?.headless === true ||
         String(req.body?.headless || "") === "1" ||

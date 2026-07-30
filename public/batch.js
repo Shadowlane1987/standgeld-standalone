@@ -942,14 +942,14 @@ function buildBookkeepingRows(onlyMarked) {
   return rows;
 }
 
-function buildTransporeonSurchargeRows(onlyMarked) {
+function buildTransporeonSurchargeRows() {
   const rows = [];
   for (const stop of currentStops || []) {
     if (!stop || Number(stop.fee_eur || 0) <= 0) continue;
     if (Boolean(stop.needs_review)) continue;
 
     const entry = getBookkeepingEntry(stop);
-    if (onlyMarked && !entry.billed) continue;
+    if (!entry.billed) continue;
 
     rows.push({
       transport_number: String(stop.transport_number || "").trim(),
@@ -965,13 +965,10 @@ function buildTransporeonSurchargeRows(onlyMarked) {
 }
 
 async function applyTransporeonSurcharges() {
-  const onlyMarked = Boolean(el.bookkeepingOnlyMarked?.checked);
-  const rows = buildTransporeonSurchargeRows(onlyMarked);
+  const rows = buildTransporeonSurchargeRows();
   if (!rows.length) {
     setStatus(
-      onlyMarked
-        ? "Keine markierten, abrechenbaren Positionen verfügbar."
-        : "Keine abrechenbaren Positionen verfügbar.",
+      "Keine markierten Positionen für Transporeon vorhanden.",
       "error",
     );
     return;
@@ -986,8 +983,8 @@ async function applyTransporeonSurcharges() {
   if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = true;
   setStatus(
     dryRun
-      ? `Prüfe ${rows.length} Positionen gegen Transporeon-Liste …`
-      : `Beantrage ${rows.length} Zuschläge in Transporeon …`,
+      ? `Prüfe ${rows.length} markierte Positionen per Transporeon-Suche …`
+      : `Beantrage ${rows.length} markierte Zuschläge in Transporeon …`,
   );
 
   try {
@@ -996,6 +993,7 @@ async function applyTransporeonSurcharges() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         dryRun,
+        keepBrowserOpen: true,
         items: rows,
       }),
     });

@@ -33,9 +33,15 @@ async function findListFrame(context) {
   for (const pg of context.pages()) {
     for (const frame of pg.frames()) {
       try {
-        const has = await frame.evaluate(
-          () => !!document.querySelector('td[class*="gxColumn-number"]'),
-        );
+        const has = await frame.evaluate(() => {
+          const hasNumberGrid = !!document.querySelector(
+            'td[class*="gxColumn-number"]',
+          );
+          const hasSearchField = !!document.querySelector(
+            'input[type="text"], input[placeholder*="Such" i], input[aria-label*="Such" i]',
+          );
+          return hasNumberGrid || hasSearchField;
+        });
         if (has) return { page: pg, frame };
       } catch {
         // ignore cross-origin/inaccessible frames
@@ -174,6 +180,97 @@ function resolveRowMatch(rows, transportNumber) {
   }
 
   return null;
+}
+
+function transportSearchQueries(transportNumber) {
+  const raw = String(transportNumber || "").trim();
+  const normalized = normalizeTransportLoose(raw);
+  const normalizedDigits = normalized.replace(/\D/g, "");
+  const last10 = normalizedDigits.slice(-10);
+  const last7 = normalizedDigits.slice(-7);
+  const unique = new Set([raw, normalized, last10, last7].filter(Boolean));
+  return Array.from(unique);
+}
+
+async function inputSearchQuery(context, query) {
+  const selectors = [
+    'input[placeholder*="Such" i]',
+    'input[aria-label*="Such" i]',
+    'input[id*="search" i]',
+    'input[class*="search" i]',
+    'input[type="text"]',
+  ];
+
+  for (const selector of selectors) {
+    const fields = context.locator(selector);
+    const count = await fields.count();
+    for (let i = 0; i < count; i += 1) {
+      const field = fields.nth(i);
+      try {
+        if (!(await field.isVisible())) continue;
+        if (!(await field.isEnabled())) continue;
+        await field.click({ timeout: 1500, force: true });
+        await field.fill("");
+        await field.fill(query);
+        await field.press("Enter").catch(() => {});
+        return true;
+      } catch {
+        // try next search field
+      }
+    }
+  }
+
+  return false;
+}
+
+async function detectVisibleTransport(contexts, transportNumber) {
+  const queries = transportSearchQueries(transportNumber);
+  for (const ctx of contexts) {
+    for (const query of queries) {
+      try {
+        const locator = ctx.getByText(new RegExp(escapeRegExp(query))).first();
+        if (await locator.isVisible({ timeout: 500 })) {
+          return query;
+        }
+      } catch {
+        // continue
+      }
+    }
+  }
+  return null;
+}
+
+async function searchTransportByNumber(contexts, transportNumber) {
+  const queries = transportSearchQueries(transportNumber);
+  if (!queries.length) {
+    return {
+      found: false,
+      query: null,
+      matched: null,
+    };
+  }
+
+  for (const query of queries) {
+    for (const ctx of contexts) {
+      const typed = await inputSearchQuery(ctx, query);
+      if (!typed) continue;
+      await sleep(700);
+      const matched = await detectVisibleTransport(contexts, transportNumber);
+      if (matched) {
+        return {
+          found: true,
+          query,
+          matched,
+        };
+      }
+    }
+  }
+
+  return {
+    found: false,
+    query: queries[0],
+    matched: null,
+  };
 }
 
 async function clickFirstVisibleLocator(locators) {
@@ -381,7 +478,7 @@ function normalizeStopType(value) {
   return "LOADING";
 }
 
-async function applySurchargeForItem(frame, page, transportRows, item) {
+async function applySurchargeForItem(frame, page, item) {
   const transportNumber = String(item?.transport_number || "").trim();
   if (!transportNumber) {
     throw new Error("Transportnummer fehlt.");
@@ -395,20 +492,15 @@ async function applySurchargeForItem(frame, page, transportRows, item) {
     throw new Error("Betrag ist ungültig oder 0.");
   }
 
-  const row = resolveRowMatch(transportRows, transportNumber);
-  if (!row) {
-    throw new Error("Transport in aktueller Liste nicht gefunden.");
+  const contexts = [frame, page];
+  const search = await searchTransportByNumber(contexts, transportNumber);
+  if (!search.found) {
+    throw new Error("Transport konnte über Suche nicht gefunden werden.");
   }
 
-  const clicked = await clickTransportCell(frame, row.text);
-  if (!clicked) {
-    throw new Error(
-      "Transportzeile konnte nicht angeklickt werden (Selektor passt nicht).",
-    );
-  }
+  await clickTransportCell(frame, String(search.matched || search.query || ""));
   await sleep(250);
 
-  const contexts = [frame, page];
   const dialogContext = await openSurchargeDialog(contexts);
   await fillPriceFields(dialogContext, amount);
   await fillDescription(dialogContext, String(item?.description || ""));
@@ -418,7 +510,7 @@ async function applySurchargeForItem(frame, page, transportRows, item) {
 
   return {
     transport_number: transportNumber,
-    matched_transport_number: row.text,
+    matched_transport_number: String(search.matched || search.query || ""),
     stop_type: stopType,
     station: stationLabel,
     amount_eur: amount,
@@ -442,6 +534,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
 
   const dryRun = Boolean(options.dryRun);
   const headless = Boolean(options.headless);
+  const keepBrowserOpen = options.keepBrowserOpen !== false;
   const perItemDelayMs = Number.isFinite(options.perItemDelayMs)
     ? Number(options.perItemDelayMs)
     : 250;
@@ -476,29 +569,18 @@ async function applyTransporeonSurcharges(items, options = {}) {
     const { page: listPage, frame } = found;
     await scrollListToLoadAllRows(frame);
     await sleep(500);
-
-    let transportRows = await collectTransportRows(frame);
-    for (let attempt = 0; attempt < 2 && !transportRows.length; attempt += 1) {
-      await listPage.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
-      await sleep(1000);
-      await scrollListToLoadAllRows(frame);
-      await sleep(500);
-      transportRows = await collectTransportRows(frame);
-    }
-    if (!transportRows.length) {
-      throw new Error(
-        "Keine Transportzeilen gefunden. Bitte Liste in Transporeon laden und erneut starten.",
-      );
-    }
-
     const processed = [];
 
     for (const item of list) {
       const transportNumber = String(item?.transport_number || "").trim();
       const stopType = normalizeStopType(item?.stop_type);
-      const rowMatch = resolveRowMatch(transportRows, transportNumber);
       const station =
         stopType === "UNLOADING" ? "Entladestelle" : "Beladestelle";
+
+      const search = await searchTransportByNumber(
+        [frame, listPage],
+        transportNumber,
+      );
 
       if (dryRun) {
         processed.push({
@@ -508,22 +590,33 @@ async function applyTransporeonSurcharges(items, options = {}) {
           amount_eur: Number(item?.amount_eur || 0),
           description: String(item?.description || ""),
           stop_key: String(item?.stop_key || "").trim() || null,
-          status: rowMatch ? "ready" : "missing_transport",
-          matched_transport_number: rowMatch ? rowMatch.text : null,
-          message: rowMatch
-            ? "Transport in Liste gefunden."
-            : "Transport in aktueller Liste nicht gefunden.",
+          status: search.found ? "ready" : "missing_transport",
+          matched_transport_number: search.found
+            ? String(search.matched || search.query || "")
+            : null,
+          message: search.found
+            ? "Transport über Suche gefunden."
+            : "Transport über Suche nicht gefunden.",
+        });
+        continue;
+      }
+
+      if (!search.found) {
+        processed.push({
+          transport_number: transportNumber,
+          stop_type: stopType,
+          station,
+          amount_eur: Number(item?.amount_eur || 0),
+          description: String(item?.description || ""),
+          stop_key: String(item?.stop_key || "").trim() || null,
+          status: "failed",
+          message: "Transport über Suche nicht gefunden.",
         });
         continue;
       }
 
       try {
-        const result = await applySurchargeForItem(
-          frame,
-          listPage,
-          transportRows,
-          item,
-        );
+        const result = await applySurchargeForItem(frame, listPage, item);
         processed.push({
           ...result,
           stop_key: String(item?.stop_key || "").trim() || null,
@@ -564,7 +657,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
       },
     };
   } finally {
-    if (!Boolean(options.keepBrowserOpen)) {
+    if (!keepBrowserOpen) {
       await context.close().catch(() => {});
     }
   }
