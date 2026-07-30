@@ -370,6 +370,31 @@ function isoToLocal(iso) {
   });
 }
 
+function formatDateTimeForJustification(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "-") return "-";
+
+  const direct = new Date(text);
+  if (!Number.isNaN(direct.getTime())) {
+    const local = direct.toLocaleString("de-DE", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return local.replace(", ", " / ");
+  }
+
+  const withYear = text.match(/^(\d{2}\.\d{2}\.\d{4}),\s*(\d{2}:\d{2})$/);
+  if (withYear) return `${withYear[1]} / ${withYear[2]}`;
+
+  const shortDate = text.match(/^(\d{2}\.\d{2})\.?[,]?\s*(\d{2}:\d{2})$/);
+  if (shortDate) return `${shortDate[1]}. / ${shortDate[2]}`;
+
+  return text;
+}
+
 function standingMinutesFromIso(arrivalIso, departureIso) {
   if (!arrivalIso || !departureIso) return null;
   const a = Date.parse(arrivalIso);
@@ -508,6 +533,17 @@ function fallbackStatusRowHtml(stop) {
   `;
 }
 
+function detailSummaryRowHtml(text) {
+  const summary = String(text || "").trim();
+  if (!summary) return "";
+
+  return `
+    <tr class="detail-summary-row">
+      <td colspan="4">${summary}</td>
+    </tr>
+  `;
+}
+
 function openStopDetailModal(stop) {
   if (!el.stopDetailModal || !stop) return;
   activeDetailStop = stop;
@@ -535,11 +571,16 @@ function openStopDetailModal(stop) {
   const departureUsed = isoToLocal(stop.departure_time_used);
   const arrivalSrc = stop.arrival_source || "XP";
   const departureSrc = stop.departure_source || "XP";
-  el.stopDetailMeta.textContent =
+  const summaryLine =
     `Zeitfenster: ${windowLocal} · Quelle: ${source}` +
     (kfz !== "-" ? ` · KFZ: ${kfz}` : "") +
     amountNote +
     rebookingNote;
+
+  if (el.stopDetailMeta) {
+    el.stopDetailMeta.textContent = "";
+    el.stopDetailMeta.hidden = true;
+  }
 
   const xpArrival = isoToLocal(stop.xp_arrival_time);
   const xpDeparture = isoToLocal(stop.xp_departure_time);
@@ -558,6 +599,7 @@ function openStopDetailModal(stop) {
   );
 
   el.stopDetailRows.innerHTML =
+    detailSummaryRowHtml(summaryLine) +
     detailRowHtml("Ankunft", xpArrival, gpsArrival, usedArrivalWithSource) +
     detailRowHtml(
       "Abfahrt",
@@ -595,9 +637,13 @@ function billedMinutes(stop) {
 function buildJustificationText(stop) {
   if (!stop) return "";
 
-  const arrivalUsed = isoToLocal(stop.arrival_time_used);
-  const departureUsed = isoToLocal(stop.departure_time_used);
-  const windowLocal = stop.window_local || isoToLocal(stop.window_start);
+  const arrivalUsed = formatDateTimeForJustification(stop.arrival_time_used);
+  const departureUsed = formatDateTimeForJustification(
+    stop.departure_time_used,
+  );
+  const windowLocal = formatDateTimeForJustification(
+    stop.window_local || stop.window_start,
+  );
   const effectiveStanding = minutesToHours(
     standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
       stop.counted_standing_minutes,
