@@ -29,8 +29,6 @@ const el = {
   uploadBtn: document.getElementById("uploadBtn"),
   sixfoldUrl: document.getElementById("sixfoldUrl"),
   sixfoldToken: document.getElementById("sixfoldToken"),
-  sixfoldDateFrom: document.getElementById("sixfoldDateFrom"),
-  sixfoldDateTo: document.getElementById("sixfoldDateTo"),
   selectiveSearchBtn: document.getElementById("selectiveSearchBtn"),
   selectivePanel: document.getElementById("selectivePanel"),
   selectiveResult: document.getElementById("selectiveResult"),
@@ -927,19 +925,11 @@ function render() {
 }
 
 function ruleParams() {
-  const sixfoldDateFrom = String(el.sixfoldDateFrom?.value || "").trim();
-  const sixfoldDateTo = String(el.sixfoldDateTo?.value || "").trim();
-  if (sixfoldDateFrom && sixfoldDateTo && sixfoldDateFrom > sixfoldDateTo) {
-    throw new Error(
-      "Sixfold-Datumsbereich ist ungueltig (Von liegt nach Bis).",
-    );
-  }
-
   const lateArrivalGraceEnabled = lateArrivalGraceEnabledState;
   const lateArrivalGraceMinutes = Number(
     el.lateArrivalGraceMinutes?.value || 45,
   );
-  const params = new URLSearchParams({
+  return new URLSearchParams({
     scope: APP_SCOPE,
     freeMinutes: el.freeMinutes.value,
     blockMinutes: el.blockMinutes.value,
@@ -950,11 +940,82 @@ function ruleParams() {
       Number.isFinite(lateArrivalGraceMinutes) ? lateArrivalGraceMinutes : 45,
     ),
   });
+}
 
-  if (sixfoldDateFrom) params.set("sixfoldDateFrom", sixfoldDateFrom);
-  if (sixfoldDateTo) params.set("sixfoldDateTo", sixfoldDateTo);
+function mergeUploadResults(results) {
+  const list = Array.isArray(results) ? results.filter(Boolean) : [];
+  if (!list.length) return null;
 
-  return params;
+  const stops = list.flatMap((item) =>
+    Array.isArray(item.stops) ? item.stops : [],
+  );
+  const summaries = list.map((item) => item.summary || {});
+  const totalFeeEur = stops.reduce(
+    (sum, stop) => sum + (stop.needs_review ? 0 : Number(stop.fee_eur || 0)),
+    0,
+  );
+
+  return {
+    summary: {
+      transport_count: summaries.reduce(
+        (sum, summary) => sum + Number(summary.transport_count || 0),
+        0,
+      ),
+      stop_count: stops.length,
+      chargeable_count: stops.filter((s) => Number(s.fee_eur || 0) > 0).length,
+      review_count: stops.filter((s) => Boolean(s.needs_review)).length,
+      gps_checked: summaries.some((summary) => Boolean(summary.gps_checked)),
+      gps_used_count: stops.filter(
+        (s) => s.arrival_source === "GPS" || s.departure_source === "GPS",
+      ).length,
+      gps_missing_count: stops.filter((s) => Boolean(s.gps_missing)).length,
+      mixed_source_count: stops.filter(
+        (s) => s.arrival_source !== s.departure_source,
+      ).length,
+      rebooking_suspected_count: stops.filter((s) =>
+        Boolean(s.rebooking_suspected),
+      ).length,
+      total_fee_eur: totalFeeEur,
+      total_fee_display: euro(totalFeeEur),
+      date_filter_applied: summaries.some((summary) =>
+        Boolean(summary.date_filter_applied),
+      ),
+      input_transport_count: summaries.reduce(
+        (sum, summary) => sum + Number(summary.input_transport_count || 0),
+        0,
+      ),
+      filtered_transport_count: summaries.reduce(
+        (sum, summary) => sum + Number(summary.filtered_transport_count || 0),
+        0,
+      ),
+      excluded_transport_count: summaries.reduce(
+        (sum, summary) => sum + Number(summary.excluded_transport_count || 0),
+        0,
+      ),
+      fallback_available: summaries.some((summary) =>
+        Boolean(summary.fallback_available),
+      ),
+      fallback_applied: summaries.reduce(
+        (sum, summary) => sum + Number(summary.fallback_applied || 0),
+        0,
+      ),
+      fallback_candidates: summaries.reduce(
+        (sum, summary) => sum + Number(summary.fallback_candidates || 0),
+        0,
+      ),
+      fallback_overridden_existing: summaries.reduce(
+        (sum, summary) =>
+          sum + Number(summary.fallback_overridden_existing || 0),
+        0,
+      ),
+      fallback_already_matching: summaries.reduce(
+        (sum, summary) => sum + Number(summary.fallback_already_matching || 0),
+        0,
+      ),
+    },
+    stops,
+    generated_at: new Date().toISOString(),
+  };
 }
 
 function setImportOptions(imports, preferredId = "") {
@@ -1134,46 +1195,63 @@ async function load(forceRecalc = false) {
 }
 
 async function upload() {
-  const file = el.fileInput.files && el.fileInput.files[0];
-  if (!file) {
-    setStatus("Bitte zuerst eine Excel-Datei auswählen.", "error");
+  const files = Array.from(el.fileInput.files || []);
+  if (!files.length) {
+    setStatus("Bitte zuerst mindestens eine Excel-Datei auswählen.", "error");
     return;
   }
 
-  setStatus(`Lade „${file.name}" hoch und rechne ab …`);
+  setStatus(
+    files.length === 1
+      ? `Lade „${files[0].name}" hoch und rechne ab …`
+      : `Lade ${files.length} Excel-Dateien hoch und gleiche ab …`,
+  );
   el.uploadBtn.disabled = true;
   el.loadBtn.disabled = true;
 
   try {
-    const params = ruleParams();
-    params.set("name", file.name);
     const gps = sixfoldHeaders();
     const headers = { "Content-Type": "application/octet-stream", ...gps };
-    const baseUrl = `/api/billing/upload?${params.toString()}`;
-    const url = baseUrl + sixfoldParams();
-    if (gps["x-sixfold-url"]) {
-      setStatus(
-        `Lade „${file.name}" hoch, gleiche mit Sixfold ab und rechne ab …`,
-      );
-    } else {
-      setStatus(`Lade „${file.name}" hoch und rechne ab …`);
-    }
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      body: file,
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const results = [];
+    let nextImportId = currentImportId;
 
-    applyResult(data);
-    currentImportId = String(data.import?.id || "").trim() || currentImportId;
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const params = ruleParams();
+      params.set("name", file.name);
+      const baseUrl = `/api/billing/upload?${params.toString()}`;
+      const url = baseUrl + sixfoldParams();
+
+      setStatus(
+        gps["x-sixfold-url"]
+          ? `Datei ${index + 1}/${files.length}: „${file.name}" hochladen + Sixfold-Abgleich …`
+          : `Datei ${index + 1}/${files.length}: „${file.name}" hochladen …`,
+      );
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: file,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      results.push(data);
+      nextImportId = String(data.import?.id || "").trim() || nextImportId;
+    }
+
+    const merged = mergeUploadResults(results);
+    if (merged) applyResult(merged);
+
+    currentImportId = nextImportId;
     await refreshImports(currentImportId, true);
     setImportIdInUrl(currentImportId, true);
     syncImportWorkspace();
     if (currentImportId) {
       setStatus(
-        `Import gespeichert und abgerechnet: ${data.import?.file_name || file.name}`,
+        files.length === 1
+          ? `Import gespeichert und abgerechnet: ${files[0].name}`
+          : `${files.length} Importe gespeichert und gemeinsam abgerechnet.`,
         "success",
       );
     }

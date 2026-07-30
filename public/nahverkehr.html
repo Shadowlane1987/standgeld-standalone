@@ -73,9 +73,10 @@
         </div>
         <div class="grid grid-5">
           <label class="upload-label"
-            >Excel-Export hochladen<input
+            >Excel-Exporte hochladen<input
               id="fileInput"
               type="file"
+              multiple
               accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           /></label>
           <label class="upload-label"
@@ -88,13 +89,6 @@
             >Gespeicherter Import<select id="importSelect">
               <option value="">Keine gespeicherten Importe</option>
             </select></label
-          >
-          <label
-            >Sixfold Fleet-Timeline-Link<input
-              id="sixfoldUrl"
-              type="url"
-              placeholder="https://app.sixfold.com/companies/…/fleet/all/timeline"
-          /></label>
           <label
             >Session-Token<input
               id="sixfoldToken"
@@ -102,9 +96,6 @@
               autocomplete="off"
               placeholder="sessionToken-Wert"
           /></label>
-          <label
-            >Sixfold Datum von (optional)<input
-              id="sixfoldDateFrom"
               type="date"
           /></label>
           <label
