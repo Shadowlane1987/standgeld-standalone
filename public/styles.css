@@ -1069,11 +1069,34 @@ td input[type="checkbox"][data-bk] {
   white-space: nowrap;
 }
 
-.detail-summary-row td {
-  white-space: normal;
-  font-weight: 600;
-  color: var(--ink-soft);
-  background: rgba(14, 92, 74, 0.05);
+.detail-window-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.detail-window-hit {
+  background: rgba(22, 121, 79, 0.16);
+  color: #0f5f3f;
+}
+
+.detail-window-late {
+  background: rgba(185, 28, 28, 0.14);
+  color: #b91c1c;
+}
+
+.detail-window-missing,
+.detail-window-neutral {
+  background: rgba(176, 105, 28, 0.14);
+  color: #8a4f16;
+}
+
+.detail-total-row td {
+  background: rgba(14, 92, 74, 0.07);
+  font-weight: 700;
 }
 
 .detail-win {

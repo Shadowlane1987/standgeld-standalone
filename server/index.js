@@ -133,6 +133,75 @@ function shouldForceRecalc(req) {
   return value === "1" || value.toLowerCase() === "true";
 }
 
+function enforceUnloadingGpsGate(result) {
+  if (!result || !Array.isArray(result.stops)) return result;
+
+  const keptStops = [];
+  let removedUnloadingStops = 0;
+
+  for (const stop of result.stops) {
+    const isUnloading =
+      String(stop?.stop_type || "").toUpperCase() === "UNLOADING";
+    const hasVerifiedGps = Boolean(stop?.gps_available);
+    const hasPlateLink = Boolean(stop?.gps_plate_match);
+
+    if (isUnloading && (!hasVerifiedGps || !hasPlateLink)) {
+      removedUnloadingStops += 1;
+      continue;
+    }
+
+    keptStops.push(stop);
+  }
+
+  const summary = {
+    ...(result.summary || {}),
+    stop_count: keptStops.length,
+    chargeable_count: keptStops.filter((s) => Number(s?.fee_eur || 0) > 0)
+      .length,
+    review_count: keptStops.filter((s) => Boolean(s?.needs_review)).length,
+    gps_used_count: keptStops.filter(
+      (s) => s?.arrival_source === "GPS" || s?.departure_source === "GPS",
+    ).length,
+    gps_missing_count: keptStops.filter((s) => Boolean(s?.gps_missing)).length,
+    mixed_source_count: keptStops.filter(
+      (s) => s?.arrival_source !== s?.departure_source,
+    ).length,
+    rebooking_suspected_count: keptStops.filter((s) =>
+      Boolean(s?.rebooking_suspected),
+    ).length,
+    total_fee_eur: keptStops.reduce(
+      (sum, s) => sum + (s?.needs_review ? 0 : Number(s?.fee_eur || 0)),
+      0,
+    ),
+    filtered_unloading_missing_gps_or_plate: removedUnloadingStops,
+  };
+
+  if (
+    Object.prototype.hasOwnProperty.call(summary, "gps_used_transport_count")
+  ) {
+    summary.gps_used_transport_count = new Set(
+      keptStops
+        .filter(
+          (s) => s?.arrival_source === "GPS" || s?.departure_source === "GPS",
+        )
+        .map((s) => String(s?.transport_number || "").trim())
+        .filter(Boolean),
+    ).size;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(summary, "xp_missing_count")) {
+    summary.xp_missing_count = keptStops.filter((s) =>
+      Boolean(s?.xp_missing),
+    ).length;
+  }
+
+  return {
+    ...result,
+    stops: keptStops,
+    summary,
+  };
+}
+
 function loadCachedBillingResult(importId, cacheKey) {
   const cached = importStore.getBillingResult(importId, cacheKey);
   return cached && cached.result ? cached.result : null;
@@ -1993,7 +2062,8 @@ app.get("/api/billing/export", async (req, res) => {
       },
     );
 
-    const result = billFromExport(filteredTransports, { config, gpsIndex });
+    const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
+    const result = enforceUnloadingGpsGate(rawResult);
     persistBillingResult(importId, cacheKey, {
       file: filePath,
       generated_at: new Date().toISOString(),
@@ -2126,10 +2196,11 @@ app.get("/api/billing/live", async (req, res) => {
       });
     }
 
-    const result = billFromLiveData(filteredTransports, liveResult.events, {
+    const rawResult = billFromLiveData(filteredTransports, liveResult.events, {
       config,
       gpsIndex,
     });
+    const result = enforceUnloadingGpsGate(rawResult);
 
     if (!allowPartialLive && result.summary.xp_missing_count > 0) {
       return res.status(409).json({
@@ -2250,7 +2321,11 @@ app.post(
         },
       );
 
-      const result = billFromExport(filteredTransports, { config, gpsIndex });
+      const rawResult = billFromExport(filteredTransports, {
+        config,
+        gpsIndex,
+      });
+      const result = enforceUnloadingGpsGate(rawResult);
       persistBillingResult(savedImport.id, cacheKey, {
         file: req.query.name ? String(req.query.name) : "upload.xlsx",
         import: savedImport,
@@ -2387,10 +2462,15 @@ app.post(
         });
       }
 
-      const result = billFromLiveData(filteredTransports, liveResult.events, {
-        config,
-        gpsIndex,
-      });
+      const rawResult = billFromLiveData(
+        filteredTransports,
+        liveResult.events,
+        {
+          config,
+          gpsIndex,
+        },
+      );
+      const result = enforceUnloadingGpsGate(rawResult);
 
       persistBillingResult(savedImport?.id, cacheKey, {
         file: req.query.name ? String(req.query.name) : "upload.xlsx",

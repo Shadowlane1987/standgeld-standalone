@@ -533,13 +533,58 @@ function fallbackStatusRowHtml(stop) {
   `;
 }
 
-function detailSummaryRowHtml(text) {
-  const summary = String(text || "").trim();
-  if (!summary) return "";
+function buildWindowStatus(stop) {
+  const hasWindow = Boolean(String(stop?.window_local || "").trim());
+  if (!hasWindow) {
+    return {
+      className: "detail-window-missing",
+      text: "Kein Zeitfenster",
+    };
+  }
 
+  if (stop?.within_window === true) {
+    return {
+      className: "detail-window-hit",
+      text: "Zeitfenster getroffen",
+    };
+  }
+
+  const lateMinutesRaw = Number(stop?.minutes_after_window_end || 0);
+  const lateMinutes = Number.isFinite(lateMinutesRaw) ? lateMinutesRaw : 0;
+  if (stop?.arrived_late || lateMinutes > 0) {
+    return {
+      className: "detail-window-late",
+      text:
+        lateMinutes > 0
+          ? `Verspätet (+${minutesToHours(lateMinutes)})`
+          : "Verspätet",
+    };
+  }
+
+  return {
+    className: "detail-window-neutral",
+    text: "Zeitfenster prüfen",
+  };
+}
+
+function detailWindowRowHtml(windowValue, status) {
   return `
-    <tr class="detail-summary-row">
-      <td colspan="4">${summary}</td>
+    <tr>
+      <td>Zeitfenster</td>
+      <td>${detailCell(windowValue)}</td>
+      <td>-</td>
+      <td class="detail-used"><span class="detail-window-badge ${status.className}">${status.text}</span></td>
+    </tr>
+  `;
+}
+
+function detailTotalRowHtml(amount) {
+  return `
+    <tr class="detail-total-row">
+      <td>Abrechenbare Summe</td>
+      <td>-</td>
+      <td>-</td>
+      <td class="detail-used">${amount}</td>
     </tr>
   `;
 }
@@ -562,20 +607,17 @@ function openStopDetailModal(stop) {
   const overFreeStanding = minutesToHours(stop.minutes_over_free);
   const freeWindow = minutesToHours(stop.free_minutes || 120);
   const windowLocal = stop.window_local || "-";
-  const countStartLocal = isoToLocal(stop.count_start);
   const rebookingNote = stop.rebooking_suspected
     ? " · ⚠ Umbuchung/Pause erkannt: gezählt ab GPS-Ankunft (Prüffall)"
     : "";
-  const amountNote = ` · Abrechenbare Summe: ${euro(stop.fee_eur)}`;
+  const totalAmount = euro(stop.fee_eur);
   const arrivalUsed = isoToLocal(stop.arrival_time_used);
   const departureUsed = isoToLocal(stop.departure_time_used);
   const arrivalSrc = stop.arrival_source || "XP";
   const departureSrc = stop.departure_source || "XP";
   const summaryLine =
-    `Zeitfenster: ${windowLocal} · Quelle: ${source}` +
-    (kfz !== "-" ? ` · KFZ: ${kfz}` : "") +
-    amountNote +
-    rebookingNote;
+    `Quelle: ${source}` + (kfz !== "-" ? ` · KFZ: ${kfz}` : "") + rebookingNote;
+  const windowStatus = buildWindowStatus(stop);
 
   if (el.stopDetailMeta) {
     el.stopDetailMeta.textContent = "";
@@ -599,7 +641,7 @@ function openStopDetailModal(stop) {
   );
 
   el.stopDetailRows.innerHTML =
-    detailSummaryRowHtml(summaryLine) +
+    detailWindowRowHtml(windowLocal, windowStatus) +
     detailRowHtml("Ankunft", xpArrival, gpsArrival, usedArrivalWithSource) +
     detailRowHtml(
       "Abfahrt",
@@ -616,7 +658,8 @@ function openStopDetailModal(stop) {
     ) +
     detailRowHtml("Freigrenze", "-", "-", freeWindow) +
     detailRowHtml("Über Frei", "-", "-", overFreeStanding) +
-    fallbackStatusRowHtml(stop);
+    fallbackStatusRowHtml(stop) +
+    detailTotalRowHtml(totalAmount);
 
   el.stopDetailModal.hidden = false;
   if (el.justificationText) {
