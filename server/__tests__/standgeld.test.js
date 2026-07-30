@@ -256,9 +256,9 @@ test("Standzeit > 12h mit Ruhezeit ergibt niedrige Gebühr (nicht 650 EUR Deckel
   assert.equal(r.chargeable, true);
 });
 
-test("Umbuchung/Pause: GPS-Ankunft weit vor Fenster -> ab Ankunft zaehlen + Prueffall", () => {
-  // Fenster 06:00 (umgebucht), GPS-Ankunft 6h frueher (00:00), Abfahrt 09:00.
-  // Ohne Sonderregel wuerde ab 06:00 gezaehlt (3h). Mit GPS-Beleg ab 00:00 (9h).
+test("Fruehankunft mit GPS weit vor Fenster: weiterhin ab Fenster, kein Prueffall", () => {
+  // Fenster 06:00, Ankunft 00:00, Abfahrt 09:00.
+  // Wartezeit vor dem Fenster wird ignoriert -> Zaehlung ab 06:00.
   const r = computeStandgeld(
     stop({
       arrival_time: "2026-07-16T00:00:00.000Z",
@@ -266,16 +266,14 @@ test("Umbuchung/Pause: GPS-Ankunft weit vor Fenster -> ab Ankunft zaehlen + Prue
       arrival_gps_verified: true,
     }),
   );
-  assert.equal(r.rebooking_suspected, true);
-  assert.equal(r.count_start, "2026-07-16T00:00:00.000Z");
-  assert.equal(r.counted_standing_minutes, 540); // 9h ab echter Ankunft
-  assert.equal(r.needs_review, true); // Prueffall
+  assert.equal(r.rebooking_suspected, false);
+  assert.equal(r.count_start, "2026-07-16T06:00:00.000Z");
+  assert.equal(r.counted_standing_minutes, 180); // 3h ab Fenster
+  assert.equal(r.needs_review, false);
   assert.equal(r.chargeable, true);
 });
 
-test("Umbuchung/Pause: OHNE GPS bleibt es beim Fenster (konservativ)", () => {
-  // Gleiche Zeiten, aber arrival_gps_verified nicht gesetzt -> normale Frueh-
-  // ankunft-Regel: ab Fenster 06:00 zaehlen, kein Prueffall.
+test("Fruehankunft ohne GPS: ab Fenster, kein Prueffall", () => {
   const r = computeStandgeld(
     stop({
       arrival_time: "2026-07-16T02:00:00.000Z",
@@ -285,11 +283,11 @@ test("Umbuchung/Pause: OHNE GPS bleibt es beim Fenster (konservativ)", () => {
   assert.equal(r.rebooking_suspected, false);
   assert.equal(r.count_start, "2026-07-16T06:00:00.000Z");
   assert.equal(r.counted_standing_minutes, 180); // 3h ab Fenster
+  assert.equal(r.needs_review, false);
 });
 
-test("Umbuchung/Pause: GPS-Ankunft nur knapp vor Fenster (unter Schwelle) -> Fenster", () => {
-  // GPS-Ankunft nur 1h vor Fenster (< 6h Schwelle) -> normale Fruehankunft, kein
-  // Umbuchungsfall. Ab Fenster zaehlen.
+test("Fruehankunft mit GPS knapp vor Fenster: ab Fenster", () => {
+  // Auch mit GPS bleibt Fruehankunft vor dem Fenster immer beim Fensterstart.
   const r = computeStandgeld(
     stop({
       arrival_time: "2026-07-16T05:00:00.000Z",

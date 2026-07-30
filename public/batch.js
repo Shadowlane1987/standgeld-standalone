@@ -65,6 +65,8 @@ let lateArrivalGraceEnabledState = false;
 const bookkeepingByKey = new Map();
 const BOOKKEEPING_STORAGE_KEY = `standgeld.bookkeeping.${APP_SCOPE}.v1`;
 const SIXFOLD_STORAGE_KEY = "standgeld.sixfold.credentials.v1";
+const IMPORT_BATCH_STORAGE_KEY = `standgeld.importBatch.${APP_SCOPE}.v1`;
+let currentImportBatchIds = [];
 
 const REASON_LABELS = {
   chargeable: "Abrechenbar",
@@ -208,6 +210,53 @@ function readRuleStorage() {
   } catch (_error) {
     return {};
   }
+}
+
+function readImportBatchStorage() {
+  try {
+    const raw = window.localStorage.getItem(IMPORT_BATCH_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function writeImportBatchStorage(ids) {
+  try {
+    window.localStorage.setItem(
+      IMPORT_BATCH_STORAGE_KEY,
+      JSON.stringify(Array.isArray(ids) ? ids : []),
+    );
+  } catch (_error) {
+    // ignore storage write errors
+  }
+}
+
+function setCurrentImportBatch(ids) {
+  const uniqueIds = [
+    ...new Set((ids || []).map((id) => String(id).trim())),
+  ].filter(Boolean);
+  currentImportBatchIds = uniqueIds;
+  writeImportBatchStorage(uniqueIds);
+}
+
+function activeImportIds() {
+  const current = String(
+    currentImportId || el.importSelect?.value || "",
+  ).trim();
+  if (!currentImports.length) return current ? [current] : [];
+
+  const available = new Set(
+    currentImports.map((item) => String(item.id || "").trim()),
+  );
+  const batch = (currentImportBatchIds || []).filter((id) => available.has(id));
+
+  // Batch nur dann nutzen, wenn der aktuell ausgewaehlte Import Teil davon ist.
+  if (batch.length > 1 && current && batch.includes(current)) return batch;
+  return current ? [current] : [];
 }
 
 function writeRuleStorage(value) {
@@ -1055,6 +1104,12 @@ function setImportOptions(imports, preferredId = "") {
   }
 
   currentImportId = el.importSelect.value || targetId;
+  const available = new Set(list.map((item) => String(item.id || "").trim()));
+  if (currentImportBatchIds.length) {
+    setCurrentImportBatch(
+      currentImportBatchIds.filter((id) => available.has(id)),
+    );
+  }
   loadBookkeepingForImport(currentImportId);
   setImportIdInUrl(currentImportId, true);
   syncImportWorkspace();
@@ -1153,10 +1208,8 @@ function sixfoldParams() {
 async function load(forceRecalc = false) {
   const gps = sixfoldHeaders();
   const hasGps = Boolean(gps["x-sixfold-url"]);
-  const importId = String(
-    currentImportId || el.importSelect?.value || "",
-  ).trim();
-  if (!importId) {
+  const importIds = activeImportIds();
+  if (!importIds.length) {
     setStatus(
       "Bitte zuerst einen gespeicherten Import auswählen oder hochladen.",
       "error",
@@ -1165,27 +1218,38 @@ async function load(forceRecalc = false) {
   }
   setStatus(
     hasGps
-      ? "Lade gespeicherten Import + GPS-Abgleich …"
-      : "Lade gespeicherten Import …",
+      ? importIds.length > 1
+        ? `Lade ${importIds.length} gespeicherte Importe + GPS-Abgleich …`
+        : "Lade gespeicherten Import + GPS-Abgleich …"
+      : importIds.length > 1
+        ? `Lade ${importIds.length} gespeicherte Importe …`
+        : "Lade gespeicherten Import …",
   );
   el.loadBtn.disabled = true;
 
   try {
-    const params = ruleParams();
-    params.set("importId", importId);
-    if (forceRecalc) {
-      params.set("forceRecalc", "1");
+    const results = [];
+    for (const importId of importIds) {
+      const params = ruleParams();
+      params.set("importId", importId);
+      if (forceRecalc) {
+        params.set("forceRecalc", "1");
+      }
+      const baseUrl = `/api/billing/export?${params.toString()}`;
+      const url = baseUrl + sixfoldParams();
+      const res = await fetch(url, {
+        headers: gps,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      results.push(data);
     }
-    const baseUrl = `/api/billing/export?${params.toString()}`;
-    const url = baseUrl + sixfoldParams();
-    const res = await fetch(url, {
-      headers: gps,
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-    applyResult(data);
-    setImportIdInUrl(importId, true);
+    const merged = mergeUploadResults(results);
+    if (merged) {
+      applyResult(merged);
+    }
+    setImportIdInUrl(String(currentImportId || importIds[0] || ""), true);
     syncImportWorkspace();
   } catch (error) {
     setStatus(error.message || "Fehler beim Laden", "error");
@@ -1214,6 +1278,7 @@ async function upload() {
     const headers = { "Content-Type": "application/octet-stream", ...gps };
     const results = [];
     let nextImportId = currentImportId;
+    const uploadedImportIds = [];
 
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
@@ -1237,13 +1302,18 @@ async function upload() {
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
       results.push(data);
-      nextImportId = String(data.import?.id || "").trim() || nextImportId;
+      const importedId = String(data.import?.id || "").trim();
+      if (importedId) uploadedImportIds.push(importedId);
+      nextImportId = importedId || nextImportId;
     }
 
     const merged = mergeUploadResults(results);
     if (merged) applyResult(merged);
 
     currentImportId = nextImportId;
+    if (uploadedImportIds.length) {
+      setCurrentImportBatch(uploadedImportIds);
+    }
     await refreshImports(currentImportId, true);
     setImportIdInUrl(currentImportId, true);
     syncImportWorkspace();
@@ -1515,6 +1585,9 @@ el.uploadBtn.addEventListener("click", upload);
 if (el.importSelect) {
   el.importSelect.addEventListener("change", async () => {
     currentImportId = String(el.importSelect.value || "").trim();
+    if (currentImportId) {
+      setCurrentImportBatch([currentImportId]);
+    }
     setImportIdInUrl(currentImportId, true);
     syncImportWorkspace();
     if (currentImportId) {
@@ -1607,6 +1680,7 @@ document.addEventListener("keydown", (event) => {
 
 restoreSixfoldCredentials();
 restoreRuleSettings();
+setCurrentImportBatch(readImportBatchStorage());
 
 refreshImports("", true)
   .then(async () => {
