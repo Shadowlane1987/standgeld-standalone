@@ -903,6 +903,17 @@ tbody tr {
   cursor: pointer;
 }
 
+.selected-row {
+  background: rgba(29, 78, 216, 0.12) !important;
+  box-shadow:
+    inset 4px 0 0 var(--focus),
+    inset 0 0 0 1px rgba(29, 78, 216, 0.16);
+}
+
+.selected-row td:last-child {
+  font-weight: 700;
+}
+
 .result-row:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;

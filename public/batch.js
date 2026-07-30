@@ -793,6 +793,24 @@ function closeStopDetailModal() {
   el.stopDetailModal.hidden = true;
 }
 
+function selectStop(stop) {
+  if (!stop) return;
+  activeDetailStop = stop;
+  render();
+
+  if (el.rows) {
+    const selectedKey = stopKey(stop);
+    const selectedRow = Array.from(
+      el.rows.querySelectorAll("tr[data-stop-key]"),
+    ).find((row) => row.dataset.stopKey === selectedKey);
+    if (selectedRow && typeof selectedRow.scrollIntoView === "function") {
+      selectedRow.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+
+  openStopDetailModal(stop);
+}
+
 function billedMinutes(stop) {
   if (!stop || !stop.chargeable) return 0;
   return Math.max(0, Math.round(Number(stop.minutes_over_free || 0)));
@@ -976,13 +994,20 @@ async function exportBookkeeping() {
 function render() {
   const stops = filteredStops();
   el.rows.innerHTML = "";
+  const selectedKey = activeDetailStop ? stopKey(activeDetailStop) : "";
 
   for (const stop of stops) {
     const tr = document.createElement("tr");
+    const stopKeyValue = stopKey(stop);
+    tr.dataset.stopKey = stopKeyValue;
     tr.className = "result-row";
     if (stop.needs_review) tr.classList.add("review-row");
     else if (stop.fee_eur > 0) tr.classList.add("chargeable-row");
     if (stop.unload_window_fallback_applied) tr.classList.add("fallback-row");
+    if (selectedKey && stopKeyValue === selectedKey) {
+      tr.classList.add("selected-row");
+      tr.setAttribute("aria-current", "true");
+    }
     tr.tabIndex = 0;
 
     const statusLabel = stop.needs_review
@@ -1042,11 +1067,11 @@ function render() {
       });
     }
 
-    tr.addEventListener("click", () => openStopDetailModal(stop));
+    tr.addEventListener("click", () => selectStop(stop));
     tr.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        openStopDetailModal(stop);
+        selectStop(stop);
       }
     });
     el.rows.appendChild(tr);
