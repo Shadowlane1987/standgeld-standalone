@@ -47,8 +47,17 @@ const el = {
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
   transporeonDryRun: document.getElementById("transporeonDryRun"),
+  openTransporeonBtn: document.getElementById("openTransporeonBtn"),
   applyTransporeonBtn: document.getElementById("applyTransporeonBtn"),
   rows: document.getElementById("rows"),
+  tabSettled: document.getElementById("tabSettled"),
+  tabAll: document.getElementById("tabAll"),
+  settledView: document.getElementById("settledView"),
+  allView: document.getElementById("allView"),
+  settledRows: document.getElementById("settledRows"),
+  settledCount: document.getElementById("settledCount"),
+  settledSum: document.getElementById("settledSum"),
+  settledExportBtn: document.getElementById("settledExportBtn"),
   stopDetailModal: document.getElementById("stopDetailModal"),
   stopDetailTitle: document.getElementById("stopDetailTitle"),
   stopDetailMeta: document.getElementById("stopDetailMeta"),
@@ -434,6 +443,7 @@ function loadBookkeepingForImport(importId) {
   for (const [key, value] of Object.entries(entries)) {
     bookkeepingByKey.set(key, {
       billed: Boolean(value && value.billed),
+      submitted: Boolean(value && value.submitted),
     });
   }
 }
@@ -447,6 +457,7 @@ function persistBookkeepingForCurrentImport() {
   for (const [key, entry] of bookkeepingByKey.entries()) {
     snapshot[key] = {
       billed: Boolean(entry && entry.billed),
+      submitted: Boolean(entry && entry.submitted),
     };
   }
   storage[id] = snapshot;
@@ -918,6 +929,7 @@ function getBookkeepingEntry(stop) {
   if (!bookkeepingByKey.has(key)) {
     bookkeepingByKey.set(key, {
       billed: false,
+      submitted: false,
     });
   }
   return bookkeepingByKey.get(key);
@@ -964,6 +976,40 @@ function buildTransporeonSurchargeRows() {
   return rows;
 }
 
+async function openTransporeonSession() {
+  if (el.openTransporeonBtn) el.openTransporeonBtn.disabled = true;
+  setStatus("Öffne Automations-Fenster für Transporeon …");
+  try {
+    const res = await fetch("/api/transporeon/session/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    if (data.list_ready) {
+      setStatus(
+        `Automations-Fenster bereit: ${data.row_count || 0} Transportzeilen erkannt.`,
+        "success",
+      );
+    } else {
+      setStatus(
+        "Automations-Fenster geöffnet. Bitte in DIESEM Fenster bei Transporeon einloggen und 'Zugewiesene Transporte' öffnen, dann erneut prüfen.",
+        "info",
+      );
+    }
+  } catch (error) {
+    setStatus(
+      error.message || "Automations-Fenster konnte nicht geöffnet werden.",
+      "error",
+    );
+  } finally {
+    if (el.openTransporeonBtn) el.openTransporeonBtn.disabled = false;
+  }
+}
+
 async function applyTransporeonSurcharges() {
   const rows = buildTransporeonSurchargeRows();
   if (!rows.length) {
@@ -1003,6 +1049,7 @@ async function applyTransporeonSurcharges() {
       throw new Error(data.error || `HTTP ${res.status}`);
     }
 
+    const doneTransports = [];
     if (!dryRun && Array.isArray(data.processed)) {
       const successKeys = new Set(
         data.processed
@@ -1016,6 +1063,8 @@ async function applyTransporeonSurcharges() {
           if (!successKeys.has(key)) continue;
           const entry = getBookkeepingEntry(stop);
           entry.billed = true;
+          entry.submitted = true;
+          doneTransports.push(String(stop.transport_number || "").trim());
         }
         persistBookkeepingForCurrentImport();
         render();
@@ -1024,12 +1073,20 @@ async function applyTransporeonSurcharges() {
 
     const success = Number(data.summary?.success_count || 0);
     const failure = Number(data.summary?.failure_count || 0);
-    setStatus(
-      dryRun
-        ? `Trockenlauf fertig: ${success} bereit, ${failure} nicht gefunden/fehlerhaft.`
-        : `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.`,
-      failure > 0 ? "info" : "success",
-    );
+    if (dryRun) {
+      setStatus(
+        `Trockenlauf fertig: ${success} bereit, ${failure} nicht gefunden/fehlerhaft.`,
+        failure > 0 ? "info" : "success",
+      );
+    } else {
+      const doneText = doneTransports.length
+        ? ` Abgerechnet: ${doneTransports.join(", ")}.`
+        : "";
+      setStatus(
+        `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.${doneText}`,
+        failure > 0 ? "info" : "success",
+      );
+    }
   } catch (error) {
     setStatus(
       error.message || "Zuschlagslauf konnte nicht gestartet werden.",
@@ -1120,6 +1177,10 @@ function render() {
 
     const bk = getBookkeepingEntry(stop);
     const checkedAttr = bk.billed ? "checked" : "";
+    if (bk.submitted) tr.classList.add("submitted-row");
+    const submittedCell = bk.submitted
+      ? '<span class="tp-done">✓ Abgerechnet</span>'
+      : '<span class="tp-open">—</span>';
 
     tr.innerHTML = `
       <td>${stop.transport_number || "-"}</td>
@@ -1152,6 +1213,7 @@ function render() {
       <td>${stop.billable_blocks || 0}</td>
       <td>${statusLabel}</td>
       <td><input type="checkbox" data-bk="billed" ${checkedAttr} /></td>
+      <td>${submittedCell}</td>
     `;
 
     tr.querySelectorAll("input[data-bk]").forEach((input) => {
@@ -1175,6 +1237,103 @@ function render() {
       }
     });
     el.rows.appendChild(tr);
+  }
+
+  renderSettled();
+}
+
+function buildSettledStops() {
+  const list = [];
+  for (const stop of currentStops || []) {
+    const entry = getBookkeepingEntry(stop);
+    if (entry && entry.submitted) list.push(stop);
+  }
+  return list;
+}
+
+function stationLabelForStop(stop) {
+  const type = String(stop.stop_type || "").toUpperCase();
+  if (type === "UNLOADING") return "Entladestelle";
+  if (type === "LOADING") return "Beladestelle";
+  return "-";
+}
+
+function renderSettled() {
+  if (!el.settledRows) return;
+  const stops = buildSettledStops();
+  el.settledRows.innerHTML = "";
+
+  let sum = 0;
+  for (const stop of stops) {
+    sum += Number(stop.fee_eur || 0);
+    const tr = document.createElement("tr");
+    tr.className = "result-row submitted-row";
+    tr.innerHTML = `
+      <td>${stop.transport_number || "-"}</td>
+      <td>${TYPE_LABELS[stop.stop_type] || stop.stop_type || "-"}</td>
+      <td>${stationLabelForStop(stop)}</td>
+      <td>${formatDateTimeForJustification(stop.window_local || stop.window_start)}</td>
+      <td>${minutesToHours(stop.counted_standing_minutes)}</td>
+      <td>${euro(stop.fee_eur)}</td>
+      <td><span class="tp-done">✓ Abgerechnet</span></td>
+    `;
+    tr.addEventListener("click", () => selectStop(stop));
+    el.settledRows.appendChild(tr);
+  }
+
+  if (el.settledCount) el.settledCount.textContent = String(stops.length);
+  if (el.settledSum) el.settledSum.textContent = euro(sum);
+}
+
+function switchResultTab(tab) {
+  const showSettled = tab !== "all";
+  if (el.settledView) el.settledView.hidden = !showSettled;
+  if (el.allView) el.allView.hidden = showSettled;
+  if (el.tabSettled) el.tabSettled.classList.toggle("active", showSettled);
+  if (el.tabAll) el.tabAll.classList.toggle("active", !showSettled);
+}
+
+async function exportSettled() {
+  const stops = buildSettledStops();
+  if (!stops.length) {
+    setStatus("Keine abgerechneten Touren zum Exportieren.", "error");
+    return;
+  }
+
+  const rows = stops.map((stop) => ({
+    transport_number: String(stop.transport_number || "").trim(),
+    amount_eur: Number(stop.fee_eur || 0),
+  }));
+
+  if (el.settledExportBtn) el.settledExportBtn.disabled = true;
+  setStatus("Erstelle Excel der abgerechneten Touren …");
+
+  try {
+    const res = await fetch("/api/billing/settled-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows }),
+    });
+
+    if (!res.ok) {
+      let err = `HTTP ${res.status}`;
+      try {
+        const data = await res.json();
+        err = data.error || err;
+      } catch {
+        // ignore JSON parse error
+      }
+      throw new Error(err);
+    }
+
+    const blob = await res.blob();
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `abgerechnete_touren_${stamp}.xlsx`);
+    setStatus(`${rows.length} abgerechnete Touren exportiert.`, "success");
+  } catch (error) {
+    setStatus(error.message || "Export fehlgeschlagen.", "error");
+  } finally {
+    if (el.settledExportBtn) el.settledExportBtn.disabled = false;
   }
 }
 
@@ -1925,8 +2084,20 @@ el.filterMode.addEventListener("change", render);
 if (el.bookkeepingExportBtn) {
   el.bookkeepingExportBtn.addEventListener("click", exportBookkeeping);
 }
+if (el.openTransporeonBtn) {
+  el.openTransporeonBtn.addEventListener("click", openTransporeonSession);
+}
 if (el.applyTransporeonBtn) {
   el.applyTransporeonBtn.addEventListener("click", applyTransporeonSurcharges);
+}
+if (el.tabSettled) {
+  el.tabSettled.addEventListener("click", () => switchResultTab("settled"));
+}
+if (el.tabAll) {
+  el.tabAll.addEventListener("click", () => switchResultTab("all"));
+}
+if (el.settledExportBtn) {
+  el.settledExportBtn.addEventListener("click", exportSettled);
 }
 if (el.closeStopDetailModalBtn) {
   el.closeStopDetailModalBtn.addEventListener("click", closeStopDetailModal);

@@ -23,6 +23,12 @@ const { windowStartForStop } = require("./normalize/zeitfenster");
 const { fetchLiveVisibilityEvents } = require("./services/transporeonLive");
 const {
   applyTransporeonSurcharges,
+  openTransporeonSession,
+  inspectSurchargeControls,
+  debugOpenSurchargeDialog,
+  debugDetailTabs,
+  debugPriceTabContent,
+  debugSurchargeDialogFields,
 } = require("./services/transporeonSurchargeAutomation");
 const { ImportStore, normalizeScope } = require("./storage/importStore");
 
@@ -2574,6 +2580,109 @@ app.post("/api/billing/bookkeeping-export", (req, res) => {
     res
       .status(500)
       .json({ error: error.message || "Buchungs-Export fehlgeschlagen." });
+  }
+});
+
+app.post("/api/billing/settled-export", (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!rows.length) {
+      return res.status(400).json({
+        error: "Keine abgerechneten Touren übergeben.",
+      });
+    }
+
+    const exportRows = rows.map((row) => ({
+      Colanummer: transportNumberToLadenummer(row.transport_number) || "",
+      "Preis €": Number(row.amount_eur || 0),
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws["!cols"] = [{ wch: 16 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Abgerechnet");
+
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const filename = `abgerechnete_touren_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Export fehlgeschlagen." });
+  }
+});
+
+app.post("/api/transporeon/session/open", async (req, res) => {
+  try {
+    const result = await openTransporeonSession({});
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      error:
+        error.message || "Automations-Fenster konnte nicht geöffnet werden.",
+    });
+  }
+});
+
+app.post("/api/transporeon/debug/controls", async (req, res) => {
+  try {
+    const result = await inspectSurchargeControls();
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Diagnose fehlgeschlagen.",
+    });
+  }
+});
+
+app.post("/api/transporeon/debug/dialog", async (req, res) => {
+  try {
+    const result = await debugOpenSurchargeDialog();
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Dialog-Diagnose fehlgeschlagen.",
+    });
+  }
+});
+
+app.post("/api/transporeon/debug/tabs", async (req, res) => {
+  try {
+    const tn = String(req.body?.transport_number || "").trim();
+    const result = await debugDetailTabs(tn);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Reiter-Diagnose fehlgeschlagen.",
+    });
+  }
+});
+
+app.post("/api/transporeon/debug/price", async (req, res) => {
+  try {
+    const tn = String(req.body?.transport_number || "").trim();
+    const result = await debugPriceTabContent(tn);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Preis-Reiter-Diagnose fehlgeschlagen.",
+    });
+  }
+});
+
+app.post("/api/transporeon/debug/fields", async (req, res) => {
+  try {
+    const tn = String(req.body?.transport_number || "").trim();
+    const result = await debugSurchargeDialogFields(tn);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Feld-Diagnose fehlgeschlagen.",
+    });
   }
 });
 

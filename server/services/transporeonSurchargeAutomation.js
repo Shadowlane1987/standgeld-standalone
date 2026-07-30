@@ -270,54 +270,59 @@ async function inputSearchQuery(context, query) {
   return false;
 }
 
-async function detectVisibleTransport(contexts, transportNumber) {
-  const queries = transportSearchQueries(transportNumber);
-  for (const ctx of contexts) {
-    for (const query of queries) {
+async function clearSearchField(context) {
+  const selectors = [
+    'input[placeholder*="Such" i]',
+    'input[aria-label*="Such" i]',
+    'input[id*="search" i]',
+    'input[class*="search" i]',
+  ];
+  for (const selector of selectors) {
+    const fields = context.locator(selector);
+    const count = await fields.count();
+    for (let i = 0; i < count; i += 1) {
+      const field = fields.nth(i);
       try {
-        const locator = ctx.getByText(new RegExp(escapeRegExp(query))).first();
-        if (await locator.isVisible({ timeout: 500 })) {
-          return query;
-        }
+        if (!(await field.isVisible())) continue;
+        await field.fill("");
+        await field.press("Enter").catch(() => {});
+        return true;
       } catch {
-        // continue
+        // try next
       }
     }
   }
-  return null;
+  return false;
 }
 
-async function searchTransportByNumber(contexts, transportNumber) {
+// Sucht einen Transport ueber die Suchleiste und gibt die getroffene Grid-Zeile
+// zurueck. Der Abgleich laeuft ueber den tatsaechlichen Grid-Inhalt (deterministisch),
+// nicht ueber fragile Textsuche im gesamten DOM.
+async function searchAndLocateRow(frame, page, transportNumber) {
   const queries = transportSearchQueries(transportNumber);
   if (!queries.length) {
-    return {
-      found: false,
-      query: null,
-      matched: null,
-    };
+    return { found: false, query: null, row: null };
   }
 
+  // Vielleicht ist der Transport schon sichtbar (Liste bereits gefiltert).
+  let row = resolveRowMatch(await collectTransportRows(frame), transportNumber);
+  if (row) return { found: true, query: null, row };
+
   for (const query of queries) {
-    for (const ctx of contexts) {
-      const typed = await inputSearchQuery(ctx, query);
-      if (!typed) continue;
-      await sleep(700);
-      const matched = await detectVisibleTransport(contexts, transportNumber);
-      if (matched) {
-        return {
-          found: true,
-          query,
-          matched,
-        };
-      }
+    const typed =
+      (await inputSearchQuery(frame, query)) ||
+      (await inputSearchQuery(page, query));
+    if (!typed) continue;
+
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline) {
+      await sleep(400);
+      row = resolveRowMatch(await collectTransportRows(frame), transportNumber);
+      if (row) return { found: true, query, row };
     }
   }
 
-  return {
-    found: false,
-    query: queries[0],
-    matched: null,
-  };
+  return { found: false, query: queries[0] || null, row: null };
 }
 
 async function clickFirstVisibleLocator(locators) {
@@ -337,6 +342,7 @@ async function clickFirstVisibleLocator(locators) {
 
 function contextLocators(context) {
   return [
+    context.locator('[class*="toolbarButton_add"]'),
     context.locator('[title*="hinzuf" i]'),
     context.locator('[aria-label*="hinzuf" i]'),
     context.locator('button:has-text("+")'),
@@ -359,32 +365,89 @@ async function clickTextIfVisible(contexts, matcher) {
   return false;
 }
 
-async function openSurchargeDialog(contexts) {
-  await clickTextIfVisible(contexts, /^Preis$/i).catch(() => {});
-  await clickTextIfVisible(contexts, /Zuschl[aä]ge/i).catch(() => {});
-
+async function clickPriceTab(contexts) {
+  const candidates = [];
   for (const ctx of contexts) {
-    const clicked = await clickFirstVisibleLocator(contextLocators(ctx));
-    if (clicked) break;
+    // Preis-Reiter ist ein Icon-Tab ohne Text: stabile Klasse + qtip-Tooltip.
+    candidates.push(ctx.locator("li.transportPriceItemsTab"));
+    candidates.push(ctx.locator('[class*="transportPriceItemsTab"]'));
+    candidates.push(ctx.locator('li[qtip="Preis"]'));
+    candidates.push(ctx.locator('[qtip="Preis" i]'));
+    candidates.push(ctx.locator('[title="Preis" i]'));
+    candidates.push(ctx.getByText(/^Preis$/i));
+  }
+  return clickFirstVisibleLocator(candidates);
+}
+
+async function waitForPriceTabActive(contexts, { timeoutMs = 12000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    // Reiter "Preis" aktivieren (Icon-Tab li.transportPriceItemsTab).
+    await clickPriceTab(contexts).catch(() => {});
+    for (const ctx of contexts) {
+      try {
+        const active = ctx.locator(
+          "li.transportPriceItemsTab.tabStripActive, li.transportPriceItemsTab[class*='Active']",
+        );
+        if ((await active.count()) >= 1) return true;
+      } catch {
+        // continue
+      }
+    }
+    await sleep(400);
+  }
+  return false;
+}
+
+async function openSurchargeDialog(contexts) {
+  // Detail braucht Zeit bis die Reiterleiste da ist -> aktiv auf Preis warten.
+  await waitForPriceTabActive(contexts);
+  await sleep(500);
+
+  // Aktiv auf sichtbaren '+'-Button (toolbarButton_add) warten und klicken.
+  const addDeadline = Date.now() + 9000;
+  let added = false;
+  while (Date.now() < addDeadline && !added) {
+    for (const ctx of contexts) {
+      const add = ctx.locator('[class*="toolbarButton_add"]').first();
+      try {
+        if ((await add.count()) >= 1 && (await add.isVisible())) {
+          await add.click({ timeout: 4000, force: true });
+          added = true;
+          break;
+        }
+      } catch {
+        // erneut versuchen
+      }
+    }
+    if (!added) await sleep(300);
+  }
+
+  if (!added) {
+    for (const ctx of contexts) {
+      const clicked = await clickFirstVisibleLocator(contextLocators(ctx));
+      if (clicked) break;
+    }
   }
 
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     for (const ctx of contexts) {
       try {
-        const title = ctx.getByText(/Zuschlag hinzuf[üu]gen/i).first();
-        if (await title.isVisible()) {
+        // Schnelle, gezielte Erkennung statt DOM-weiter Textsuche (getByText).
+        const typeField = ctx.locator('input[name="typeField"]').first();
+        if (await typeField.isVisible()) {
           return ctx;
         }
       } catch {
         // continue
       }
     }
-    await sleep(250);
+    await sleep(200);
   }
 
   throw new Error(
-    "Dialog 'Zuschlag hinzufügen' wurde nicht gefunden (Plus-Button/Panel prüfen).",
+    "Dialog 'Zuschlag hinzufügen' wurde nicht gefunden (Preis-Reiter/Plus-Button prüfen).",
   );
 }
 
@@ -393,29 +456,66 @@ async function fillPriceFields(context, amountEur) {
   const euros = Math.floor(cents / 100);
   const centPart = String(cents % 100).padStart(2, "0");
 
-  const inputs = context.locator("input:not([type='hidden']):not([disabled])");
-  const numericInputs = [];
+  // Preisfelder tragen die (obfuskierte) Klasse 'taHAE' und liegen im Dialog.
+  const priceInputs = [];
+  const byClass = context.locator('input[class*="taHAE"]');
+  const byClassCount = await byClass.count();
+  for (let i = 0; i < byClassCount; i += 1) {
+    const input = byClass.nth(i);
+    if (await input.isVisible().catch(() => false)) priceInputs.push(input);
+  }
 
-  const count = await inputs.count();
-  for (let i = 0; i < count; i += 1) {
-    const input = inputs.nth(i);
-    try {
-      if (!(await input.isVisible())) continue;
-      const value = String(await input.inputValue()).trim();
-      if (/^\d*$/.test(value)) numericInputs.push(input);
-    } catch {
-      // ignore read issues
+  // Fallback: reine Ziffern-Inputs, aber Listen-/Paging-Felder ausschliessen.
+  if (priceInputs.length < 1) {
+    const inputs = context.locator(
+      "input:not([type='hidden']):not([disabled])",
+    );
+    const count = await inputs.count();
+    for (let i = 0; i < count; i += 1) {
+      const input = inputs.nth(i);
+      try {
+        if (!(await input.isVisible())) continue;
+        const value = String(await input.inputValue()).trim();
+        const placeholder = String(
+          (await input.getAttribute("placeholder")) || "",
+        );
+        const cls = String((await input.getAttribute("class")) || "");
+        if (/Such/i.test(placeholder)) continue;
+        if (/paging/i.test(cls)) continue;
+        if (/Eintr/i.test(value)) continue;
+        if (/^\d+$/.test(value)) priceInputs.push(input);
+      } catch {
+        // ignore read issues
+      }
     }
   }
 
-  if (!numericInputs.length) {
+  if (!priceInputs.length) {
     throw new Error("Preisfeld wurde nicht erkannt.");
   }
 
-  await numericInputs[0].fill(String(euros));
-  if (numericInputs[1]) {
-    await numericInputs[1].fill(centPart);
+  // GXT-Zahlenfelder uebernehmen .fill() nicht -> echt tippen + committen.
+  await typeIntoField(priceInputs[0], String(euros));
+  if (priceInputs[1]) {
+    await typeIntoField(priceInputs[1], centPart);
   }
+}
+
+async function typeIntoField(input, value) {
+  await input.click({ timeout: 4000, force: true }).catch(() => {});
+  await input.press("Control+a").catch(() => {});
+  await input.press("Delete").catch(() => {});
+  await input.pressSequentially(String(value), { delay: 40 });
+  // Commit erzwingen: Enter + synthetische input/change/blur-Events (GXT-Modell).
+  await input.press("Enter").catch(() => {});
+  await input
+    .evaluate((el, v) => {
+      el.value = v;
+      for (const type of ["input", "change", "blur"]) {
+        el.dispatchEvent(new Event(type, { bubbles: true }));
+      }
+    }, String(value))
+    .catch(() => {});
 }
 
 async function fillDescription(context, text) {
@@ -440,35 +540,34 @@ async function selectStation(contexts, stationLabel) {
 
   for (const ctx of contexts) {
     try {
-      const chooser = ctx.getByText(/Bitte ausw[aä]hlen/i).first();
-      if (await chooser.isVisible()) {
-        await chooser.click({ timeout: 4000, force: true });
-      }
-      const option = ctx.getByText(new RegExp(station, "i")).first();
-      if (await option.isVisible()) {
-        await option.click({ timeout: 4000, force: true });
-        return;
-      }
-    } catch {
-      // try fallback
-    }
-  }
+      const field = ctx.locator('input[name="occuredStation"]').first();
+      if ((await field.count()) < 1) continue;
+      if (!(await field.isVisible())) continue;
 
-  for (const ctx of contexts) {
-    try {
-      const inputs = ctx.locator("input:not([type='hidden']):not([disabled])");
-      const count = await inputs.count();
-      for (let i = count - 1; i >= 0; i -= 1) {
-        const input = inputs.nth(i);
-        if (!(await input.isVisible())) continue;
-        const value = String(await input.inputValue()).trim();
-        if (/^\d*$/.test(value)) continue;
-        await input.fill(station);
-        await ctx.page().keyboard.press("Enter");
+      // Schnell per Tastatur: Feld fokussieren, Label tippen, Enter waehlt.
+      await field.click({ timeout: 4000, force: true });
+      await sleep(250);
+      await field.pressSequentially(station, { delay: 30 });
+      await sleep(250);
+      await field.press("Enter").catch(() => {});
+      await sleep(150);
+      if (String(await field.inputValue().catch(() => "")).trim()) {
         return;
       }
+
+      // Fallback: exakte Option im Dropdown anklicken (langsamere Textsuche).
+      await field.click({ timeout: 4000, force: true });
+      await sleep(300);
+      const exact = ctx
+        .getByText(new RegExp(`^${escapeRegExp(station)}$`, "i"))
+        .first();
+      if (await exact.isVisible().catch(() => false)) {
+        await exact.click({ timeout: 4000, force: true });
+        return;
+      }
+      return;
     } catch {
-      // continue
+      // naechsten Kontext versuchen
     }
   }
 
@@ -492,12 +591,13 @@ async function clickSave(context) {
   const deadline = Date.now() + 12000;
   while (Date.now() < deadline) {
     try {
-      const dialogTitle = context.getByText(/Zuschlag hinzuf[üu]gen/i).first();
-      if (!(await dialogTitle.isVisible())) return;
+      // Dialog gilt als geschlossen, sobald das typeField weg ist (schneller Selektor).
+      const typeField = context.locator('input[name="typeField"]').first();
+      if (!(await typeField.isVisible())) return;
     } catch {
       return;
     }
-    await sleep(250);
+    await sleep(200);
   }
 }
 
@@ -506,14 +606,23 @@ async function requestDecision(contexts) {
 
   for (const ctx of contexts) {
     const clicked = await clickFirstVisibleLocator([
+      ctx.locator(
+        '[class*="toolbarButton_requestDecisionIcon"]:not([class*="disabled"])',
+      ),
+      ctx.locator(
+        '[class*="toolbarButton_requestDecision"]:not([class*="disabled"])',
+      ),
       ctx.locator('[title*="Entscheidung einholen" i]'),
       ctx.locator('[aria-label*="Entscheidung" i]'),
+      ctx.locator('[class*="toolbarButton_request"]'),
+      ctx.locator('[class*="toolbarButton_decision"]'),
+      ctx.locator('[class*="toolbarButton_help"]'),
       ctx.locator("button:has-text('?')"),
     ]);
-    if (clicked) return;
+    if (clicked) return true;
   }
 
-  throw new Error("Button 'Entscheidung einholen' wurde nicht gefunden.");
+  return false;
 }
 
 function normalizeStopType(value) {
@@ -525,7 +634,7 @@ function normalizeStopType(value) {
   return "LOADING";
 }
 
-async function applySurchargeForItem(frame, page, item) {
+async function applySurchargeForItem(frame, page, item, prelocatedRow) {
   const transportNumber = String(item?.transport_number || "").trim();
   if (!transportNumber) {
     throw new Error("Transportnummer fehlt.");
@@ -540,27 +649,37 @@ async function applySurchargeForItem(frame, page, item) {
   }
 
   const contexts = [frame, page];
-  const search = await searchTransportByNumber(contexts, transportNumber);
-  if (!search.found) {
-    throw new Error("Transport konnte über Suche nicht gefunden werden.");
+  let row = prelocatedRow || null;
+  if (!row) {
+    const search = await searchAndLocateRow(frame, page, transportNumber);
+    if (!search.found) {
+      throw new Error("Transport konnte über Suche nicht gefunden werden.");
+    }
+    row = search.row;
   }
 
-  await clickTransportCell(frame, String(search.matched || search.query || ""));
-  await sleep(250);
+  const clicked = await clickTransportCell(frame, String(row?.text || ""));
+  if (!clicked) {
+    throw new Error("Transportzeile konnte nicht angeklickt werden.");
+  }
+  await sleep(400);
 
   const dialogContext = await openSurchargeDialog(contexts);
-  await fillPriceFields(dialogContext, amount);
-  await fillDescription(dialogContext, String(item?.description || ""));
+  // Station + Beschreibung zuerst, Preis ZULETZT (Station-/Beschreibungswechsel
+  // setzt das GXT-Preisfeld sonst wieder auf 0 zurueck).
   await selectStation(contexts, stationLabel);
+  await fillDescription(dialogContext, String(item?.description || ""));
+  await fillPriceFields(dialogContext, amount);
   await clickSave(dialogContext);
-  await requestDecision(contexts);
+  const decisionRequested = await requestDecision(contexts);
 
   return {
     transport_number: transportNumber,
-    matched_transport_number: String(search.matched || search.query || ""),
+    matched_transport_number: String(row?.text || ""),
     stop_type: stopType,
     station: stationLabel,
     amount_eur: amount,
+    decision_requested: decisionRequested,
     status: "applied",
   };
 }
@@ -611,11 +730,13 @@ async function applyTransporeonSurcharges(items, options = {}) {
       });
     }
 
-    found = found || (await waitForListFrame(context, {
-      timeoutMs: Number.isFinite(options.waitForListTimeoutMs)
-        ? options.waitForListTimeoutMs
-        : 90000,
-    }));
+    found =
+      found ||
+      (await waitForListFrame(context, {
+        timeoutMs: Number.isFinite(options.waitForListTimeoutMs)
+          ? options.waitForListTimeoutMs
+          : 90000,
+      }));
 
     if (!found) {
       throw new Error(
@@ -634,10 +755,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
       const station =
         stopType === "UNLOADING" ? "Entladestelle" : "Beladestelle";
 
-      const search = await searchTransportByNumber(
-        [frame, listPage],
-        transportNumber,
-      );
+      const search = await searchAndLocateRow(frame, listPage, transportNumber);
 
       if (dryRun) {
         processed.push({
@@ -649,7 +767,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
           stop_key: String(item?.stop_key || "").trim() || null,
           status: search.found ? "ready" : "missing_transport",
           matched_transport_number: search.found
-            ? String(search.matched || search.query || "")
+            ? String(search.row?.text || "")
             : null,
           message: search.found
             ? "Transport über Suche gefunden."
@@ -673,7 +791,12 @@ async function applyTransporeonSurcharges(items, options = {}) {
       }
 
       try {
-        const result = await applySurchargeForItem(frame, listPage, item);
+        const result = await applySurchargeForItem(
+          frame,
+          listPage,
+          item,
+          search.row,
+        );
         processed.push({
           ...result,
           stop_key: String(item?.stop_key || "").trim() || null,
@@ -726,6 +849,468 @@ async function applyTransporeonSurcharges(items, options = {}) {
   }
 }
 
+// Oeffnet (oder verwendet) das dauerhaft offene Automations-Fenster und navigiert
+// es zu Transporeon. Der Nutzer loggt sich EINMAL in genau diesem Fenster ein und
+// oeffnet "Zugewiesene Transporte". Danach steuert die Automatisierung dasselbe,
+// eingeloggte Fenster - deshalb sind die Touren sichtbar und die Suche findet sie.
+async function openTransporeonSession(options = {}) {
+  const context = await getOrCreateContext({
+    profileDir: options.profileDir,
+    headless: false,
+  });
+
+  const pages = context.pages();
+  const page =
+    pages.find((pageItem) => {
+      const url = String(pageItem.url() || "").trim();
+      return Boolean(url && url !== "about:blank");
+    }) ||
+    pages[0] ||
+    (await context.newPage());
+
+  const currentUrl = String(page.url() || "");
+  if (!/transporeon/i.test(currentUrl)) {
+    await page
+      .goto(options.startUrl || START_URL, { waitUntil: "domcontentloaded" })
+      .catch(() => {});
+  }
+  await page.bringToFront().catch(() => {});
+
+  const found = await waitForListFrame(context, {
+    timeoutMs: Number.isFinite(options.waitForListTimeoutMs)
+      ? options.waitForListTimeoutMs
+      : 2500,
+  });
+
+  let rowCount = 0;
+  if (found) {
+    await scrollListToLoadAllRows(found.frame).catch(() => {});
+    await sleep(300);
+    rowCount = (await collectTransportRows(found.frame)).length;
+  }
+
+  return {
+    opened: true,
+    list_ready: Boolean(found),
+    row_count: rowCount,
+    message: found
+      ? `Automations-Fenster bereit. ${rowCount} Transportzeilen erkannt.`
+      : "Automations-Fenster ge\u00f6ffnet. Bitte in DIESEM Fenster bei Transporeon einloggen und 'Zugewiesene Transporte' \u00f6ffnen.",
+  };
+}
+
+// Liest alle sichtbaren, potenziell klickbaren Toolbar-Elemente aus allen Frames
+// aus, damit der '+'-Button und die weiteren Steuer-Icons kalibriert werden koennen.
+async function inspectSurchargeControls() {
+  const context = await getOrCreateContext({ headless: false });
+  const out = [];
+
+  for (const pg of context.pages()) {
+    for (const frame of pg.frames()) {
+      let items = [];
+      try {
+        items = await frame.evaluate(() => {
+          const results = [];
+          const isVisible = (el) => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width < 3 || rect.height < 3) return false;
+            const style = window.getComputedStyle(el);
+            if (style.visibility === "hidden" || style.display === "none") {
+              return false;
+            }
+            return true;
+          };
+
+          const nodes = Array.from(
+            document.querySelectorAll(
+              "[title], [aria-label], [role='button'], button, [class*='icon'], [class*='Icon'], [class*='btn'], [class*='tool'], [class*='Tool']",
+            ),
+          );
+
+          for (const el of nodes) {
+            if (!isVisible(el)) continue;
+            const title = el.getAttribute("title") || "";
+            const aria = el.getAttribute("aria-label") || "";
+            const text = String(el.textContent || "")
+              .trim()
+              .slice(0, 40);
+            const cls = String(el.className || "").slice(0, 120);
+            const relevant =
+              /hinzu|zuschlag|add|plus|entscheid|einhol|speicher|save|toolbarButton|preis|ladeauftrag/i.test(
+                `${title} ${aria} ${text} ${cls}`,
+              ) ||
+              text === "+" ||
+              text === "?";
+            if (!relevant) continue;
+
+            results.push({
+              tag: el.tagName.toLowerCase(),
+              title: title.slice(0, 80),
+              aria: aria.slice(0, 80),
+              text,
+              cls,
+            });
+          }
+          return results.slice(0, 60);
+        });
+      } catch {
+        // ignore inaccessible frames
+      }
+
+      if (items.length) {
+        out.push({
+          frameUrl: String(frame.url() || "").slice(0, 120),
+          controls: items,
+        });
+      }
+    }
+  }
+
+  return { frames: out };
+}
+
+// Klickt das '+' (toolbarButton_add), oeffnet den Dialog 'Zuschlag hinzufuegen'
+// und liest dessen Felder (Preis-Inputs, Station-Auswahl, Beschreibung, Speichern,
+// Entscheidung) aus, damit der komplette Dialog-Ablauf kalibriert werden kann.
+async function debugOpenSurchargeDialog() {
+  const context = await getOrCreateContext({ headless: false });
+  const found = await findListFrame(context);
+  const frame = found?.frame;
+  if (!frame) {
+    return { error: "Kein Detail-Frame gefunden." };
+  }
+
+  let clicked = false;
+  try {
+    const add = frame.locator('[class*="toolbarButton_add"]').first();
+    if (await add.count()) {
+      await add.click({ timeout: 5000, force: true });
+      clicked = true;
+    }
+  } catch (error) {
+    return { error: `Klick auf '+' fehlgeschlagen: ${error.message}` };
+  }
+
+  await sleep(1500);
+
+  const dialog = await frame.evaluate(() => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return false;
+      const style = window.getComputedStyle(el);
+      return style.visibility !== "hidden" && style.display !== "none";
+    };
+
+    const inputs = Array.from(document.querySelectorAll("input"))
+      .filter(isVisible)
+      .map((el) => ({
+        type: el.getAttribute("type") || "text",
+        placeholder: el.getAttribute("placeholder") || "",
+        aria: el.getAttribute("aria-label") || "",
+        name: el.getAttribute("name") || "",
+        value: String(el.value || "").slice(0, 30),
+        cls: String(el.className || "").slice(0, 100),
+      }));
+
+    const textareas = Array.from(document.querySelectorAll("textarea"))
+      .filter(isVisible)
+      .map((el) => ({
+        placeholder: el.getAttribute("placeholder") || "",
+        aria: el.getAttribute("aria-label") || "",
+        cls: String(el.className || "").slice(0, 100),
+      }));
+
+    const buttons = Array.from(
+      document.querySelectorAll(
+        "button, [role='button'], [class*='Button'], [class*='button']",
+      ),
+    )
+      .filter(isVisible)
+      .map((el) => ({
+        tag: el.tagName.toLowerCase(),
+        text: String(el.textContent || "")
+          .trim()
+          .slice(0, 30),
+        title: el.getAttribute("title") || "",
+        cls: String(el.className || "").slice(0, 100),
+      }))
+      .filter((b) => b.text || b.title)
+      .slice(0, 40);
+
+    const stationHints = Array.from(document.querySelectorAll("*"))
+      .filter(
+        (el) =>
+          isVisible(el) &&
+          /Beladestelle|Entladestelle|Bitte ausw|Ladestelle/i.test(
+            el.textContent || "",
+          ) &&
+          (el.children.length === 0 ||
+            String(el.textContent || "").length < 40),
+      )
+      .map((el) => ({
+        tag: el.tagName.toLowerCase(),
+        text: String(el.textContent || "")
+          .trim()
+          .slice(0, 40),
+        cls: String(el.className || "").slice(0, 100),
+      }))
+      .slice(0, 15);
+
+    const hasDialog = /Zuschlag hinzuf/i.test(document.body.innerText || "");
+
+    return { hasDialog, inputs, textareas, buttons, stationHints };
+  });
+
+  return { clicked, ...dialog };
+}
+
+// Oeffnet den Transport und liest die Detail-Reiterleiste aus, damit der
+// 'Preis'-Reiter (Icon-Tab, verschleierte Klassen) exakt bestimmt werden kann.
+async function debugDetailTabs(transportNumber) {
+  const context = await getOrCreateContext({ headless: false });
+  const found = await findListFrame(context);
+  if (!found) return { error: "Kein Listen-Frame gefunden." };
+  const { page, frame } = found;
+
+  let opened = false;
+  if (transportNumber) {
+    const search = await searchAndLocateRow(frame, page, transportNumber);
+    if (search.found) {
+      opened = await clickTransportCell(frame, String(search.row?.text || ""));
+      await sleep(1800);
+    }
+  }
+
+  const tabs = await frame.evaluate(() => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return false;
+      const style = window.getComputedStyle(el);
+      return style.visibility !== "hidden" && style.display !== "none";
+    };
+
+    // Anker: das Text-Label "Ladeauftrag" oder "Preis" in der Reiterleiste.
+    const labels = Array.from(document.querySelectorAll("*")).filter(
+      (el) =>
+        isVisible(el) &&
+        el.children.length === 0 &&
+        /^(Ladeauftrag|Preis)$/i.test(String(el.textContent || "").trim()),
+    );
+
+    let strip = null;
+    for (const label of labels) {
+      let node = label;
+      for (let i = 0; i < 5 && node; i += 1) {
+        node = node.parentElement;
+        if (node && node.querySelectorAll("*").length > 6) {
+          strip = node;
+          break;
+        }
+      }
+      if (strip) break;
+    }
+
+    const describe = (el) => ({
+      tag: el.tagName.toLowerCase(),
+      title: el.getAttribute("title") || "",
+      aria: el.getAttribute("aria-label") || "",
+      text: String(el.textContent || "")
+        .trim()
+        .slice(0, 20),
+      cls: String(el.className || "").slice(0, 120),
+    });
+
+    const stripChildren = strip
+      ? Array.from(strip.querySelectorAll("*"))
+          .filter(isVisible)
+          .map(describe)
+          .filter(
+            (d) =>
+              d.title ||
+              d.aria ||
+              d.text ||
+              /tab|reiter|icon|button/i.test(d.cls),
+          )
+          .slice(0, 40)
+      : [];
+
+    return {
+      stripHtml: strip ? String(strip.outerHTML || "").slice(0, 3000) : "",
+      stripChildren,
+    };
+  });
+
+  return { opened, ...tabs };
+}
+
+// Oeffnet den Transport, klickt den Preis-Reiter und liest den Inhalt aus
+// (Zuschlaege-Bereich + alle Toolbar-/Plus-Buttons), um den '+' exakt zu finden.
+async function debugPriceTabContent(transportNumber) {
+  const context = await getOrCreateContext({ headless: false });
+  const found = await findListFrame(context);
+  if (!found) return { error: "Kein Listen-Frame gefunden." };
+  const { page, frame } = found;
+
+  let opened = false;
+  if (transportNumber) {
+    const search = await searchAndLocateRow(frame, page, transportNumber);
+    if (search.found) {
+      opened = await clickTransportCell(frame, String(search.row?.text || ""));
+      await sleep(1500);
+    }
+  }
+
+  const tabClicked = await clickPriceTab([frame, page]).catch(() => false);
+  await sleep(1200);
+
+  const content = await frame.evaluate(() => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return false;
+      const style = window.getComputedStyle(el);
+      return style.visibility !== "hidden" && style.display !== "none";
+    };
+    const describe = (el) => ({
+      tag: el.tagName.toLowerCase(),
+      title: el.getAttribute("title") || "",
+      qtip: el.getAttribute("qtip") || "",
+      aria: el.getAttribute("aria-label") || "",
+      text: String(el.textContent || "")
+        .trim()
+        .slice(0, 30),
+      cls: String(el.className || "").slice(0, 120),
+    });
+
+    // Alle Toolbar-artigen Buttons.
+    const toolbarButtons = Array.from(
+      document.querySelectorAll(
+        "[class*='toolbarButton'], [class*='Button'], [class*='button'], [role='button']",
+      ),
+    )
+      .filter(isVisible)
+      .map(describe)
+      .slice(0, 60);
+
+    // Kandidaten fuer '+' / hinzufuegen / Zuschlag.
+    const addCandidates = Array.from(document.querySelectorAll("*"))
+      .filter(
+        (el) =>
+          isVisible(el) &&
+          (el.children.length === 0 ||
+            String(el.textContent || "").length < 40) &&
+          (/hinzuf|zuschlag/i.test(
+            (el.getAttribute("title") || "") +
+              (el.getAttribute("qtip") || "") +
+              (el.getAttribute("aria-label") || ""),
+          ) ||
+            String(el.textContent || "").trim() === "+"),
+      )
+      .map(describe)
+      .slice(0, 30);
+
+    const priceTabActive = !!document.querySelector(
+      "li.transportPriceItemsTab.tabStripActive, li.transportPriceItemsTab[class*='Active']",
+    );
+
+    const bodyText = String(document.body.innerText || "");
+    const hasZuschlaege = /Zuschl[aä]ge/i.test(bodyText);
+
+    return { priceTabActive, hasZuschlaege, toolbarButtons, addCandidates };
+  });
+
+  return { opened, tabClicked, ...content };
+}
+
+// Oeffnet den kompletten Zuschlag-Dialog und listet ALLE sichtbaren Eingabefelder
+// mit Position/Label/Wert auf, um das Preisfeld exakt zu bestimmen.
+async function debugSurchargeDialogFields(transportNumber) {
+  const context = await getOrCreateContext({ headless: false });
+  const found = await findListFrame(context);
+  if (!found) return { error: "Kein Listen-Frame gefunden." };
+  const { page, frame } = found;
+
+  let opened = false;
+  if (transportNumber) {
+    const search = await searchAndLocateRow(frame, page, transportNumber);
+    if (search.found) {
+      opened = await clickTransportCell(frame, String(search.row?.text || ""));
+      await sleep(1200);
+    }
+  }
+
+  let dialogOpened = false;
+  try {
+    await openSurchargeDialog([frame, page]);
+    dialogOpened = true;
+  } catch (error) {
+    return { opened, dialogOpened, error: error.message };
+  }
+
+  await sleep(600);
+
+  const fields = await frame.evaluate(() => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return false;
+      const style = window.getComputedStyle(el);
+      return style.visibility !== "hidden" && style.display !== "none";
+    };
+
+    // Nur Felder im obersten Dialog-Layer (hoechster z-index / modal).
+    const labelFor = (el) => {
+      // naechstgelegenes Label-artiges Geschwister/Vorfahr-Text.
+      let node = el;
+      for (let i = 0; i < 4 && node; i += 1) {
+        node = node.parentElement;
+        if (!node) break;
+        const txt = String(node.textContent || "").trim();
+        if (txt && txt.length < 60) return txt.slice(0, 50);
+      }
+      return "";
+    };
+
+    const inputs = Array.from(document.querySelectorAll("input"))
+      .filter(isVisible)
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          x: Math.round(r.x),
+          y: Math.round(r.y),
+          w: Math.round(r.width),
+          type: el.getAttribute("type") || "text",
+          name: el.getAttribute("name") || "",
+          placeholder: el.getAttribute("placeholder") || "",
+          value: String(el.value || "").slice(0, 30),
+          cls: String(el.className || "").slice(0, 90),
+          label: labelFor(el),
+        };
+      });
+
+    const textareas = Array.from(document.querySelectorAll("textarea"))
+      .filter(isVisible)
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          x: Math.round(r.x),
+          y: Math.round(r.y),
+          value: String(el.value || "").slice(0, 40),
+          cls: String(el.className || "").slice(0, 90),
+          label: labelFor(el),
+        };
+      });
+
+    return { inputs, textareas };
+  });
+
+  return { opened, dialogOpened, ...fields };
+}
+
 module.exports = {
   applyTransporeonSurcharges,
+  openTransporeonSession,
+  inspectSurchargeControls,
+  debugOpenSurchargeDialog,
+  debugDetailTabs,
+  debugPriceTabContent,
+  debugSurchargeDialogFields,
 };

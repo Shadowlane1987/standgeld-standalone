@@ -192,57 +192,107 @@
           <div><strong>Gesamtbetrag:</strong> <span id="totalFee">-</span></div>
         </div>
 
-        <div class="result-toolbar bookkeeping-toolbar">
-          <label>
-            Filter
-            <select id="filterMode">
-              <option value="all">Alle anzeigen</option>
-              <option value="chargeable">Nur abrechenbar</option>
-              <option value="review">Nur Prüffälle</option>
-              <option value="gpsMissing">Nur ohne GPS</option>
-              <option value="unloadFallback">
-                Excel-Entladefenster genutzt
-              </option>
-            </select>
-          </label>
-          <label class="checkbox-label">
-            <input id="bookkeepingOnlyMarked" type="checkbox" />
-            Nur als „abgerechnet“ markierte exportieren
-          </label>
-          <button id="bookkeepingExportBtn" type="button">
-            Buchungs-Excel exportieren
+        <div class="tab-nav">
+          <button id="tabSettled" type="button" class="tab-btn active">
+            Abgerechnete Touren
           </button>
-          <label class="checkbox-label">
-            <input id="transporeonDryRun" type="checkbox" checked />
-            Trockenlauf (nur prüfen)
-          </label>
-          <button id="applyTransporeonBtn" type="button" class="btn-secondary">
-            Zuschläge in Transporeon beantragen
+          <button id="tabAll" type="button" class="tab-btn">
+            Alle Positionen
           </button>
         </div>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Transport</th>
-                <th>KFZ</th>
-                <th>Typ</th>
-                <th>Quelle</th>
-                <th>Ankunft</th>
-                <th>Abfahrt</th>
-                <th>Zählbeginn</th>
-                <th>Zeitfenster</th>
-                <th>Standzeit</th>
-                <th>Über Frei</th>
-                <th>Betrag</th>
-                <th>Takte</th>
-                <th>Status</th>
-                <th>Abgerechnet</th>
-              </tr>
-            </thead>
-            <tbody id="rows"></tbody>
-          </table>
+        <div id="settledView">
+          <div class="result-toolbar">
+            <span class="settled-count">
+              Abgerechnet in Transporeon:
+              <strong id="settledCount">0</strong>
+            </span>
+            <span class="settled-sum">
+              Summe: <strong id="settledSum">-</strong>
+            </span>
+            <button id="settledExportBtn" type="button">
+              Abgerechnete als Excel exportieren
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Transport</th>
+                  <th>Typ</th>
+                  <th>Station</th>
+                  <th>Zeitfenster</th>
+                  <th>Standzeit</th>
+                  <th>Betrag</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="settledRows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="allView" hidden>
+          <div class="result-toolbar bookkeeping-toolbar">
+            <label>
+              Filter
+              <select id="filterMode">
+                <option value="all">Alle anzeigen</option>
+                <option value="chargeable">Nur abrechenbar</option>
+                <option value="review">Nur Prüffälle</option>
+                <option value="gpsMissing">Nur ohne GPS</option>
+                <option value="unloadFallback">
+                  Excel-Entladefenster genutzt
+                </option>
+              </select>
+            </label>
+            <label class="checkbox-label">
+              <input id="bookkeepingOnlyMarked" type="checkbox" />
+              Nur als „abgerechnet“ markierte exportieren
+            </label>
+            <button id="bookkeepingExportBtn" type="button">
+              Buchungs-Excel exportieren
+            </button>
+            <button id="openTransporeonBtn" type="button" class="btn-secondary">
+              Transporeon-Fenster öffnen / einloggen
+            </button>
+            <label class="checkbox-label">
+              <input id="transporeonDryRun" type="checkbox" checked />
+              Trockenlauf (nur prüfen)
+            </label>
+            <button
+              id="applyTransporeonBtn"
+              type="button"
+              class="btn-secondary"
+            >
+              Zuschläge in Transporeon beantragen
+            </button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Transport</th>
+                  <th>KFZ</th>
+                  <th>Typ</th>
+                  <th>Quelle</th>
+                  <th>Ankunft</th>
+                  <th>Abfahrt</th>
+                  <th>Zählbeginn</th>
+                  <th>Zeitfenster</th>
+                  <th>Standzeit</th>
+                  <th>Über Frei</th>
+                  <th>Betrag</th>
+                  <th>Takte</th>
+                  <th>Status</th>
+                  <th>Abrechnen?</th>
+                  <th>Transporeon</th>
+                </tr>
+              </thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
