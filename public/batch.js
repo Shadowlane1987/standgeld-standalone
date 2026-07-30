@@ -428,18 +428,17 @@ function formatDateTimeForJustification(value) {
     const local = direct.toLocaleString("de-DE", {
       day: "2-digit",
       month: "2-digit",
-      year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     });
-    return local.replace(", ", " / ");
+    return local.replace(/\.\s*,\s*/, " / ");
   }
 
   const withYear = text.match(/^(\d{2}\.\d{2}\.\d{4}),\s*(\d{2}:\d{2})$/);
-  if (withYear) return `${withYear[1]} / ${withYear[2]}`;
+  if (withYear) return `${withYear[1].slice(0, 5)} / ${withYear[2]}`;
 
   const shortDate = text.match(/^(\d{2}\.\d{2})\.?[,]?\s*(\d{2}:\d{2})$/);
-  if (shortDate) return `${shortDate[1]}. / ${shortDate[2]}`;
+  if (shortDate) return `${shortDate[1]} / ${shortDate[2]}`;
 
   return text;
 }
@@ -655,13 +654,17 @@ function openStopDetailModal(stop) {
   const countedStanding = minutesToHours(stop.counted_standing_minutes);
   const overFreeStanding = minutesToHours(stop.minutes_over_free);
   const freeWindow = minutesToHours(stop.free_minutes || 120);
-  const windowLocal = stop.window_local || "-";
+  const windowLocal = formatDateTimeForJustification(
+    stop.window_local || stop.window_start,
+  );
   const rebookingNote = stop.rebooking_suspected
     ? " · ⚠ Umbuchung/Pause erkannt: gezählt ab GPS-Ankunft (Prüffall)"
     : "";
   const totalAmount = euro(stop.fee_eur);
-  const arrivalUsed = isoToLocal(stop.arrival_time_used);
-  const departureUsed = isoToLocal(stop.departure_time_used);
+  const arrivalUsed = formatDateTimeForJustification(stop.arrival_time_used);
+  const departureUsed = formatDateTimeForJustification(
+    stop.departure_time_used,
+  );
   const arrivalSrc = stop.arrival_source || "XP";
   const departureSrc = stop.departure_source || "XP";
   const summaryLine =
@@ -673,10 +676,10 @@ function openStopDetailModal(stop) {
     el.stopDetailMeta.hidden = true;
   }
 
-  const xpArrival = isoToLocal(stop.xp_arrival_time);
-  const xpDeparture = isoToLocal(stop.xp_departure_time);
-  const gpsArrival = isoToLocal(stop.gps_arrival_time);
-  const gpsDeparture = isoToLocal(stop.gps_departure_time);
+  const xpArrival = formatDateTimeForJustification(stop.xp_arrival_time);
+  const xpDeparture = formatDateTimeForJustification(stop.xp_departure_time);
+  const gpsArrival = formatDateTimeForJustification(stop.gps_arrival_time);
+  const gpsDeparture = formatDateTimeForJustification(stop.gps_departure_time);
   const usedArrival = arrivalUsed;
   const usedDeparture = departureUsed;
   const usedArrivalWithSource = `${usedArrival}${usedArrival !== "-" ? ` ${arrivalSrc}` : ""}`;
@@ -752,7 +755,7 @@ function buildJustificationText(stop) {
 }
 
 function usedBoundaryLabel(iso, source) {
-  const local = isoToLocal(iso);
+  const local = formatDateTimeForJustification(iso);
   if (local === "-") return "-";
   return `${local} ${source || "XP"}`;
 }
@@ -931,12 +934,20 @@ function render() {
       <td><span class="${srcClass}">${src}</span></td>
       <td>${timeCellHtml(usedBoundaryLabel(stop.arrival_time_used, stop.arrival_source), sourceTone(stop.arrival_source), stop.arrival_source || "XP")}</td>
       <td>${timeCellHtml(usedBoundaryLabel(stop.departure_time_used, stop.departure_source), sourceTone(stop.departure_source), stop.departure_source || "XP")}</td>
-      <td>${timeCellHtml(isoToLocal(stop.count_start), context.startClass, context.startHint)}</td>
+      <td>${timeCellHtml(formatDateTimeForJustification(stop.count_start), context.startClass, context.startHint)}</td>
       <td>${
         stop.unload_window_fallback_applied
-          ? timeCellHtml(stop.window_local || "-", "time-chip-excel", "Excel")
+          ? timeCellHtml(
+              formatDateTimeForJustification(
+                stop.window_local || stop.window_start,
+              ),
+              "time-chip-excel",
+              "Excel",
+            )
           : timeCellHtml(
-              stop.window_local || "-",
+              formatDateTimeForJustification(
+                stop.window_local || stop.window_start,
+              ),
               context.windowClass,
               context.windowHint,
             )
