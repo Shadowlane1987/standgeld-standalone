@@ -2255,6 +2255,7 @@ app.post(
     try {
       const scope = scopeFromReq(req);
       const buffer = req.body;
+      const cacheKey = billingCacheKey(req);
       if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
         return res
           .status(400)
@@ -2369,6 +2370,7 @@ app.post(
     try {
       const scope = scopeFromReq(req);
       const buffer = req.body;
+      const cacheKey = billingCacheKey(req);
       if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
         return res
           .status(400)
