@@ -2124,9 +2124,10 @@ app.get("/api/billing/export", async (req, res) => {
       sixfoldDateFrom,
       sixfoldDateTo,
     );
+    const unloadWindowIndex = loadPersistedUnloadWindowIndex(scope);
     const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
       filteredTransports,
-      loadPersistedUnloadWindowIndex(scope),
+      unloadWindowIndex,
     );
     const filterMeta = buildUnloadDateFilterMeta(
       transports,
@@ -2171,6 +2172,7 @@ app.get("/api/billing/export", async (req, res) => {
           transports: filteredTransports,
           sixfoldStops,
           config,
+          unloadWindowIndex,
         })
       : gatedResult;
     if (importId) {

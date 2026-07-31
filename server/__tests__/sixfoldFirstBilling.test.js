@@ -4,6 +4,8 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const { appendSixfoldOnlyStops } = require("../normalize/sixfoldFirstBilling");
+const { buildWindowIndex } = require("../normalize/zeitfenster");
+const { transportNumberToLadenummer } = require("../normalize/ladenummer");
 
 // Basis-Excel-Ergebnis (wie billFromExport es liefert), stark vereinfacht.
 function excelResult(stops = []) {
@@ -100,6 +102,35 @@ test("Mehrfachbesuch: früheste Ankunft + späteste Abfahrt gewinnen", () => {
   const s = result.stops[0];
   assert.equal(s.gps_arrival_time, "2026-07-23T05:00:00.000Z");
   assert.equal(s.gps_departure_time, "2026-07-23T12:00:00.000Z");
+});
+
+test("Zeitfenster-Excel wird auf Sixfold-Entladestopp angewendet (Fenster ueberschreibt Sixfold-Slot)", () => {
+  const tn = "B2_20260723_0006654477";
+  const ladenummer = transportNumberToLadenummer(tn); // "6654477"
+  const unloadWindowIndex = buildWindowIndex([
+    { ladenummer, entladezeit_start: "16:30" },
+  ]);
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [
+      sixfoldStop({
+        transport_number: tn,
+        type: "UNLOADING",
+        // Ankunft VOR Fenster -> Zaehlbeginn ab Fenster (16:30), nicht ab Sixfold-Slot (06:00).
+        arrival_time: "2026-07-23T15:00:00.000Z",
+        departure_time: "2026-07-23T19:30:00.000Z",
+        timeslot_begin: "2026-07-23T06:00:00.000Z",
+      }),
+    ],
+    unloadWindowIndex,
+  });
+  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
+  const s = result.stops[0];
+  assert.equal(s.unload_window_fallback_applied, true);
+  assert.equal(s.window_local, "2026-07-23 16:30");
+  // 16:30 -> 19:30 = 180 min, 120 frei, 60 ueber -> 2 Bloecke -> 60 EUR.
+  // (Mit dem Sixfold-Slot 06:00 waeren es 150 EUR gewesen.)
+  assert.equal(s.fee_eur, 60);
 });
 
 test("bestehende Excel-Stops bleiben erhalten und Summe stimmt", () => {

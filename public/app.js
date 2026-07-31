@@ -23,6 +23,9 @@ const el = {
   positions: document.getElementById("positions"),
   units: document.getElementById("units"),
   dateSort: document.getElementById("dateSort"),
+  dateFrom: document.getElementById("dateFrom"),
+  dateTo: document.getElementById("dateTo"),
+  dateClearBtn: document.getElementById("dateClearBtn"),
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
   transporeonDryRun: document.getElementById("transporeonDryRun"),
@@ -49,6 +52,7 @@ const el = {
 
 let importedTimeWindows = [];
 let latestStops = [];
+let activeStop = null;
 let lateArrivalGraceEnabledState = false;
 const bookkeepingByKey = new Map();
 const URL_STORAGE_KEY = "standgeld.sixfoldUrl";
@@ -414,15 +418,64 @@ function sortStopsByDate(stops, sortMode) {
   return items;
 }
 
+// Datumsfilter (von/bis) fuer die Ergebnisliste; leere Felder = kein Filter.
+function stopDateForFilter(stop) {
+  const raw = String(
+    stop?.arrival_time ||
+      stop?.rule_start_display ||
+      stop?.departure_time ||
+      stop?.arrival_display ||
+      stop?.departure_display ||
+      "",
+  ).trim();
+  const iso = raw.match(/(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  const de = raw.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  return de ? `${de[3]}-${de[2]}-${de[1]}` : "";
+}
+
+function dateInRange(stop) {
+  const from = el.dateFrom && el.dateFrom.value ? el.dateFrom.value : "";
+  const to = el.dateTo && el.dateTo.value ? el.dateTo.value : "";
+  if (!from && !to) return true;
+  const d = stopDateForFilter(stop);
+  if (!d) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
+// Gleiche Transportnummern immer zusammen halten; die Gruppen-Reihenfolge
+// folgt dem ersten Vorkommen der jeweiligen Nummer nach der Datumssortierung.
+function groupByTransportNumber(stops) {
+  const groups = new Map();
+  for (const stop of stops) {
+    const key = String(stop.transport_number || stop.tour_id || "").trim();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(stop);
+  }
+  return Array.from(groups.values()).flat();
+}
+
 function renderStops(stops) {
-  const sortedStops = sortStopsByDate(stops, el.dateSort.value);
+  const inRange = (Array.isArray(stops) ? stops : []).filter(dateInRange);
+  const sortedStops = groupByTransportNumber(
+    sortStopsByDate(inRange, el.dateSort.value),
+  );
   el.rows.innerHTML = "";
+  const selectedKey = activeStop ? stopKey(activeStop) : "";
 
   for (const stop of sortedStops) {
     const tr = document.createElement("tr");
+    const stopKeyValue = stopKey(stop);
+    tr.dataset.stopKey = stopKeyValue;
     tr.className = "result-row";
     if (Number(stop.amount_eur || 0) > 0) tr.classList.add("chargeable-row");
     if (stop.needs_review) tr.classList.add("review-row");
+    if (selectedKey && stopKeyValue === selectedKey) {
+      tr.classList.add("selected-row");
+      tr.setAttribute("aria-current", "true");
+    }
     tr.tabIndex = 0;
     const arrival = compactDateTimeDisplay(stop.arrival_display);
     const departure = compactDateTimeDisplay(stop.departure_display);
@@ -463,16 +516,35 @@ function renderStops(stops) {
         renderSettled();
       });
     }
-    tr.addEventListener("click", () => openSurchargeModal(stop));
+    tr.addEventListener("click", () => selectStop(stop));
     tr.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        openSurchargeModal(stop);
+        selectStop(stop);
       }
     });
     el.rows.appendChild(tr);
   }
   renderSettled();
+}
+
+// Merkt sich die zuletzt angeklickte Tour und hebt ihre Zeile hervor.
+function selectStop(stop) {
+  activeStop = stop;
+  highlightSelectedRow();
+  openSurchargeModal(stop);
+}
+
+function highlightSelectedRow() {
+  if (!el.rows) return;
+  const selectedKey = activeStop ? stopKey(activeStop) : "";
+  el.rows.querySelectorAll("tr[data-stop-key]").forEach((row) => {
+    const isSelected =
+      Boolean(selectedKey) && row.dataset.stopKey === selectedKey;
+    row.classList.toggle("selected-row", isSelected);
+    if (isSelected) row.setAttribute("aria-current", "true");
+    else row.removeAttribute("aria-current");
+  });
 }
 
 function buildSettledStops() {
@@ -1158,6 +1230,39 @@ function detailRowHtml(field, xp, gps, used) {
   `;
 }
 
+// Zeitfenster als eigene Leiste (eine Zeile mit Status-Badge), wie im Batch-Popup.
+function buildWindowStatus(stop) {
+  const hasWindow = resolveWindowDisplay(stop) !== "-";
+  if (!hasWindow) {
+    return { className: "detail-window-missing", text: "Kein Zeitfenster" };
+  }
+  if (stop?.within_window === true) {
+    return { className: "detail-window-hit", text: "Zeitfenster getroffen" };
+  }
+  const lateMinutes = Number(stop?.minutes_after_window_end || 0);
+  if (stop?.arrived_late || lateMinutes > 0) {
+    return {
+      className: "detail-window-late",
+      text:
+        lateMinutes > 0
+          ? `Verspätet (+${formatMinutesAsHours(lateMinutes)})`
+          : "Verspätet",
+    };
+  }
+  return { className: "detail-window-neutral", text: "Zeitfenster prüfen" };
+}
+
+function detailWindowRowHtml(windowValue, status) {
+  return `
+    <tr>
+      <td>Zeitfenster</td>
+      <td>${detailCell(windowValue)}</td>
+      <td>-</td>
+      <td class="detail-used"><span class="detail-window-badge ${status.className}">${status.text}</span></td>
+    </tr>
+  `;
+}
+
 function excelSingleWindowValue(stop) {
   const raw = String(stop?.excel_window_display || "").trim();
   if (!raw) return "-";
@@ -1311,6 +1416,7 @@ function openSurchargeModal(stop) {
   }
   if (el.surchargeDetailRows) {
     el.surchargeDetailRows.innerHTML =
+      detailWindowRowHtml(windowText, buildWindowStatus(stop)) +
       detailRowHtml("Ankunft", arrival, "-", arrival) +
       detailRowHtml("Abfahrt", departure, "-", departure) +
       detailRowHtml("Standzeit (Ist)", effective, "-", effective) +
@@ -1398,6 +1504,20 @@ el.clearTimeWindowBtn.addEventListener("click", () => {
 el.dateSort.addEventListener("change", () => {
   renderStops(latestStops);
 });
+
+if (el.dateFrom) {
+  el.dateFrom.addEventListener("change", () => renderStops(latestStops));
+}
+if (el.dateTo) {
+  el.dateTo.addEventListener("change", () => renderStops(latestStops));
+}
+if (el.dateClearBtn) {
+  el.dateClearBtn.addEventListener("click", () => {
+    if (el.dateFrom) el.dateFrom.value = "";
+    if (el.dateTo) el.dateTo.value = "";
+    renderStops(latestStops);
+  });
+}
 
 el.copySurchargeBtn.addEventListener("click", async () => {
   try {

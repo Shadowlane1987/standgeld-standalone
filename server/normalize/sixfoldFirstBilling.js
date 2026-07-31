@@ -19,6 +19,8 @@
 
 const { computeStandgeld } = require("./standgeld");
 const { normalizeTransportNumber } = require("./exportBilling");
+const { transportNumberToLadenummer } = require("./ladenummer");
+const { windowStartForStop } = require("./zeitfenster");
 
 const DEFAULT_TZ = "Europe/Berlin";
 
@@ -26,6 +28,24 @@ function parseMs(iso) {
   if (!iso) return null;
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? null : ms;
+}
+
+// Setzt die Uhrzeit (HH:MM) aus dem Zeitfenster-Excel auf das Datum + die
+// Zeitzone eines vorhandenen Sixfold-ISO-Zeitstempels. So bleibt der Tag der
+// Tour erhalten und die Zeitzone stimmt (wichtig auf UTC-Servern wie Render).
+function applyTimeToIsoDate(refIso, hhmm) {
+  const ref = String(refIso || "").match(
+    /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?/,
+  );
+  const hm = String(hhmm || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!ref || !hm) return null;
+  const date = ref[1];
+  const offset = ref[2] || "Z";
+  const hh = String(hm[1]).padStart(2, "0");
+  return {
+    iso: `${date}T${hh}:${hm[2]}:00${offset}`,
+    local: `${date} ${hh}:${hm[2]}`,
+  };
 }
 
 function earliest(a, b) {
@@ -88,6 +108,13 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     : [];
   const config = options.config || {};
   const timezone = options.timezone || DEFAULT_TZ;
+  // Zeitfenster-Excel-Index (per Ladenummer) fuer Entlade-Fenster.
+  const unloadWindowIndex =
+    options.unloadWindowIndex &&
+    typeof options.unloadWindowIndex.get === "function"
+      ? options.unloadWindowIndex
+      : null;
+  let unloadWindowFromExcel = 0;
 
   // Bereits über Excel abgedeckte Transportnummern (normalisiert).
   const excelTns = new Set();
@@ -134,11 +161,32 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     // Ohne verifizierte GPS-Zeit gibt es keinen Beleg -> nicht abrechnen.
     if (!g.arrival_iso && !g.departure_iso) continue;
 
+    // Entlade-Fenster aus der Zeitfenster-Excel (per Ladenummer) hat Vorrang
+    // vor dem Sixfold-Buchungsfenster. Datum/Zeitzone vom Sixfold-Zeitstempel.
+    let windowIso = g.window_iso;
+    let windowLocal = null;
+    let windowFromExcel = false;
+    if (unloadWindowIndex && g.stop_type === "UNLOADING") {
+      const ladenummer = transportNumberToLadenummer(g.transport_number);
+      const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
+      const unloadStart = windowStartForStop(windowRow, "UNLOADING");
+      const refIso = g.arrival_iso || g.window_iso || g.departure_iso;
+      const built = unloadStart
+        ? applyTimeToIsoDate(refIso, unloadStart)
+        : null;
+      if (built) {
+        windowIso = built.iso;
+        windowLocal = built.local;
+        windowFromExcel = true;
+        unloadWindowFromExcel += 1;
+      }
+    }
+
     const fee = computeStandgeld(
       {
         arrival_time: g.arrival_iso,
         departure_time: g.departure_iso,
-        window_start: g.window_iso,
+        window_start: windowIso,
         transport_number: g.transport_number,
         stop_type: g.stop_type,
         arrival_gps_verified: Boolean(g.arrival_iso),
@@ -149,7 +197,8 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     addedStops.push(
       Object.freeze({
         ...fee,
-        window_local: null,
+        window_local: windowLocal,
+        unload_window_fallback_applied: windowFromExcel,
         booking_location: g.booking_location || null,
         arrival_local: null,
         departure_local: null,
@@ -181,14 +230,36 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     0,
   );
 
+  // Zaehler muessen die ergaenzten Sixfold-Touren mitzaehlen, sonst zeigt die
+  // reine Sixfold-Abrechnung faelschlich "0 Transporte" / "0 mit GPS".
+  const addedTransportCount = new Set(
+    addedStops
+      .map((s) => String(s.transport_number || "").trim())
+      .filter(Boolean),
+  ).size;
+  const gpsUsed = stops.filter(
+    (s) => s.arrival_source === "GPS" || s.departure_source === "GPS",
+  );
+  const gpsUsedTransportCount = new Set(
+    gpsUsed.map((s) => String(s.transport_number || "").trim()).filter(Boolean),
+  ).size;
+  const gpsMissing = stops.filter((s) => s.gps_missing);
+
   return {
     stops,
     summary: {
       ...baseSummary,
+      transport_count:
+        (Number(baseSummary.transport_count) || 0) + addedTransportCount,
       stop_count: stops.length,
       chargeable_count: chargeable.length,
       review_count: review.length,
+      gps_checked: baseSummary.gps_checked || addedStops.length > 0,
+      gps_used_count: gpsUsed.length,
+      gps_used_transport_count: gpsUsedTransportCount,
+      gps_missing_count: gpsMissing.length,
       sixfold_only_count: addedStops.length,
+      sixfold_unload_window_from_excel: unloadWindowFromExcel,
       total_fee_eur: totalFee,
     },
   };
