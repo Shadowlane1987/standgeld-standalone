@@ -2023,9 +2023,26 @@ app.get("/api/billing/export", async (req, res) => {
   try {
     const scope = scopeFromReq(req);
     const filePath = resolveExportFilePath(req, EXPORT_XLSX_PATH);
-    if (!fs.existsSync(filePath)) {
+    const hasExcel = fs.existsSync(filePath);
+
+    const sixfoldDateFrom = req.query.sixfoldDateFrom
+      ? String(req.query.sixfoldDateFrom).trim()
+      : null;
+    const sixfoldDateTo = req.query.sixfoldDateTo
+      ? String(req.query.sixfoldDateTo).trim()
+      : null;
+    const hasSixfold = Boolean(
+      String(req.get("x-sixfold-url") || "").trim() &&
+      (String(req.get("x-sixfold-token") || "").trim() ||
+        String(req.get("x-sixfold-cookie") || "").trim()),
+    );
+
+    // Ohne Excel ist nur die reine Sixfold-Abrechnung moeglich: Link + Token +
+    // Zeitraum. Basis sind dann ALLE Sixfold-Touren im Zeitraum.
+    const sixfoldOnly = !hasExcel;
+    if (sixfoldOnly && !(hasSixfold && (sixfoldDateFrom || sixfoldDateTo))) {
       return res.status(404).json({
-        error: `Export-Datei nicht gefunden: ${filePath}`,
+        error: `Export-Datei nicht gefunden: ${filePath}. Fuer die reine Sixfold-Abrechnung bitte Sixfold-Link, Token und einen Zeitraum (von/bis) angeben.`,
       });
     }
 
@@ -2044,16 +2061,10 @@ app.get("/api/billing/export", async (req, res) => {
       }
     }
 
-    const transports = loadTransporeonExport(filePath);
+    const transports = hasExcel ? loadTransporeonExport(filePath) : [];
 
     // Nutze Datums-Filter, falls gesetzt
-    let window = computeTransportsWindow(transports);
-    const sixfoldDateFrom = req.query.sixfoldDateFrom
-      ? String(req.query.sixfoldDateFrom).trim()
-      : null;
-    const sixfoldDateTo = req.query.sixfoldDateTo
-      ? String(req.query.sixfoldDateTo).trim()
-      : null;
+    let window = hasExcel ? computeTransportsWindow(transports) : {};
     if (sixfoldDateFrom || sixfoldDateTo) {
       window = {
         fromTime: sixfoldDateFrom
@@ -2078,7 +2089,9 @@ app.get("/api/billing/export", async (req, res) => {
       sixfoldDateTo,
     );
 
-    if (filteredTransports.length === 0) {
+    // Nur mit Excel ist "keine Transporte im Zeitraum" ein Fehler. Bei reiner
+    // Sixfold-Abrechnung ist eine leere Excel-Liste erwuenscht.
+    if (filteredTransports.length === 0 && !sixfoldOnly) {
       return res.status(400).json({
         error:
           "Keine Transporte im vorgegebenen Entlade-Datumsbereich gefunden. Bitte Bereich oder Export pruefen.",
@@ -2097,28 +2110,31 @@ app.get("/api/billing/export", async (req, res) => {
     const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
     const gatedResult = enforceUnloadingGpsGate(rawResult);
     // Excel + Zeitfenster laufen nur als Overlay; Basis sind ALLE Touren.
-    // Touren, die es NUR in Sixfold gibt, werden hier ergaenzt, damit keine
-    // GPS-belegte Tour verloren geht.
+    // Touren, die es NUR in Sixfold gibt (bei reiner Sixfold-Abrechnung: alle),
+    // werden hier ergaenzt, damit keine GPS-belegte Tour verloren geht.
     const result = appendSixfoldOnlyStops(gatedResult, {
       transports: filteredTransports,
       sixfoldStops,
       config,
     });
-    persistBillingResult(importId, cacheKey, {
-      file: filePath,
-      generated_at: new Date().toISOString(),
-      gps: gpsInfo,
-      summary: {
-        ...result.summary,
-        ...filterMeta,
-        ...unloadFallbackMeta,
-        total_fee_display: formatEuro(result.summary.total_fee_eur),
-      },
-      stops: result.stops,
-    });
+    if (importId) {
+      persistBillingResult(importId, cacheKey, {
+        file: filePath,
+        generated_at: new Date().toISOString(),
+        gps: gpsInfo,
+        summary: {
+          ...result.summary,
+          ...filterMeta,
+          ...unloadFallbackMeta,
+          total_fee_display: formatEuro(result.summary.total_fee_eur),
+        },
+        stops: result.stops,
+      });
+    }
 
     res.json({
-      file: filePath,
+      file: hasExcel ? filePath : null,
+      sixfold_only: sixfoldOnly,
       generated_at: new Date().toISOString(),
       gps: gpsInfo,
       summary: {

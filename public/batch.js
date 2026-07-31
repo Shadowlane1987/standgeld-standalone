@@ -62,6 +62,9 @@ const el = {
   dateFrom: document.getElementById("dateFrom"),
   dateTo: document.getElementById("dateTo"),
   clearDateFilterBtn: document.getElementById("clearDateFilterBtn"),
+  batchDateFrom: document.getElementById("batchDateFrom"),
+  batchDateTo: document.getElementById("batchDateTo"),
+  sixfoldBatchBtn: document.getElementById("sixfoldBatchBtn"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
   transporeonDryRun: document.getElementById("transporeonDryRun"),
   openTransporeonBtn: document.getElementById("openTransporeonBtn"),
@@ -1684,8 +1687,50 @@ function sixfoldParams() {
   // Harte Voreinstellung: keine Teil-Abrechnung mit Luecken.
   params.set("allowPartialLive", "0");
 
+  // Zeitraum treibt den Sixfold-Abruf (und filtert Excel-Overlay).
+  const from = ((el.batchDateFrom && el.batchDateFrom.value) || "").trim();
+  const to = ((el.batchDateTo && el.batchDateTo.value) || "").trim();
+  if (from) params.set("sixfoldDateFrom", from);
+  if (to) params.set("sixfoldDateTo", to);
+
   const query = params.toString();
   return query ? `&${query}` : "";
+}
+
+// Reine Sixfold-Abrechnung: alle Touren im Zeitraum ueber Link + Token laden
+// und abrechnen, ohne Excel als Basis. Excel/Zeitfenster koennen danach als
+// Overlay drueberlaufen (Upload/Import laden).
+async function loadFromSixfold() {
+  const gps = sixfoldHeaders();
+  if (!gps["x-sixfold-url"]) {
+    setStatus("Bitte Sixfold-Link und Session-Token eintragen.", "error");
+    return;
+  }
+  const from = ((el.batchDateFrom && el.batchDateFrom.value) || "").trim();
+  const to = ((el.batchDateTo && el.batchDateTo.value) || "").trim();
+  if (!from && !to) {
+    setStatus(
+      "Bitte einen Zeitraum (von/bis) für die Sixfold-Abrechnung wählen.",
+      "error",
+    );
+    return;
+  }
+
+  setStatus("Lade alle Touren aus Sixfold im Zeitraum und rechne ab …");
+  if (el.sixfoldBatchBtn) el.sixfoldBatchBtn.disabled = true;
+  try {
+    const params = ruleParams();
+    // Kein importId -> reine Sixfold-Abrechnung ohne Excel.
+    const url = `/api/billing/export?${params.toString()}` + sixfoldParams();
+    const res = await fetch(url, { headers: gps });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    applyResult(data);
+  } catch (error) {
+    setStatus(error.message || "Sixfold-Abrechnung fehlgeschlagen.", "error");
+  } finally {
+    if (el.sixfoldBatchBtn) el.sixfoldBatchBtn.disabled = false;
+  }
 }
 
 async function load(forceRecalc = false) {
@@ -2157,6 +2202,9 @@ if (el.sixfoldToken) {
 }
 el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
 el.filterMode.addEventListener("change", render);
+if (el.sixfoldBatchBtn) {
+  el.sixfoldBatchBtn.addEventListener("click", loadFromSixfold);
+}
 if (el.dateFrom) el.dateFrom.addEventListener("change", render);
 if (el.dateTo) el.dateTo.addEventListener("change", render);
 if (el.clearDateFilterBtn) {
