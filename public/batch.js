@@ -7,6 +7,20 @@ const APP_SCOPE = (() => {
   return raw === "nahverkehr" ? "nahverkehr" : "fernverkehr";
 })();
 
+// Die Transporeon-Automation braucht einen echten Browser auf DEINEM PC.
+// Läuft die App auf Render (nicht localhost), werden die Automations-Aufrufe
+// an den lokalen Abrechnungs-Motor (Standgeld-App starten.cmd) weitergeleitet.
+const IS_LOCAL_HOST =
+  location.hostname === "localhost" || location.hostname === "127.0.0.1";
+const AUTOMATION_BASE = IS_LOCAL_HOST ? "" : "http://localhost:3100";
+
+function automationUnreachableHint() {
+  return (
+    "Lokaler Abrechnungs-Motor nicht erreichbar. Bitte auf deinem PC die Datei " +
+    "'Standgeld-App starten.cmd' per Doppelklick starten und es erneut versuchen."
+  );
+}
+
 const el = {
   freeMinutes: document.getElementById("freeMinutes"),
   blockMinutes: document.getElementById("blockMinutes"),
@@ -980,7 +994,7 @@ async function openTransporeonSession() {
   if (el.openTransporeonBtn) el.openTransporeonBtn.disabled = true;
   setStatus("Öffne Automations-Fenster für Transporeon …");
   try {
-    const res = await fetch("/api/transporeon/session/open", {
+    const res = await fetch(`${AUTOMATION_BASE}/api/transporeon/session/open`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -1001,10 +1015,11 @@ async function openTransporeonSession() {
       );
     }
   } catch (error) {
-    setStatus(
-      error.message || "Automations-Fenster konnte nicht geöffnet werden.",
-      "error",
-    );
+    const msg =
+      error instanceof TypeError && !IS_LOCAL_HOST
+        ? automationUnreachableHint()
+        : error.message || "Automations-Fenster konnte nicht geöffnet werden.";
+    setStatus(msg, "error");
   } finally {
     if (el.openTransporeonBtn) el.openTransporeonBtn.disabled = false;
   }
@@ -1034,15 +1049,18 @@ async function applyTransporeonSurcharges() {
   );
 
   try {
-    const res = await fetch("/api/transporeon/surcharges/apply", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        dryRun,
-        keepBrowserOpen: true,
-        items: rows,
-      }),
-    });
+    const res = await fetch(
+      `${AUTOMATION_BASE}/api/transporeon/surcharges/apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dryRun,
+          keepBrowserOpen: true,
+          items: rows,
+        }),
+      },
+    );
 
     const data = await res.json();
     if (!res.ok) {
@@ -1088,10 +1106,11 @@ async function applyTransporeonSurcharges() {
       );
     }
   } catch (error) {
-    setStatus(
-      error.message || "Zuschlagslauf konnte nicht gestartet werden.",
-      "error",
-    );
+    const msg =
+      error instanceof TypeError && !IS_LOCAL_HOST
+        ? automationUnreachableHint()
+        : error.message || "Zuschlagslauf konnte nicht gestartet werden.";
+    setStatus(msg, "error");
   } finally {
     if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = false;
   }
