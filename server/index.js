@@ -2109,14 +2109,17 @@ app.get("/api/billing/export", async (req, res) => {
 
     const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
     const gatedResult = enforceUnloadingGpsGate(rawResult);
-    // Excel + Zeitfenster laufen nur als Overlay; Basis sind ALLE Touren.
-    // Touren, die es NUR in Sixfold gibt (bei reiner Sixfold-Abrechnung: alle),
-    // werden hier ergaenzt, damit keine GPS-belegte Tour verloren geht.
-    const result = appendSixfoldOnlyStops(gatedResult, {
-      transports: filteredTransports,
-      sixfoldStops,
-      config,
-    });
+    // Nur im reinen Sixfold-Modus (ohne Excel) werden alle Sixfold-Touren
+    // abgerechnet. Sobald eine Excel laeuft, ist die Excel-Liste die massgebliche
+    // Basis (GPS nur als Overlay) – sonst wuerde die komplette Firmen-Flotte
+    // (auch fremde/nicht gelistete Touren) mitabgerechnet und die Summe explodiert.
+    const result = sixfoldOnly
+      ? appendSixfoldOnlyStops(gatedResult, {
+          transports: filteredTransports,
+          sixfoldStops,
+          config,
+        })
+      : gatedResult;
     if (importId) {
       persistBillingResult(importId, cacheKey, {
         file: filePath,
