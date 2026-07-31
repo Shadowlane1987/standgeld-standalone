@@ -36,6 +36,11 @@ const COLUMN_MATCHERS = Object.freeze({
     h.includes("kfz-kennz") ||
     h.includes("kennzeichen") ||
     h.includes("license"),
+  // Ortsspalten des Exports: "Start" = Ladeort, "Ziel" = Entladeort,
+  // "Firmenname - Ziel" = Fallback-Name fuer den Entladeort.
+  load_location: (h) => h === "start",
+  unload_location: (h) => h === "ziel",
+  unload_company: (h) => h.includes("firmenname") && h.includes("ziel"),
   load_window: (h) => h.startsWith("gebucht ab") && !h.includes("zweite"),
   load_arrival: (h) => h.startsWith("ankunft") && !h.includes("zweite"),
   load_departure: (h) => h.startsWith("abfahrt") && !h.includes("zweite"),
@@ -149,6 +154,11 @@ function parseTransporeonExport(rows) {
     if (!transportNumber) continue;
 
     const vehicleRegistration = cell(row, columns.vehicle_registration);
+    const loadLocation = cell(row, columns.load_location) || null;
+    const unloadLocation =
+      cell(row, columns.unload_location) ||
+      cell(row, columns.unload_company) ||
+      null;
     const loadWin = cleanDateTime(cell(row, columns.load_window));
     const loadArr = cleanDateTime(cell(row, columns.load_arrival));
     const loadDep = cleanDateTime(cell(row, columns.load_departure));
@@ -162,6 +172,7 @@ function parseTransporeonExport(rows) {
             window_local: loadWin,
             arrival_local: loadArr,
             departure_local: loadDep,
+            location: loadLocation,
           }
         : null;
     let unloading =
@@ -170,6 +181,7 @@ function parseTransporeonExport(rows) {
             window_local: unloadWin,
             arrival_local: unloadArr,
             departure_local: unloadDep,
+            location: unloadLocation,
           }
         : null;
 

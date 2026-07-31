@@ -106,6 +106,20 @@ const TYPE_LABELS = {
   UNLOADING: "Entladen",
 };
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function locationLabel(stop) {
+  const raw = String(stop?.booking_location || "").trim();
+  return raw ? escapeHtml(raw) : "-";
+}
+
 function setStatus(text, type = "info") {
   el.status.textContent = text;
   el.status.style.color =
@@ -1205,6 +1219,7 @@ function render() {
       <td>${stop.transport_number || "-"}</td>
       <td>${plateCheckLabel(stop)}</td>
       <td>${TYPE_LABELS[stop.stop_type] || stop.stop_type || "-"}</td>
+      <td>${locationLabel(stop)}</td>
       <td><span class="${srcClass}">${src}</span></td>
       <td>${timeCellHtml(usedBoundaryLabel(stop.arrival_time_used, stop.arrival_source), sourceTone(stop.arrival_source), stop.arrival_source || "XP")}</td>
       <td>${timeCellHtml(usedBoundaryLabel(stop.departure_time_used, stop.departure_source), sourceTone(stop.departure_source), stop.departure_source || "XP")}</td>
@@ -1290,6 +1305,7 @@ function renderSettled() {
     tr.innerHTML = `
       <td>${stop.transport_number || "-"}</td>
       <td>${TYPE_LABELS[stop.stop_type] || stop.stop_type || "-"}</td>
+      <td>${locationLabel(stop)}</td>
       <td>${stationLabelForStop(stop)}</td>
       <td>${formatDateTimeForJustification(stop.window_local || stop.window_start)}</td>
       <td>${minutesToHours(stop.counted_standing_minutes)}</td>

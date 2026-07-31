@@ -270,6 +270,7 @@ function billFromExport(transports, options = {}) {
         Object.freeze({
           ...fee,
           window_local: stop.window_local,
+          booking_location: stop.location || null,
           unload_window_fallback_applied:
             stopType === "UNLOADING"
               ? Boolean(stop.unload_window_fallback_applied)

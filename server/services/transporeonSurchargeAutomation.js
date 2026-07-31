@@ -399,7 +399,44 @@ async function waitForPriceTabActive(contexts, { timeoutMs = 12000 } = {}) {
   return false;
 }
 
+async function closeOpenSurchargeDialog(contexts, { timeoutMs = 4000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let openCtx = null;
+    for (const ctx of contexts) {
+      try {
+        const typeField = ctx.locator('input[name="typeField"]').first();
+        if (await typeField.isVisible()) {
+          openCtx = ctx;
+          break;
+        }
+      } catch {
+        // continue
+      }
+    }
+    if (!openCtx) return true;
+
+    // Erst "Abbrechen" versuchen, sonst Escape auf dem Dialogfeld.
+    const cancelled = await clickFirstVisibleLocator([
+      openCtx.getByRole("button", { name: /^Abbrechen$/i }),
+      openCtx.locator("button", { hasText: /^Abbrechen$/i }),
+      openCtx.getByText(/^Abbrechen$/i),
+    ]).catch(() => false);
+    if (!cancelled) {
+      await openCtx
+        .locator('input[name="typeField"]')
+        .first()
+        .press("Escape")
+        .catch(() => {});
+    }
+    await sleep(300);
+  }
+  return false;
+}
+
 async function openSurchargeDialog(contexts) {
+  // Haengengebliebenen Dialog aus einem abgebrochenen Lauf zuerst schliessen.
+  await closeOpenSurchargeDialog(contexts).catch(() => {});
   // Detail braucht Zeit bis die Reiterleiste da ist -> aktiv auf Preis warten.
   await waitForPriceTabActive(contexts);
   await sleep(500);
@@ -602,22 +639,36 @@ async function clickSave(context) {
 }
 
 async function requestDecision(contexts) {
-  await clickTextIfVisible(contexts, /^Standzeit$/i).catch(() => {});
+  // "Entscheidung einholen" (?) ist DISABLED bis die neue Zuschlag-Zeile markiert
+  // ist. Nach dem Speichern rendert/selektiert das Grid verzoegert -> aktiv warten.
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    // Zuschlag-Zeile markieren, damit der Button aktiv wird.
+    await clickTextIfVisible(contexts, /^Standzeit$/i).catch(() => {});
 
+    for (const ctx of contexts) {
+      const enabled = ctx
+        .locator(
+          '[class*="toolbarButton_requestDecisionIcon"]:not([class*="disabled"])',
+        )
+        .first();
+      try {
+        if ((await enabled.count()) >= 1 && (await enabled.isVisible())) {
+          await enabled.click({ timeout: 4000, force: true });
+          return true;
+        }
+      } catch {
+        // weiter versuchen
+      }
+    }
+    await sleep(400);
+  }
+
+  // Fallback: direkte Attribut-Selektoren, falls die Klasse abweicht.
   for (const ctx of contexts) {
     const clicked = await clickFirstVisibleLocator([
-      ctx.locator(
-        '[class*="toolbarButton_requestDecisionIcon"]:not([class*="disabled"])',
-      ),
-      ctx.locator(
-        '[class*="toolbarButton_requestDecision"]:not([class*="disabled"])',
-      ),
       ctx.locator('[title*="Entscheidung einholen" i]'),
       ctx.locator('[aria-label*="Entscheidung" i]'),
-      ctx.locator('[class*="toolbarButton_request"]'),
-      ctx.locator('[class*="toolbarButton_decision"]'),
-      ctx.locator('[class*="toolbarButton_help"]'),
-      ctx.locator("button:has-text('?')"),
     ]);
     if (clicked) return true;
   }
