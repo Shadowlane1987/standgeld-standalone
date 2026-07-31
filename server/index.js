@@ -1742,19 +1742,26 @@ function hasValidLocalWindowDateTime(value) {
 
 // Filtert Transporte nach Entladedatum (aus dem Entlade-Stopp).
 // Bereich ist inklusiv: from <= datum <= to.
-// Nutzer-Vorgabe (2026-07-31): Transporte OHNE Entladedatum bleiben drin
-// (der Nutzer filtert selbst); nur datierte Transporte AUSSERHALB des Bereichs
-// werden ausgeschlossen.
+// Primaere Datumsquelle ist die Export-Spalte "Entladedatum" (immer gefuellt);
+// nur als Fallback die Ist-/Fenster-Zeiten des Entlade-Stopps.
+// Nutzer-Vorgabe (2026-07-31): Transporte OHNE jegliches Datum bleiben drin.
+function unloadDateForTransport(t) {
+  const explicit = extractLocalDate(t?.unload_date);
+  if (explicit) return explicit;
+  const unload = t?.unloading || null;
+  return (
+    extractLocalDate(unload?.window_local) ||
+    extractLocalDate(unload?.arrival_local) ||
+    extractLocalDate(unload?.departure_local)
+  );
+}
+
 function filterTransportsByUnloadDate(transports, fromDate, toDate) {
   if (!fromDate && !toDate) return Array.isArray(transports) ? transports : [];
 
   const list = Array.isArray(transports) ? transports : [];
   return list.filter((t) => {
-    const unload = t?.unloading || null;
-    const unloadDate =
-      extractLocalDate(unload?.window_local) ||
-      extractLocalDate(unload?.arrival_local) ||
-      extractLocalDate(unload?.departure_local);
+    const unloadDate = unloadDateForTransport(t);
     if (!unloadDate) return true;
     if (fromDate && unloadDate < fromDate) return false;
     if (toDate && unloadDate > toDate) return false;
@@ -1781,11 +1788,7 @@ function buildUnloadDateFilterMeta(transports, fromDate, toDate) {
   let missingUnloadDate = 0;
   let outsideRange = 0;
   for (const t of list) {
-    const unload = t?.unloading || null;
-    const unloadDate =
-      extractLocalDate(unload?.window_local) ||
-      extractLocalDate(unload?.arrival_local) ||
-      extractLocalDate(unload?.departure_local);
+    const unloadDate = unloadDateForTransport(t);
 
     if (!unloadDate) {
       missingUnloadDate += 1;

@@ -38,6 +38,7 @@ function summarizeTransports(transports) {
     .map((transport) => {
       const stop = transport?.unloading || null;
       return (
+        extractLocalDate(transport?.unload_date) ||
         extractLocalDate(stop?.window_local) ||
         extractLocalDate(stop?.arrival_local) ||
         extractLocalDate(stop?.departure_local) ||

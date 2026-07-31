@@ -41,6 +41,9 @@ const COLUMN_MATCHERS = Object.freeze({
   load_location: (h) => h === "start",
   unload_location: (h) => h === "ziel",
   unload_company: (h) => h.includes("firmenname") && h.includes("ziel"),
+  // Eigene Export-Spalte "Entladedatum" (immer gefuellt) = zuverlaessige
+  // Datumsquelle fuer den von/bis-Filter, auch wenn Entlade-Stopp-Zeiten fehlen.
+  unload_date: (h) => h === "entladedatum",
   load_window: (h) => h.startsWith("gebucht ab") && !h.includes("zweite"),
   load_arrival: (h) => h.startsWith("ankunft") && !h.includes("zweite"),
   load_departure: (h) => h.startsWith("abfahrt") && !h.includes("zweite"),
@@ -68,6 +71,20 @@ function cleanDateTime(value) {
   const m = text.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
   if (!m) return null;
   return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+}
+
+/**
+ * Liest ein reines Datum ("YYYY-MM-DD") aus einer Zelle (z.B. Spalte
+ * "Entladedatum"). Platzhalter ("-", "") ergeben null.
+ *
+ * @param {string} value
+ * @returns {string|null}
+ */
+function cleanDate(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-") return null;
+  const m = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
 /**
@@ -159,6 +176,7 @@ function parseTransporeonExport(rows) {
       cell(row, columns.unload_location) ||
       cell(row, columns.unload_company) ||
       null;
+    const unloadDate = cleanDate(cell(row, columns.unload_date));
     const loadWin = cleanDateTime(cell(row, columns.load_window));
     const loadArr = cleanDateTime(cell(row, columns.load_arrival));
     const loadDep = cleanDateTime(cell(row, columns.load_departure));
@@ -195,6 +213,7 @@ function parseTransporeonExport(rows) {
       Object.freeze({
         transport_number: transportNumber,
         vehicle_registration: vehicleRegistration || null,
+        unload_date: unloadDate,
         loading,
         unloading,
       }),
