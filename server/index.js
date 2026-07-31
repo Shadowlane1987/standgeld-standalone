@@ -1840,6 +1840,8 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
       fallback_unresolved: 0,
       fallback_overridden_existing: 0,
       fallback_already_matching: 0,
+      fallback_created_stops: 0,
+      fallback_created_unresolved: 0,
     };
   }
 
@@ -1847,10 +1849,43 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
   let applied = 0;
   let overriddenExisting = 0;
   let alreadyMatching = 0;
+  let createdStops = 0;
+  let createdUnresolved = 0;
 
-  for (const transport of list) {
+  for (let i = 0; i < list.length; i += 1) {
+    const transport = list[i];
     const unload = transport?.unloading;
-    if (!unload) continue;
+
+    // Tour OHNE Entlade-Stopp: aus der Zeitfenster-Excel (per Ladenummer) einen
+    // Entlade-Stopp NEU anlegen, damit die Tour sichtbar/abrechenbar wird.
+    // Anker fuer das Datum ist die Export-Spalte "Entladedatum" (immer gefuellt).
+    if (!unload) {
+      if (!transport) continue;
+      const ladenummer = transportNumberToLadenummer(
+        transport.transport_number,
+      );
+      const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
+      const unloadStart = windowStartForStop(windowRow, "UNLOADING");
+      const anchorDate =
+        extractLocalDate(transport.unload_date) ||
+        localDateForUnloadWindowFallback(transport);
+      if (!unloadStart || !anchorDate) {
+        createdUnresolved += 1;
+        continue;
+      }
+      const createdUnload = {
+        window_local: `${anchorDate} ${unloadStart}`,
+        arrival_local: null,
+        departure_local: null,
+        location: null,
+        created_from_zeitfenster: true,
+        unload_window_fallback_applied: true,
+        unload_window_fallback_reason: "created_stop_from_excel_window",
+      };
+      list[i] = Object.freeze({ ...transport, unloading: createdUnload });
+      createdStops += 1;
+      continue;
+    }
 
     candidates += 1;
     const hadExistingWindow = hasValidLocalWindowDateTime(unload.window_local);
@@ -1900,6 +1935,8 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
     fallback_unresolved: Math.max(0, candidates - applied),
     fallback_overridden_existing: overriddenExisting,
     fallback_already_matching: alreadyMatching,
+    fallback_created_stops: createdStops,
+    fallback_created_unresolved: createdUnresolved,
   };
 }
 
