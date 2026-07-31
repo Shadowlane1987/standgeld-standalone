@@ -1742,6 +1742,9 @@ function hasValidLocalWindowDateTime(value) {
 
 // Filtert Transporte nach Entladedatum (aus dem Entlade-Stopp).
 // Bereich ist inklusiv: from <= datum <= to.
+// Nutzer-Vorgabe (2026-07-31): Transporte OHNE Entladedatum bleiben drin
+// (der Nutzer filtert selbst); nur datierte Transporte AUSSERHALB des Bereichs
+// werden ausgeschlossen.
 function filterTransportsByUnloadDate(transports, fromDate, toDate) {
   if (!fromDate && !toDate) return Array.isArray(transports) ? transports : [];
 
@@ -1752,7 +1755,7 @@ function filterTransportsByUnloadDate(transports, fromDate, toDate) {
       extractLocalDate(unload?.window_local) ||
       extractLocalDate(unload?.arrival_local) ||
       extractLocalDate(unload?.departure_local);
-    if (!unloadDate) return false;
+    if (!unloadDate) return true;
     if (fromDate && unloadDate < fromDate) return false;
     if (toDate && unloadDate > toDate) return false;
     return true;
@@ -1770,7 +1773,7 @@ function buildUnloadDateFilterMeta(transports, fromDate, toDate) {
       input_transport_count: list.length,
       filtered_transport_count: list.length,
       excluded_transport_count: 0,
-      excluded_missing_unload_date_count: 0,
+      kept_missing_unload_date_count: 0,
       excluded_outside_date_range_count: 0,
     };
   }
@@ -1804,7 +1807,8 @@ function buildUnloadDateFilterMeta(transports, fromDate, toDate) {
     input_transport_count: list.length,
     filtered_transport_count: filtered.length,
     excluded_transport_count: Math.max(0, list.length - filtered.length),
-    excluded_missing_unload_date_count: missingUnloadDate,
+    // Ohne Entladedatum bleiben Transporte jetzt DRIN (nur Diagnose).
+    kept_missing_unload_date_count: missingUnloadDate,
     excluded_outside_date_range_count: outsideRange,
   };
 }
