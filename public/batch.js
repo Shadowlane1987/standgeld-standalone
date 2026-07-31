@@ -59,6 +59,9 @@ const el = {
   totalFee: document.getElementById("totalFee"),
   filterMode: document.getElementById("filterMode"),
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
+  dateFrom: document.getElementById("dateFrom"),
+  dateTo: document.getElementById("dateTo"),
+  clearDateFilterBtn: document.getElementById("clearDateFilterBtn"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
   transporeonDryRun: document.getElementById("transporeonDryRun"),
   openTransporeonBtn: document.getElementById("openTransporeonBtn"),
@@ -906,16 +909,41 @@ function copyJustificationText() {
     });
 }
 
+function stopDate(stop) {
+  // Lokales Kalenderdatum des Stopps (YYYY-MM-DD) aus den vorhandenen Zeitfeldern.
+  const raw = String(
+    stop.window_local ||
+      stop.arrival_local ||
+      stop.count_start ||
+      stop.window_start ||
+      "",
+  ).trim();
+  const m = raw.match(/(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : "";
+}
+
+function dateInRange(stop) {
+  const from = el.dateFrom && el.dateFrom.value ? el.dateFrom.value : "";
+  const to = el.dateTo && el.dateTo.value ? el.dateTo.value : "";
+  if (!from && !to) return true;
+  const d = stopDate(stop);
+  if (!d) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
 function filteredStops() {
   const mode = el.filterMode.value;
-  if (mode === "chargeable") return currentStops.filter((s) => s.fee_eur > 0);
-  if (mode === "review") return currentStops.filter((s) => s.needs_review);
-  if (mode === "gpsMissing") return currentStops.filter((s) => s.gps_missing);
-  if (mode === "unloadFallback")
-    return currentStops.filter(
+  let list = currentStops;
+  if (mode === "chargeable") list = list.filter((s) => s.fee_eur > 0);
+  else if (mode === "review") list = list.filter((s) => s.needs_review);
+  else if (mode === "gpsMissing") list = list.filter((s) => s.gps_missing);
+  else if (mode === "unloadFallback")
+    list = list.filter(
       (s) => s.unload_window_fallback_applied === true && s.fee_eur > 0,
     );
-  return currentStops;
+  return list.filter(dateInRange);
 }
 
 function sourceLabel(stop) {
@@ -1271,6 +1299,19 @@ function render() {
       }
     });
     el.rows.appendChild(tr);
+  }
+
+  const dateActive =
+    (el.dateFrom && el.dateFrom.value) || (el.dateTo && el.dateTo.value);
+  if (dateActive) {
+    const sum = stops.reduce((acc, s) => acc + Number(s.fee_eur || 0), 0);
+    const chargeable = stops.filter((s) => Number(s.fee_eur || 0) > 0).length;
+    const from = (el.dateFrom && el.dateFrom.value) || "…";
+    const to = (el.dateTo && el.dateTo.value) || "…";
+    setStatus(
+      `Zeitraum ${from} bis ${to}: ${stops.length} Stopps, ${chargeable} abrechenbar, Summe ${euro(sum)}.`,
+      "info",
+    );
   }
 
   renderSettled();
@@ -2116,6 +2157,15 @@ if (el.sixfoldToken) {
 }
 el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
 el.filterMode.addEventListener("change", render);
+if (el.dateFrom) el.dateFrom.addEventListener("change", render);
+if (el.dateTo) el.dateTo.addEventListener("change", render);
+if (el.clearDateFilterBtn) {
+  el.clearDateFilterBtn.addEventListener("click", () => {
+    if (el.dateFrom) el.dateFrom.value = "";
+    if (el.dateTo) el.dateTo.value = "";
+    render();
+  });
+}
 if (el.bookkeepingExportBtn) {
   el.bookkeepingExportBtn.addEventListener("click", exportBookkeeping);
 }

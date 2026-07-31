@@ -25,6 +25,9 @@ const el = {
   dateSort: document.getElementById("dateSort"),
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
+  transporeonDryRun: document.getElementById("transporeonDryRun"),
+  openTransporeonBtn: document.getElementById("openTransporeonBtn"),
+  applyTransporeonBtn: document.getElementById("applyTransporeonBtn"),
   rows: document.getElementById("rows"),
   surchargeModal: document.getElementById("surchargeModal"),
   surchargeTitle: document.getElementById("surchargeTitle"),
@@ -44,6 +47,19 @@ const URL_STORAGE_KEY = "standgeld.sixfoldUrl";
 const SESSION_TOKEN_STORAGE_KEY = "standgeld.sessionToken";
 const SINGLE_RULES_STORAGE_KEY = "standgeld.single.rules.v1";
 const SINGLE_BOOKKEEPING_STORAGE_KEY = "standgeld.single.bookkeeping.v1";
+
+// Wenn die Seite auf Render (nicht localhost) laeuft, delegiert die Transporeon-
+// Automatik an den lokalen Motor auf http://localhost:3100.
+const IS_LOCAL_HOST =
+  location.hostname === "localhost" || location.hostname === "127.0.0.1";
+const AUTOMATION_BASE = IS_LOCAL_HOST ? "" : "http://localhost:3100";
+
+function automationUnreachableHint() {
+  return (
+    "Lokaler Automations-Motor nicht erreichbar. Bitte die App lokal starten " +
+    "(Standgeld-App starten.cmd) und dieses Fenster auf http://localhost:3100 nutzen."
+  );
+}
 
 function stopKey(stop) {
   return [
@@ -120,6 +136,142 @@ function buildBookkeepingRows(onlyMarked) {
     });
   }
   return rows;
+}
+
+function buildTransporeonSurchargeRows() {
+  const rows = [];
+  for (const stop of latestStops || []) {
+    if (!stop || Number(stop.amount_eur || 0) <= 0) continue;
+    if (Boolean(stop.needs_review)) continue;
+
+    const entry = getBookkeepingEntry(stop);
+    if (!entry.billed) continue;
+
+    rows.push({
+      transport_number: String(stop.transport_number || "").trim(),
+      stop_type: String(stop.type || "")
+        .trim()
+        .toUpperCase(),
+      amount_eur: Number(stop.amount_eur || 0),
+      description: buildSurchargeDescription(stop),
+      stop_key: stopKey(stop),
+    });
+  }
+  return rows;
+}
+
+async function openTransporeonSession() {
+  if (el.openTransporeonBtn) el.openTransporeonBtn.disabled = true;
+  setStatus("Öffne Automations-Fenster für Transporeon …");
+  try {
+    const res = await fetch(`${AUTOMATION_BASE}/api/transporeon/session/open`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data.list_ready) {
+      setStatus(
+        `Automations-Fenster bereit: ${data.row_count || 0} Transportzeilen erkannt.`,
+        "success",
+      );
+    } else {
+      setStatus(
+        "Automations-Fenster geöffnet. Bitte in DIESEM Fenster bei Transporeon einloggen und 'Zugewiesene Transporte' öffnen.",
+        "info",
+      );
+    }
+  } catch (error) {
+    const msg =
+      error instanceof TypeError && !IS_LOCAL_HOST
+        ? automationUnreachableHint()
+        : error.message || "Automations-Fenster konnte nicht geöffnet werden.";
+    setStatus(msg, "error");
+  } finally {
+    if (el.openTransporeonBtn) el.openTransporeonBtn.disabled = false;
+  }
+}
+
+async function applyTransporeonSurcharges() {
+  const rows = buildTransporeonSurchargeRows();
+  if (!rows.length) {
+    setStatus(
+      "Keine als „abgerechnet“ markierten Positionen für Transporeon vorhanden.",
+      "error",
+    );
+    return;
+  }
+
+  const dryRun = Boolean(el.transporeonDryRun?.checked);
+  const confirmText = dryRun
+    ? `Trockenlauf für ${rows.length} Positionen starten?`
+    : `Automatisch ${rows.length} Zuschläge in Transporeon anlegen und Entscheidung einholen?`;
+  if (!window.confirm(confirmText)) return;
+
+  if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = true;
+  setStatus(
+    dryRun
+      ? `Prüfe ${rows.length} markierte Positionen per Transporeon-Suche …`
+      : `Beantrage ${rows.length} markierte Zuschläge in Transporeon …`,
+  );
+
+  try {
+    const res = await fetch(
+      `${AUTOMATION_BASE}/api/transporeon/surcharges/apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun, keepBrowserOpen: true, items: rows }),
+      },
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    const doneTransports = [];
+    if (!dryRun && Array.isArray(data.processed)) {
+      const successKeys = new Set(
+        data.processed
+          .filter((item) => item.status === "applied")
+          .map((item) => String(item.stop_key || "").trim())
+          .filter(Boolean),
+      );
+      if (successKeys.size) {
+        for (const stop of latestStops || []) {
+          if (!successKeys.has(stopKey(stop))) continue;
+          getBookkeepingEntry(stop).billed = true;
+          doneTransports.push(String(stop.transport_number || "").trim());
+        }
+        persistBookkeepingEntries();
+        renderStops(latestStops);
+      }
+    }
+
+    const success = Number(data.summary?.success_count || 0);
+    const failure = Number(data.summary?.failure_count || 0);
+    if (dryRun) {
+      setStatus(
+        `Trockenlauf fertig: ${success} bereit, ${failure} nicht gefunden/fehlerhaft.`,
+        failure > 0 ? "info" : "success",
+      );
+    } else {
+      const doneText = doneTransports.length
+        ? ` Abgerechnet: ${doneTransports.join(", ")}.`
+        : "";
+      setStatus(
+        `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.${doneText}`,
+        failure > 0 ? "info" : "success",
+      );
+    }
+  } catch (error) {
+    const msg =
+      error instanceof TypeError && !IS_LOCAL_HOST
+        ? automationUnreachableHint()
+        : error.message || "Zuschlagslauf konnte nicht gestartet werden.";
+    setStatus(msg, "error");
+  } finally {
+    if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = false;
+  }
 }
 
 function downloadBlob(blob, filename) {
@@ -1186,6 +1338,13 @@ if (el.lateArrivalGraceMinutes) {
 
 if (el.bookkeepingExportBtn) {
   el.bookkeepingExportBtn.addEventListener("click", exportBookkeeping);
+}
+
+if (el.openTransporeonBtn) {
+  el.openTransporeonBtn.addEventListener("click", openTransporeonSession);
+}
+if (el.applyTransporeonBtn) {
+  el.applyTransporeonBtn.addEventListener("click", applyTransporeonSurcharges);
 }
 
 el.runBtn.addEventListener("click", run);
