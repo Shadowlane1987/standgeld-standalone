@@ -13,9 +13,7 @@ const {
   normalizeLicensePlate,
 } = require("./normalize/exportBilling");
 const { billFromLiveData } = require("./normalize/liveBilling");
-const {
-  appendSixfoldOnlyStops,
-} = require("./normalize/sixfoldFirstBilling");
+const { appendSixfoldOnlyStops } = require("./normalize/sixfoldFirstBilling");
 const { classifySixfoldStop } = require("./normalize/sixfoldGps");
 const {
   loadTransporeonExportFromBuffer,
