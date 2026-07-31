@@ -244,12 +244,15 @@ function billFromExport(transports, options = {}) {
       const gpsArrivalIso = gpsAvailable ? gpsEntry?.arrival_iso : null;
       const gpsDepartureIso = gpsAvailable ? gpsEntry?.departure_iso : null;
 
-      // Pro Grenze die laengere Standzeit waehlen (dokumentierte Nutzer-Regel):
-      // Ankunft = FRUEHESTE aus {XP, verifiziertes GPS}
-      // Abfahrt = SPAETESTE aus {XP, verifiziertes GPS}
-      // So wird der echte Standzeit-Zeitraum erfasst, auch bei Mehrfachbesuch/
-      // Pause (z.B. GPS-Ankunft frueh, XP-Abfahrt spaet nach der Ruhezeit).
-      const arrivalChoice = chooseArrival(xpArrivalIso, gpsArrivalIso);
+      // Nutzer-Regel (2026-07-31):
+      // - Mit Kennzeichen (verifiziertes GPS vorhanden): Ankunft = ECHTE GPS-Zeit.
+      // - Abfahrt = die SPAETERE aus {XP, GPS} -> ist die XP-Abfahrt spaeter,
+      //   gewinnt XP (Start bleibt GPS, Abfahrt XP).
+      // - Ohne Kennzeichen ist kein GPS verfuegbar -> XP fuer Ankunft UND Abfahrt.
+      const arrivalChoice =
+        gpsArrivalIso != null
+          ? { iso: gpsArrivalIso, source: "GPS" }
+          : chooseArrival(xpArrivalIso, null);
       const departureChoice = chooseDeparture(xpDepartureIso, gpsDepartureIso);
 
       const fee = computeStandgeld(

@@ -143,8 +143,8 @@ test("billFromExport mit gpsIndex: laengere GPS-Abfahrt gewinnt = mehr Standgeld
   const withoutGps = billFromExport(transports);
   const withGps = billFromExport(transports, { gpsIndex });
 
-  // Ankunft ist bei XP und GPS gleich (08:00) -> XP gewinnt bei Gleichstand.
-  assert.equal(withGps.stops[0].arrival_source, "XP");
+  // Ankunft: mit Kennzeichen zaehlt die GPS-Ankunft (auch bei Gleichstand).
+  assert.equal(withGps.stops[0].arrival_source, "GPS");
   // Abfahrt: GPS 12:00 ist spaeter als XP 10:00 -> GPS gewinnt.
   assert.equal(withGps.stops[0].departure_source, "GPS");
   assert.equal(withGps.stops[0].gps_available, true);
@@ -224,6 +224,43 @@ test("billFromExport: Mix - fruehe GPS-Ankunft + spaete XP-Abfahrt (Pause/Mehrfa
   // Abfahrt: XP 18:00 ist spaeter als GPS 08:00 -> XP gewinnt.
   assert.equal(result.stops[0].departure_source, "XP");
   assert.equal(result.summary.gps_used_count, 1);
+});
+
+test("billFromExport: mit Kennzeichen zaehlt GPS-Ankunft auch wenn spaeter als XP (Nutzer 2026-07-31)", () => {
+  // Neue Regel: bei Kennzeichen-Touren ist die ECHTE GPS-Ankunft massgeblich,
+  // selbst wenn die XP-Ankunft frueher steht (keine Fake-Frueh-Ankunft abrechnen).
+  const transports = [
+    {
+      transport_number: "T1",
+      vehicle_registration: "B-AB 123",
+      loading: {
+        window_local: "2026-07-16 06:00",
+        arrival_local: "2026-07-16 08:00", // XP frueh
+        departure_local: "2026-07-16 18:00",
+      },
+      unloading: null,
+    },
+  ];
+
+  const gpsIndex = buildGpsIndex([
+    {
+      transport_number: "T1",
+      license_plate: "B-AB 123",
+      type: "loading",
+      arrival_time: "2026-07-16T09:00:00.000Z", // 11:00 Berlin -> SPAETER als XP 08:00
+      departure_time: "2026-07-16T12:00:00.000Z", // 14:00 Berlin -> frueher als XP 18:00
+      position: { lat: 52.5, lng: 13.4 },
+      gps: { arrival_verified: true, departure_verified: true },
+    },
+  ]);
+
+  const result = billFromExport(transports, { gpsIndex });
+  assert.equal(result.stops[0].gps_available, true);
+  // Ankunft = GPS (echte Ankunft), obwohl XP frueher ist.
+  assert.equal(result.stops[0].arrival_source, "GPS");
+  assert.equal(result.stops[0].arrival_time_used, "2026-07-16T09:00:00.000Z");
+  // Abfahrt = XP (spaeter als GPS).
+  assert.equal(result.stops[0].departure_source, "XP");
 });
 
 test("buildGpsIndex: 0/0-Koordinaten werden gefiltert (keine Fake-GPS) (Nutzer 2026-07-20)", () => {
