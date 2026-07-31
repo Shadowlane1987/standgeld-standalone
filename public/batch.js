@@ -1665,8 +1665,18 @@ function applyResult(data) {
       }
     }
   }
+  const sixfoldNote =
+    typeof data.summary.sixfold_only_count === "number" &&
+    data.summary.sixfold_only_count > 0
+      ? ` · aus Sixfold ergänzt: ${data.summary.sixfold_only_count}`
+      : "";
+  const createdNote =
+    typeof data.summary.fallback_created_stops === "number" &&
+    data.summary.fallback_created_stops > 0
+      ? ` · Entlade-Stopps aus Zeitfenster erzeugt: ${data.summary.fallback_created_stops}`
+      : "";
   setStatus(
-    `${data.summary.transport_count} Transporte · ${data.summary.stop_count} Positionen${gpsNote}${filterNote}${mixNote}${fallbackNote}.`,
+    `${data.summary.transport_count} Transporte · ${data.summary.stop_count} Positionen${gpsNote}${filterNote}${mixNote}${fallbackNote}${sixfoldNote}${createdNote}.`,
     "success",
   );
 }

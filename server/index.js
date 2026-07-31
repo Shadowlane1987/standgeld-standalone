@@ -2154,11 +2154,19 @@ app.get("/api/billing/export", async (req, res) => {
 
     const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
     const gatedResult = enforceUnloadingGpsGate(rawResult);
-    // Nur im reinen Sixfold-Modus (ohne Excel) werden alle Sixfold-Touren
-    // abgerechnet. Sobald eine Excel laeuft, ist die Excel-Liste die massgebliche
-    // Basis (GPS nur als Overlay) – sonst wuerde die komplette Firmen-Flotte
-    // (auch fremde/nicht gelistete Touren) mitabgerechnet und die Summe explodiert.
-    const result = sixfoldOnly
+    // Sixfold-first (Nutzer-Vorgabe 2026-07-31): Firma 799 = NUR eigene Touren,
+    // Sixfold zeigt keine fremden. Mit gesetztem Datumsfilter grenzen beide
+    // Sixfold-Abrufe serverseitig (isStopInWindow) auf den Zeitraum ein, sonst
+    // kaeme die komplette eigene Historie. Deshalb werden – reiner Sixfold-Modus
+    // ODER Excel + aktiver Datumsfilter – die Sixfold-Touren ergaenzt, die (noch)
+    // nicht in der Excel stehen. Ohne Datumsfilter bleibt die Excel die Basis
+    // (sonst wuerde die ganze Historie mitabgerechnet und die Summe explodiert).
+    const dateScoped = Boolean(sixfoldDateFrom || sixfoldDateTo);
+    const appendSixfold =
+      Array.isArray(sixfoldStops) &&
+      sixfoldStops.length > 0 &&
+      (sixfoldOnly || dateScoped);
+    const result = appendSixfold
       ? appendSixfoldOnlyStops(gatedResult, {
           transports: filteredTransports,
           sixfoldStops,
