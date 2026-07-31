@@ -13,6 +13,9 @@ const {
   normalizeLicensePlate,
 } = require("./normalize/exportBilling");
 const { billFromLiveData } = require("./normalize/liveBilling");
+const {
+  appendSixfoldOnlyStops,
+} = require("./normalize/sixfoldFirstBilling");
 const { classifySixfoldStop } = require("./normalize/sixfoldGps");
 const {
   loadTransporeonExportFromBuffer,
@@ -1941,6 +1944,8 @@ async function resolveGpsIndexFromHeaders(
       departure_time: stop?.departure_time || null,
       position: stop?.position || null,
       gps: stop?.gps || {},
+      booking_location: stop?.booking_location || stop?.address || null,
+      timeslot_begin: stop?.timeslot_begin || null,
     }));
   }
 
@@ -2004,6 +2009,7 @@ async function resolveGpsIndexFromHeaders(
 
   return {
     gpsIndex,
+    sixfoldStops,
     gpsInfo: {
       fetched: true,
       loader_mode: loaderMode,
@@ -2085,17 +2091,21 @@ app.get("/api/billing/export", async (req, res) => {
     }
 
     const debug = req.query.debug === "1" || req.query.debug === "true";
-    const { gpsIndex, gpsInfo } = await resolveGpsIndexFromHeaders(
-      req,
-      window,
-      debug,
-      {
+    const { gpsIndex, gpsInfo, sixfoldStops } =
+      await resolveGpsIndexFromHeaders(req, window, debug, {
         preferFleetTimeline: true,
-      },
-    );
+      });
 
     const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
-    const result = enforceUnloadingGpsGate(rawResult);
+    const gatedResult = enforceUnloadingGpsGate(rawResult);
+    // Excel + Zeitfenster laufen nur als Overlay; Basis sind ALLE Touren.
+    // Touren, die es NUR in Sixfold gibt, werden hier ergaenzt, damit keine
+    // GPS-belegte Tour verloren geht.
+    const result = appendSixfoldOnlyStops(gatedResult, {
+      transports: filteredTransports,
+      sixfoldStops,
+      config,
+    });
     persistBillingResult(importId, cacheKey, {
       file: filePath,
       generated_at: new Date().toISOString(),

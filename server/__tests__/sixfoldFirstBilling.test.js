@@ -1,0 +1,117 @@
+"use strict";
+
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+
+const { appendSixfoldOnlyStops } = require("../normalize/sixfoldFirstBilling");
+
+// Basis-Excel-Ergebnis (wie billFromExport es liefert), stark vereinfacht.
+function excelResult(stops = []) {
+  return {
+    stops,
+    summary: {
+      transport_count: 1,
+      stop_count: stops.length,
+      chargeable_count: stops.filter((s) => s.fee_eur > 0).length,
+      review_count: 0,
+      total_fee_eur: stops.reduce((a, s) => a + (s.fee_eur || 0), 0),
+    },
+  };
+}
+
+// Sixfold-Stopp im "simple shape" (wie resolveGpsIndexFromHeaders liefert).
+function sixfoldStop(overrides = {}) {
+  return {
+    transport_number: "B2_20260723_0006654477",
+    license_plate: "B-AB123",
+    type: "LOADING",
+    arrival_time: "2026-07-23T06:00:00.000Z",
+    departure_time: "2026-07-23T09:30:00.000Z",
+    timeslot_begin: "2026-07-23T06:00:00.000Z",
+    booking_location: "DE-14974 Ludwigsfelde",
+    position: { lat: 52.3, lng: 13.2 },
+    gps: { arrival_verified: true, departure_verified: true },
+    ...overrides,
+  };
+}
+
+test("Sixfold-only Tour wird ergänzt, wenn nicht im Excel", () => {
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [sixfoldStop()],
+  });
+  assert.equal(result.summary.sixfold_only_count, 1);
+  assert.equal(result.stops.length, 1);
+  const s = result.stops[0];
+  assert.equal(s.origin, "sixfold_only");
+  assert.equal(s.arrival_source, "GPS");
+  assert.equal(s.departure_source, "GPS");
+  assert.equal(s.gps_license_plate, "B-AB123");
+  assert.equal(s.booking_location, "DE-14974 Ludwigsfelde");
+  // 06:00 -> 09:30 = 210 min, 120 frei, 90 über -> 3 Blöcke -> 90 EUR
+  assert.equal(s.fee_eur, 90);
+});
+
+test("Tour, die schon im Excel ist (normalisierte TN), wird NICHT doppelt ergänzt", () => {
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    // Excel-TN hat anderes Präfix, gleiche 10-stellige Endnummer.
+    transports: [{ transport_number: "0C_20260723_0006654477" }],
+    sixfoldStops: [sixfoldStop()],
+  });
+  assert.equal(result.summary.sixfold_only_count, 0);
+  assert.equal(result.stops.length, 0);
+});
+
+test("Sixfold-Stopp ohne verifizierte GPS-Zeit wird nicht abgerechnet", () => {
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [
+      sixfoldStop({
+        gps: { arrival_verified: false, departure_verified: false },
+      }),
+    ],
+  });
+  assert.equal(result.summary.sixfold_only_count, 0);
+});
+
+test("0/0-Koordinaten gelten nicht als verifiziertes GPS", () => {
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [sixfoldStop({ position: { lat: 0, lng: 0 } })],
+  });
+  assert.equal(result.summary.sixfold_only_count, 0);
+});
+
+test("Mehrfachbesuch: früheste Ankunft + späteste Abfahrt gewinnen", () => {
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [
+      sixfoldStop({
+        arrival_time: "2026-07-23T06:00:00.000Z",
+        departure_time: "2026-07-23T07:00:00.000Z",
+      }),
+      sixfoldStop({
+        arrival_time: "2026-07-23T05:00:00.000Z",
+        departure_time: "2026-07-23T12:00:00.000Z",
+      }),
+    ],
+  });
+  assert.equal(result.summary.sixfold_only_count, 1);
+  const s = result.stops[0];
+  assert.equal(s.gps_arrival_time, "2026-07-23T05:00:00.000Z");
+  assert.equal(s.gps_departure_time, "2026-07-23T12:00:00.000Z");
+});
+
+test("bestehende Excel-Stops bleiben erhalten und Summe stimmt", () => {
+  const base = excelResult([
+    { fee_eur: 30, needs_review: false, transport_number: "X1" },
+  ]);
+  const result = appendSixfoldOnlyStops(base, {
+    transports: [{ transport_number: "X1_20260723_0000000001" }],
+    sixfoldStops: [sixfoldStop()],
+  });
+  // 1 Excel + 1 Sixfold-only
+  assert.equal(result.stops.length, 2);
+  assert.equal(result.summary.sixfold_only_count, 1);
+  assert.equal(result.summary.total_fee_eur, 120); // 30 + 90
+});
