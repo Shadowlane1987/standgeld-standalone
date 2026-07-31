@@ -310,7 +310,31 @@ function extractFleetTimelineContextFromUrl(urlValue) {
   }
 }
 
-function buildEvaluationWindow(period, referenceDateValue) {
+function buildEvaluationWindow(period, referenceDateValue, rangeFrom, rangeTo) {
+  const fromRaw = String(rangeFrom || "").trim();
+  const toRaw = String(rangeTo || "").trim();
+  if (fromRaw && toRaw) {
+    let fromDate = new Date(`${fromRaw}T00:00:00`);
+    let toDate = new Date(`${toRaw}T00:00:00`);
+    if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
+      if (toDate.getTime() < fromDate.getTime()) {
+        const swap = fromDate;
+        fromDate = toDate;
+        toDate = swap;
+      }
+      fromDate.setHours(0, 0, 0, 0);
+      toDate.setHours(0, 0, 0, 0);
+      // bis-Datum inklusiv: Fenster bis zum Ende des gewaehlten Tages.
+      toDate.setDate(toDate.getDate() + 1);
+      return {
+        period: "range",
+        referenceDate: `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, "0")}-${String(fromDate.getDate()).padStart(2, "0")}`,
+        fromTime: fromDate.toISOString(),
+        toTime: toDate.toISOString(),
+      };
+    }
+  }
+
   const normalizedPeriod =
     String(period || "day").toLowerCase() === "week" ? "week" : "day";
   const raw = String(referenceDateValue || "").trim();
@@ -2897,6 +2921,8 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
     const authToken = String(req.body?.authToken || "").trim();
     const period = String(req.body?.period || "day").trim();
     const referenceDate = String(req.body?.referenceDate || "").trim();
+    const rangeFrom = String(req.body?.fromDate || "").trim();
+    const rangeTo = String(req.body?.toDate || "").trim();
     const transportNumberFilter = String(
       req.body?.transportNumber || "",
     ).trim();
@@ -2926,7 +2952,12 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
             "Fleet-URL erkannt: SessionToken/Session-Cookie oder Auth-Token fehlt.",
         });
       }
-      const window = buildEvaluationWindow(period, referenceDate);
+      const window = buildEvaluationWindow(
+        period,
+        referenceDate,
+        rangeFrom,
+        rangeTo,
+      );
       const fleet = await fetchFleetTimelineStops(url, {
         sessionCookie,
         authToken,
