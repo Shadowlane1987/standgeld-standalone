@@ -141,63 +141,111 @@
           <div><strong>Positionen:</strong> <span id="positions">-</span></div>
           <div><strong>Takte:</strong> <span id="units">-</span></div>
         </div>
-        <div class="result-toolbar bookkeeping-toolbar">
-          <label>
-            Sortierung
-            <select id="dateSort">
-              <option value="arrival-asc">Ankunft aufsteigend</option>
-              <option value="arrival-desc">Ankunft absteigend</option>
-              <option value="departure-asc">Abfahrt aufsteigend</option>
-              <option value="departure-desc">Abfahrt absteigend</option>
-              <option value="rule-start-asc">Standgeld ab aufsteigend</option>
-              <option value="rule-start-desc">Standgeld ab absteigend</option>
-            </select>
-          </label>
-          <label class="checkbox-label">
-            <input id="bookkeepingOnlyMarked" type="checkbox" />
-            Nur als „abgerechnet“ markierte exportieren
-          </label>
-          <button id="bookkeepingExportBtn" type="button">
-            Buchungs-Excel exportieren
+
+        <div class="tab-nav">
+          <button id="tabAll" type="button" class="tab-btn active">
+            Alle Positionen
           </button>
-          <button id="openTransporeonBtn" type="button" class="btn-secondary">
-            Transporeon-Fenster öffnen / einloggen
-          </button>
-          <label class="checkbox-label">
-            <input id="transporeonDryRun" type="checkbox" checked />
-            Trockenlauf (nur prüfen)
-          </label>
-          <button id="applyTransporeonBtn" type="button" class="btn-secondary">
-            Zuschläge in Transporeon beantragen
+          <button id="tabSettled" type="button" class="tab-btn">
+            Abgerechnete Touren
           </button>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Transport</th>
-                <th>LKW</th>
-                <th>Typ</th>
-                <th>Tracking</th>
-                <th>Ort</th>
-                <th>Ankunft</th>
-                <th>Abfahrt</th>
-                <th>Zeitfenster</th>
-                <th>Quelle</th>
-                <th>Standgeld ab</th>
-                <th>Effektiv</th>
-                <th>Abrechenbar</th>
-                <th>Takte</th>
-                <th>Betrag</th>
-                <th>Abgerechnet</th>
-              </tr>
-            </thead>
-            <tbody id="rows"></tbody>
-          </table>
+
+        <div id="allView">
+          <div class="result-toolbar bookkeeping-toolbar">
+            <label>
+              Sortierung
+              <select id="dateSort">
+                <option value="arrival-asc">Ankunft aufsteigend</option>
+                <option value="arrival-desc">Ankunft absteigend</option>
+                <option value="departure-asc">Abfahrt aufsteigend</option>
+                <option value="departure-desc">Abfahrt absteigend</option>
+                <option value="rule-start-asc">Standgeld ab aufsteigend</option>
+                <option value="rule-start-desc">Standgeld ab absteigend</option>
+              </select>
+            </label>
+            <label class="checkbox-label">
+              <input id="bookkeepingOnlyMarked" type="checkbox" />
+              Nur als „abgerechnet“ markierte exportieren
+            </label>
+            <button id="bookkeepingExportBtn" type="button">
+              Buchungs-Excel exportieren
+            </button>
+            <button id="openTransporeonBtn" type="button" class="btn-secondary">
+              Transporeon-Fenster öffnen / einloggen
+            </button>
+            <label class="checkbox-label">
+              <input id="transporeonDryRun" type="checkbox" checked />
+              Trockenlauf (nur prüfen)
+            </label>
+            <button
+              id="applyTransporeonBtn"
+              type="button"
+              class="btn-secondary"
+            >
+              Zuschläge in Transporeon beantragen
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Transport</th>
+                  <th>LKW</th>
+                  <th>Typ</th>
+                  <th>Tracking</th>
+                  <th>Ort</th>
+                  <th>Ankunft</th>
+                  <th>Abfahrt</th>
+                  <th>Zeitfenster</th>
+                  <th>Quelle</th>
+                  <th>Standgeld ab</th>
+                  <th>Effektiv</th>
+                  <th>Abrechenbar</th>
+                  <th>Takte</th>
+                  <th>Betrag</th>
+                  <th>Abgerechnet</th>
+                </tr>
+              </thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+          <p class="status">
+            Tipp: Auf eine Sendungszeile klicken, um den Zuschlagstext zu
+            oeffnen.
+          </p>
         </div>
-        <p class="status">
-          Tipp: Auf eine Sendungszeile klicken, um den Zuschlagstext zu oeffnen.
-        </p>
+
+        <div id="settledView" hidden>
+          <div class="result-toolbar">
+            <span class="settled-count">
+              Abgerechnet: <strong id="settledCount">0</strong>
+            </span>
+            <span class="settled-sum">
+              Summe: <strong id="settledSum">-</strong>
+            </span>
+            <button id="settledExportBtn" type="button">
+              Abgerechnete als Excel exportieren
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Transport</th>
+                  <th>Typ</th>
+                  <th>Ort</th>
+                  <th>Station</th>
+                  <th>Zeitfenster</th>
+                  <th>Standzeit</th>
+                  <th>Betrag</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="settledRows"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
     </main>
 

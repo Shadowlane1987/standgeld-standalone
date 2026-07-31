@@ -28,6 +28,14 @@ const el = {
   transporeonDryRun: document.getElementById("transporeonDryRun"),
   openTransporeonBtn: document.getElementById("openTransporeonBtn"),
   applyTransporeonBtn: document.getElementById("applyTransporeonBtn"),
+  tabAll: document.getElementById("tabAll"),
+  tabSettled: document.getElementById("tabSettled"),
+  allView: document.getElementById("allView"),
+  settledView: document.getElementById("settledView"),
+  settledCount: document.getElementById("settledCount"),
+  settledSum: document.getElementById("settledSum"),
+  settledExportBtn: document.getElementById("settledExportBtn"),
+  settledRows: document.getElementById("settledRows"),
   rows: document.getElementById("rows"),
   surchargeModal: document.getElementById("surchargeModal"),
   surchargeTitle: document.getElementById("surchargeTitle"),
@@ -452,6 +460,7 @@ function renderStops(stops) {
       billedInput.addEventListener("change", () => {
         bk.billed = Boolean(billedInput.checked);
         persistBookkeepingEntries();
+        renderSettled();
       });
     }
     tr.addEventListener("click", () => openSurchargeModal(stop));
@@ -462,6 +471,109 @@ function renderStops(stops) {
       }
     });
     el.rows.appendChild(tr);
+  }
+  renderSettled();
+}
+
+function buildSettledStops() {
+  const list = [];
+  for (const stop of latestStops || []) {
+    const entry = getBookkeepingEntry(stop);
+    if (entry && entry.billed) list.push(stop);
+  }
+  return list;
+}
+
+function settledStationLabel(stop) {
+  const type = String(stop.type || "").toLowerCase();
+  if (type === "unloading") return "Entladestelle";
+  if (type === "loading") return "Beladestelle";
+  return "-";
+}
+
+function renderSettled() {
+  if (!el.settledRows) return;
+  const stops = buildSettledStops();
+  el.settledRows.innerHTML = "";
+
+  let sum = 0;
+  for (const stop of stops) {
+    sum += Number(stop.amount_eur || 0);
+    const tr = document.createElement("tr");
+    tr.className = "result-row";
+    tr.innerHTML = `
+      <td>${stop.transport_number || stop.tour_id || "-"}</td>
+      <td>${stop.type || "-"}</td>
+      <td>${stop.booking_location || stop.address || "-"}</td>
+      <td>${settledStationLabel(stop)}</td>
+      <td>${resolveWindowDisplay(stop)}</td>
+      <td>${formatMinutesAsHours(stop.effective_minutes)}</td>
+      <td>${Number(stop.amount_eur || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</td>
+      <td><span class="tp-done">✓ Abgerechnet</span></td>
+    `;
+    tr.addEventListener("click", () => openSurchargeModal(stop));
+    el.settledRows.appendChild(tr);
+  }
+
+  if (el.settledCount) el.settledCount.textContent = String(stops.length);
+  if (el.settledSum) {
+    el.settledSum.textContent = sum.toLocaleString("de-DE", {
+      style: "currency",
+      currency: "EUR",
+    });
+  }
+}
+
+function switchResultTab(tab) {
+  const showSettled = tab === "settled";
+  if (el.settledView) el.settledView.hidden = !showSettled;
+  if (el.allView) el.allView.hidden = showSettled;
+  if (el.tabSettled) el.tabSettled.classList.toggle("active", showSettled);
+  if (el.tabAll) el.tabAll.classList.toggle("active", !showSettled);
+  if (showSettled) renderSettled();
+}
+
+async function exportSettled() {
+  const stops = buildSettledStops();
+  if (!stops.length) {
+    setStatus("Keine abgerechneten Touren zum Exportieren.", "error");
+    return;
+  }
+
+  const rows = stops.map((stop) => ({
+    transport_number: String(stop.transport_number || "").trim(),
+    amount_eur: Number(stop.amount_eur || 0),
+  }));
+
+  if (el.settledExportBtn) el.settledExportBtn.disabled = true;
+  setStatus("Erstelle Excel der abgerechneten Touren …");
+
+  try {
+    const res = await fetch("/api/billing/settled-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows }),
+    });
+
+    if (!res.ok) {
+      let err = `HTTP ${res.status}`;
+      try {
+        const data = await res.json();
+        err = data.error || err;
+      } catch {
+        // ignore JSON parse error
+      }
+      throw new Error(err);
+    }
+
+    const blob = await res.blob();
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `abgerechnete_touren_${stamp}.xlsx`);
+    setStatus(`${rows.length} abgerechnete Touren exportiert.`, "success");
+  } catch (error) {
+    setStatus(error.message || "Export fehlgeschlagen.", "error");
+  } finally {
+    if (el.settledExportBtn) el.settledExportBtn.disabled = false;
   }
 }
 
@@ -1345,6 +1457,16 @@ if (el.openTransporeonBtn) {
 }
 if (el.applyTransporeonBtn) {
   el.applyTransporeonBtn.addEventListener("click", applyTransporeonSurcharges);
+}
+
+if (el.tabAll) {
+  el.tabAll.addEventListener("click", () => switchResultTab("all"));
+}
+if (el.tabSettled) {
+  el.tabSettled.addEventListener("click", () => switchResultTab("settled"));
+}
+if (el.settledExportBtn) {
+  el.settledExportBtn.addEventListener("click", exportSettled);
 }
 
 el.runBtn.addEventListener("click", run);
