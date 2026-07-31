@@ -170,8 +170,10 @@ function enforceUnloadingGpsGate(result) {
   if (!result || !Array.isArray(result.stops)) return result;
 
   const keptStops = [];
-  let removedUnloadingStops = 0;
+  let unverifiedUnloadingStops = 0;
 
+  // Nutzer-Vorgabe (2026-07-31): KEINE Stopps mehr rauswerfen. Entladestellen
+  // ohne Kennzeichen/GPS bleiben drin (XP-Zeiten), der Nutzer filtert selbst.
   for (const stop of result.stops) {
     const isUnloading =
       String(stop?.stop_type || "").toUpperCase() === "UNLOADING";
@@ -179,8 +181,7 @@ function enforceUnloadingGpsGate(result) {
     const hasPlateLink = Boolean(stop?.gps_plate_match);
 
     if (isUnloading && (!hasVerifiedGps || !hasPlateLink)) {
-      removedUnloadingStops += 1;
-      continue;
+      unverifiedUnloadingStops += 1;
     }
 
     keptStops.push(stop);
@@ -206,7 +207,7 @@ function enforceUnloadingGpsGate(result) {
       (sum, s) => sum + (s?.needs_review ? 0 : Number(s?.fee_eur || 0)),
       0,
     ),
-    filtered_unloading_missing_gps_or_plate: removedUnloadingStops,
+    filtered_unloading_missing_gps_or_plate: unverifiedUnloadingStops,
   };
 
   if (
