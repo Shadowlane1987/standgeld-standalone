@@ -144,10 +144,20 @@ test("Fruehankunft: Wartezeit vor dem Fenster wird NICHT gezaehlt", () => {
   assert.equal(r.fee_eur, 30);
 });
 
-test("fehlende Zeitbasis -> nicht berechenbar, Prueffall", () => {
+test("kein Zeitfenster -> ab Ankunft zaehlen, kein Prueffall", () => {
   const r = computeStandgeld(
     stop({ window_start: null, departure_time: "2026-07-16T09:00:00.000Z" }),
   );
+  // Ankunft 06:00 -> Abfahrt 09:00 = 180 min, 120 frei, 60 ueber -> 2 Bloecke.
+  assert.equal(r.count_start, "2026-07-16T06:00:00.000Z");
+  assert.equal(r.counted_standing_minutes, 180);
+  assert.equal(r.fee_eur, 60);
+  assert.equal(r.chargeable, true);
+  assert.equal(r.reason, REASON.CHARGEABLE);
+});
+
+test("fehlende Abfahrt -> nicht berechenbar, Prueffall", () => {
+  const r = computeStandgeld(stop({ departure_time: null }));
   assert.equal(r.reason, REASON.MISSING_DATA);
   assert.equal(r.chargeable, false);
   assert.equal(r.needs_review, true);

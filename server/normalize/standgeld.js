@@ -87,8 +87,9 @@ function computeStandgeld(input = {}, config = {}) {
     max_fee_eur: cfg.maxFeeEur,
   };
 
-  // Ohne vollstaendige Zeiten nicht berechenbar -> Prueffall.
-  if (arrival === null || departure === null || windowStart === null) {
+  // Ohne Ankunft ODER Abfahrt nicht berechenbar -> Prueffall. Ein fehlendes
+  // Zeitfenster ist KEIN Prueffall: dann wird ab Ankunft gezaehlt (Nutzer 2026-08-01).
+  if (arrival === null || departure === null) {
     return Object.freeze({
       ...base,
       arrived_late: null,
@@ -107,7 +108,9 @@ function computeStandgeld(input = {}, config = {}) {
     });
   }
 
-  const arrivedLate = arrival > windowStart;
+  // Kein Zeitfenster (weder Transporeon/Sixfold noch Excel) -> ab Ankunft zaehlen.
+  const hasWindow = windowStart !== null;
+  const arrivedLate = hasWindow && arrival > windowStart;
   const lateGraceEnabled = Boolean(cfg.lateArrivalGraceEnabled);
   const lateGraceMinutes = Math.max(
     0,
@@ -125,7 +128,9 @@ function computeStandgeld(input = {}, config = {}) {
   effectiveFreeMinutes = freeMinutesForCharge;
   const countStartMs = lateGraceApplies
     ? arrival
-    : Math.max(windowStart, arrival);
+    : hasWindow
+      ? Math.max(windowStart, arrival)
+      : arrival;
   const countStart = new Date(countStartMs).toISOString();
 
   let countedMinutes = Math.round((departure - countStartMs) / 60000);
