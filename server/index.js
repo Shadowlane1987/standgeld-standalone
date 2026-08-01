@@ -14,13 +14,17 @@ const {
 } = require("./normalize/exportBilling");
 const { billFromLiveData } = require("./normalize/liveBilling");
 const { appendSixfoldOnlyStops } = require("./normalize/sixfoldFirstBilling");
+const { filterBillingByGpsScope } = require("./normalize/gpsScope");
 const { classifySixfoldStop } = require("./normalize/sixfoldGps");
 const {
   loadTransporeonExportFromBuffer,
 } = require("./tools/readTransporeonExport");
 const { loadZeitfensterFromBuffer } = require("./tools/readZeitfensterExcel");
 const { transportNumberToLadenummer } = require("./normalize/ladenummer");
-const { windowStartForStop } = require("./normalize/zeitfenster");
+const {
+  windowStartForStop,
+  isPlaceholderWindowTime,
+} = require("./normalize/zeitfenster");
 const { fetchLiveVisibilityEvents } = require("./services/transporeonLive");
 const {
   applyTransporeonSurcharges,
@@ -1909,10 +1913,16 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
     }
 
     candidates += 1;
-    const hadExistingWindow = hasValidLocalWindowDateTime(unload.window_local);
+    const rawWindow = unload.window_local;
+    const isPlaceholderWindow =
+      hasValidLocalWindowDateTime(rawWindow) &&
+      isPlaceholderWindowTime(rawWindow);
+    const hadExistingWindow =
+      hasValidLocalWindowDateTime(rawWindow) && !isPlaceholderWindow;
 
     // Vorhandenes Entlade-Fenster (aus Sixfold/Transporeon) wird NIE ersetzt.
-    // Die Excel ergaenzt nur dort, wo gar kein Fenster vorhanden ist.
+    // Die Excel ergaenzt nur dort, wo gar kein Fenster vorhanden ist. Ein
+    // ganztaegiges Platzhalter-Fenster (00:01-23:59) gilt NICHT als Fenster.
     if (hadExistingWindow) {
       unload.unload_window_fallback_applied = false;
       unload.unload_window_fallback_reason = "existing_window_kept";
@@ -1925,10 +1935,19 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
     const localDate = localDateForUnloadWindowFallback(transport);
 
     if (!unloadStart || !localDate) {
-      unload.unload_window_fallback_applied = false;
-      unload.unload_window_fallback_reason = !unloadStart
-        ? "no_matching_excel_window"
-        : "missing_anchor_date";
+      // Kein Excel-Fenster gefunden. Ein Platzhalter-Fenster (00:01) ist kein
+      // echtes Fenster -> entfernen, damit ab Ankunft gezaehlt wird und keine
+      // irrefuehrende 00:01-Uhrzeit als "Fenster" erscheint.
+      if (isPlaceholderWindow) {
+        unload.window_local = null;
+        unload.unload_window_fallback_applied = false;
+        unload.unload_window_fallback_reason = "placeholder_window_cleared";
+      } else {
+        unload.unload_window_fallback_applied = false;
+        unload.unload_window_fallback_reason = !unloadStart
+          ? "no_matching_excel_window"
+          : "missing_anchor_date";
+      }
       continue;
     }
 
@@ -2186,18 +2205,21 @@ app.get("/api/billing/export", async (req, res) => {
           unloadWindowIndex,
         })
       : gatedResult;
+    // Optional: Aufteilung nach GPS-Nachweisbarkeit (Seite 1 = verified,
+    // Seite 2 = gaps). Ohne Parameter bleibt alles unveraendert ("all").
+    const scopedResult = filterBillingByGpsScope(result, req.query.gpsScope);
     if (importId) {
       persistBillingResult(importId, cacheKey, {
         file: filePath,
         generated_at: new Date().toISOString(),
         gps: gpsInfo,
         summary: {
-          ...result.summary,
+          ...scopedResult.summary,
           ...filterMeta,
           ...unloadFallbackMeta,
-          total_fee_display: formatEuro(result.summary.total_fee_eur),
+          total_fee_display: formatEuro(scopedResult.summary.total_fee_eur),
         },
-        stops: result.stops,
+        stops: scopedResult.stops,
       });
     }
 
@@ -2207,12 +2229,12 @@ app.get("/api/billing/export", async (req, res) => {
       generated_at: new Date().toISOString(),
       gps: gpsInfo,
       summary: {
-        ...result.summary,
+        ...scopedResult.summary,
         ...filterMeta,
         ...unloadFallbackMeta,
-        total_fee_display: formatEuro(result.summary.total_fee_eur),
+        total_fee_display: formatEuro(scopedResult.summary.total_fee_eur),
       },
-      stops: result.stops,
+      stops: scopedResult.stops,
     });
   } catch (error) {
     res
@@ -2452,18 +2474,19 @@ app.post(
         gpsIndex,
       });
       const result = enforceUnloadingGpsGate(rawResult);
+      const scopedResult = filterBillingByGpsScope(result, req.query.gpsScope);
       persistBillingResult(savedImport.id, cacheKey, {
         file: req.query.name ? String(req.query.name) : "upload.xlsx",
         import: savedImport,
         generated_at: new Date().toISOString(),
         gps: gpsInfo,
         summary: {
-          ...result.summary,
+          ...scopedResult.summary,
           ...filterMeta,
           ...unloadFallbackMeta,
-          total_fee_display: formatEuro(result.summary.total_fee_eur),
+          total_fee_display: formatEuro(scopedResult.summary.total_fee_eur),
         },
-        stops: result.stops,
+        stops: scopedResult.stops,
       });
 
       res.json({
@@ -2472,12 +2495,12 @@ app.post(
         generated_at: new Date().toISOString(),
         gps: gpsInfo,
         summary: {
-          ...result.summary,
+          ...scopedResult.summary,
           ...filterMeta,
           ...unloadFallbackMeta,
-          total_fee_display: formatEuro(result.summary.total_fee_eur),
+          total_fee_display: formatEuro(scopedResult.summary.total_fee_eur),
         },
-        stops: result.stops,
+        stops: scopedResult.stops,
       });
     } catch (error) {
       res.status(500).json({ error: error.message || "Unbekannter Fehler" });

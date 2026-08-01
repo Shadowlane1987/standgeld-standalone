@@ -1704,6 +1704,15 @@ function sixfoldParams() {
   // Harte Voreinstellung: keine Teil-Abrechnung mit Luecken.
   params.set("allowPartialLive", "0");
 
+  // Seiten-Aufteilung nach GPS-Nachweisbarkeit (Seite 1 = verified,
+  // Seite 2 = gaps). Ohne Flag bleibt alles zusammen ("all").
+  const gpsScope = String(window.STANDGELD_GPS_SCOPE || "all")
+    .trim()
+    .toLowerCase();
+  if (gpsScope === "verified" || gpsScope === "gaps") {
+    params.set("gpsScope", gpsScope);
+  }
+
   // Zeitraum treibt den Sixfold-Abruf (und filtert Excel-Overlay).
   const from = ((el.batchDateFrom && el.batchDateFrom.value) || "").trim();
   const to = ((el.batchDateTo && el.batchDateTo.value) || "").trim();

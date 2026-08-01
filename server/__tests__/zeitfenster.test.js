@@ -8,6 +8,7 @@ const {
   parseWindowRows,
   buildWindowIndex,
   windowStartForStop,
+  isPlaceholderWindowTime,
   normalizeLadenummer,
 } = require("../normalize/zeitfenster");
 
@@ -26,6 +27,20 @@ test("extractFirstTime: Punkt/Semikolon als Trenner", () => {
 test("extractFirstTime: Sekunden werden ignoriert", () => {
   assert.equal(extractFirstTime("04:00:00 Fr."), "04:00");
   assert.equal(extractFirstTime("16:00:00"), "16:00");
+});
+
+test("isPlaceholderWindowTime: 00:00/00:01 = Platzhalter, echte Zeiten nicht", () => {
+  // Ganztags-Platzhalter aus Transporeon (00:01-23:59)
+  assert.equal(isPlaceholderWindowTime("2026-07-24 00:01"), true);
+  assert.equal(isPlaceholderWindowTime("2026-07-24 00:00"), true);
+  assert.equal(isPlaceholderWindowTime("00:01"), true);
+  // Echte Fenster
+  assert.equal(isPlaceholderWindowTime("2026-07-24 06:00"), false);
+  assert.equal(isPlaceholderWindowTime("2026-07-24 00:02"), false);
+  assert.equal(isPlaceholderWindowTime("13:00"), false);
+  // Leer/ungueltig
+  assert.equal(isPlaceholderWindowTime(""), false);
+  assert.equal(isPlaceholderWindowTime(null), false);
 });
 
 test("extractFirstTime: Bereiche -> erste Zeit", () => {

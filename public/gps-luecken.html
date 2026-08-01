@@ -3,19 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Standgeld · Alle Transporte</title>
+    <title>Standgeld · GPS-Lücken</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="layout">
       <section class="panel hero">
-        <span class="hero-eyebrow">Batch-Abrechnung · GPS belegt</span>
-        <h1>Standgeld · Transporte mit GPS</h1>
+        <span class="hero-eyebrow">GPS-Lücken · Transporeon-Abgleich</span>
+        <h1>Standgeld · Transporte ohne GPS</h1>
         <p>
-          Zeigt nur Transporte, bei denen jeder Stopp per GPS belegt ist
-          (Ankunft und Abfahrt). Transporte ohne GPS-Beleg werden auf der Seite
-          „GPS-Lücken“ mit der Transporeon-Excel abgeglichen.
-          <a href="/gps-luecken.html">Zu den GPS-Lücken &rarr;</a>
+          Zeigt nur Transporte, bei denen mindestens eine Zeit (Ankunft oder
+          Abfahrt) nicht per GPS belegt ist. Lade hier die Transporeon-Excel
+          hoch — für diese Transporte werden Ankunft und Abfahrt durch die
+          XP-Service-Account-Zeiten aus der Excel ersetzt und neu gerechnet.
+          <a href="/batch.html">Zu den GPS-Transporten &rarr;</a>
           <a href="/">Zur Einzelberechnung &rarr;</a>
           <a href="/nahverkehr.html">Zum Nahverkehr &rarr;</a>
         </p>
@@ -374,8 +375,8 @@
 
     <script>
       window.STANDGELD_SCOPE = "fernverkehr";
-      // Seite 1 zeigt nur Transporte mit vollstaendigem GPS-Beleg.
-      window.STANDGELD_GPS_SCOPE = "verified";
+      // Seite 2 zeigt nur Transporte mit GPS-Luecke (Abgleich per Transporeon-Excel).
+      window.STANDGELD_GPS_SCOPE = "gaps";
     </script>
     <script src="/batch.js"></script>
   </body>

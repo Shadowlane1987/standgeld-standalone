@@ -194,10 +194,35 @@ function windowStartForStop(window, stopType) {
   return null;
 }
 
+/**
+ * Erkennt ein Platzhalter-/Ganztags-Fenster (KEIN echtes Zeitfenster).
+ *
+ * Transporeon traegt fuer Stopps ohne echten Termin ein ganztaegiges Fenster
+ * "00:01 - 23:59" ein. Die Startzeit 00:00/00:01 ist dann nur ein Platzhalter
+ * und darf NICHT als vorhandenes Fenster gelten -> sonst wird die
+ * Zeitfenster-Excel faelschlich nicht mehr ergaenzt (Nutzer 2026-08-01).
+ *
+ * Akzeptiert lokale Wanduhrzeit "YYYY-MM-DD HH:MM" oder "HH:MM". NICHT auf
+ * UTC-ISO-Strings anwenden (dort waere die Ortszeit verschoben).
+ *
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isPlaceholderWindowTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  const m = text.match(/\b(\d{2}):(\d{2})(?::\d{2})?\s*$/);
+  if (!m) return false;
+  const hh = m[1];
+  const mm = m[2];
+  return hh === "00" && (mm === "00" || mm === "01");
+}
+
 module.exports = {
   extractFirstTime,
   parseWindowRows,
   buildWindowIndex,
   windowStartForStop,
+  isPlaceholderWindowTime,
   normalizeLadenummer,
 };

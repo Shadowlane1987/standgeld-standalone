@@ -582,11 +582,13 @@ function renderStops(stops) {
       : windowValue !== "-"
         ? { cls: "time-chip-neutral", hint: "Fenster" }
         : { cls: "time-chip-muted", hint: "-" };
-    const windowCell = timeCellHtml(windowValue, windowTone.cls, windowTone.hint);
+    const windowCell = timeCellHtml(
+      windowValue,
+      windowTone.cls,
+      windowTone.hint,
+    );
 
-    const statusLabel = stop.needs_review
-      ? "Prüfen"
-      : singleReasonLabel(stop);
+    const statusLabel = stop.needs_review ? "Prüfen" : singleReasonLabel(stop);
 
     const bk = getBookkeepingEntry(stop);
     const checkedAttr = bk.billed ? "checked" : "";
