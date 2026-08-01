@@ -42,6 +42,9 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
 const importStore = new ImportStore();
+// Version der Abrechnungs-/Fensterlogik. Hochzaehlen, wenn eine Logikaenderung
+// alte persistierte Ergebnisse ungueltig macht (2 = Platzhalter-Fenster 00:01).
+const BILLING_CACHE_VERSION = 2;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -150,6 +153,9 @@ function billingCacheKey(req) {
     // ignore
   }
   const keyData = {
+    // Bei Aenderungen an der Berechnungs-/Fensterlogik hochzaehlen, damit alte
+    // persistierte Ergebnisse verworfen und neu berechnet werden.
+    v: BILLING_CACHE_VERSION,
     scope,
     freeMinutes: String(req.query.freeMinutes || ""),
     blockMinutes: String(req.query.blockMinutes || ""),
@@ -159,6 +165,7 @@ function billingCacheKey(req) {
     lateArrivalGraceMinutes: String(req.query.lateArrivalGraceMinutes || ""),
     sixfoldDateFrom: String(req.query.sixfoldDateFrom || ""),
     sixfoldDateTo: String(req.query.sixfoldDateTo || ""),
+    gpsScope: String(req.query.gpsScope || ""),
     hasSixfoldHeaders: hasSixfoldHeaders(req) ? "1" : "0",
     unloadWindowsMtime,
   };
