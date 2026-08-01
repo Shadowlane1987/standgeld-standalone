@@ -161,13 +161,14 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     // Ohne verifizierte GPS-Zeit gibt es keinen Beleg -> nicht abrechnen.
     if (!g.arrival_iso && !g.departure_iso) continue;
 
-    // Excel-Entladefenster NUR ergaenzen, wenn Sixfold KEIN Fenster liefert.
-    // Vorhandenes Sixfold-Fenster wird nie ersetzt; Ladestellen (LOADING) nie
-    // aus der Excel gefuellt (dort ist immer ein Fenster vorhanden).
+    // Entladestellen: Die Excel-Entladezeit ist massgeblich. Gibt es eine
+    // passende Excel-Zeile, gewinnt sie - auch gegen ein (oft nur als
+    // Platzhalter 00:01 geliefertes) Sixfold-Fenster. Ladestellen (LOADING)
+    // nie aus der Excel (dort ist immer ein echtes Fenster vorhanden).
     let windowIso = g.window_iso;
     let windowLocal = null;
     let windowFromExcel = false;
-    if (unloadWindowIndex && g.stop_type === "UNLOADING" && !g.window_iso) {
+    if (unloadWindowIndex && g.stop_type === "UNLOADING") {
       const ladenummer = transportNumberToLadenummer(g.transport_number);
       const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
       const unloadStart = windowStartForStop(windowRow, "UNLOADING");
