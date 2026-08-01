@@ -104,7 +104,7 @@ test("Mehrfachbesuch: früheste Ankunft + späteste Abfahrt gewinnen", () => {
   assert.equal(s.gps_departure_time, "2026-07-23T12:00:00.000Z");
 });
 
-test("Zeitfenster-Excel wird auf Sixfold-Entladestopp angewendet (Fenster ueberschreibt Sixfold-Slot)", () => {
+test("Vorhandenes Sixfold-Entladefenster wird NICHT durch die Excel ersetzt", () => {
   const tn = "B2_20260723_0006654477";
   const ladenummer = transportNumberToLadenummer(tn); // "6654477"
   const unloadWindowIndex = buildWindowIndex([
@@ -116,10 +116,39 @@ test("Zeitfenster-Excel wird auf Sixfold-Entladestopp angewendet (Fenster uebers
       sixfoldStop({
         transport_number: tn,
         type: "UNLOADING",
-        // Ankunft VOR Fenster -> Zaehlbeginn ab Fenster (16:30), nicht ab Sixfold-Slot (06:00).
         arrival_time: "2026-07-23T15:00:00.000Z",
         departure_time: "2026-07-23T19:30:00.000Z",
+        // Sixfold LIEFERT ein Fenster (06:00) -> Excel darf nicht ersetzen.
         timeslot_begin: "2026-07-23T06:00:00.000Z",
+      }),
+    ],
+    unloadWindowIndex,
+  });
+  assert.equal(result.summary.sixfold_unload_window_from_excel, 0);
+  const s = result.stops[0];
+  assert.equal(s.unload_window_fallback_applied, false);
+  // Zaehlbeginn ab Sixfold-Fenster 06:00 bzw. Ankunft 15:00 -> 15:00->19:30
+  // = 270 min, 120 frei, 150 ueber -> 5 Bloecke -> 150 EUR (Sixfold-Fenster).
+  assert.equal(s.fee_eur, 150);
+});
+
+test("Excel-Entladefenster wird ergaenzt, wenn Sixfold KEIN Fenster hat", () => {
+  const tn = "B2_20260723_0006654477";
+  const ladenummer = transportNumberToLadenummer(tn); // "6654477"
+  const unloadWindowIndex = buildWindowIndex([
+    { ladenummer, entladezeit_start: "16:30" },
+  ]);
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [
+      sixfoldStop({
+        transport_number: tn,
+        type: "UNLOADING",
+        // Ankunft VOR Fenster -> Zaehlbeginn ab Excel-Fenster (16:30).
+        arrival_time: "2026-07-23T15:00:00.000Z",
+        departure_time: "2026-07-23T19:30:00.000Z",
+        // KEIN Sixfold-Fenster vorhanden -> Excel fuellt die Luecke.
+        timeslot_begin: null,
       }),
     ],
     unloadWindowIndex,
@@ -129,7 +158,6 @@ test("Zeitfenster-Excel wird auf Sixfold-Entladestopp angewendet (Fenster uebers
   assert.equal(s.unload_window_fallback_applied, true);
   assert.equal(s.window_local, "2026-07-23 16:30");
   // 16:30 -> 19:30 = 180 min, 120 frei, 60 ueber -> 2 Bloecke -> 60 EUR.
-  // (Mit dem Sixfold-Slot 06:00 waeren es 150 EUR gewesen.)
   assert.equal(s.fee_eur, 60);
 });
 

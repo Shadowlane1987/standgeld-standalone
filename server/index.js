@@ -1438,19 +1438,16 @@ function calculateWithSafeOverride(stop, rules, windows) {
 
   // Prioritaet: Lade-Stellen behalten Sixfold, Entlade-Stellen nutzen Excel.
   if (isUnloadStop) {
-    const overriddenStop = applyTimeWindowOverride(stop, windows);
-    if (overriddenStop !== stop) {
-      return calcStop(overriddenStop, rules);
-    }
-
     const hasSixfoldWindow =
       toDate(stop?.timeslot_begin) || toDate(stop?.timeslot_end);
-    if (hasSixfoldWindow) {
-      return {
-        ...base,
-        window_override_applied: false,
-        matched_window_key: null,
-      };
+
+    // Excel-Fenster NUR ergaenzen, wenn Sixfold KEIN Entlade-Fenster hat.
+    // Vorhandenes Sixfold-Fenster wird nie mit der Excel ersetzt.
+    if (!hasSixfoldWindow) {
+      const overriddenStop = applyTimeWindowOverride(stop, windows);
+      if (overriddenStop !== stop) {
+        return calcStop(overriddenStop, rules);
+      }
     }
 
     return {
@@ -1913,18 +1910,19 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
 
     candidates += 1;
     const hadExistingWindow = hasValidLocalWindowDateTime(unload.window_local);
-    const previousWindow = String(unload.window_local || "").trim();
+
+    // Vorhandenes Entlade-Fenster (aus Sixfold/Transporeon) wird NIE ersetzt.
+    // Die Excel ergaenzt nur dort, wo gar kein Fenster vorhanden ist.
+    if (hadExistingWindow) {
+      unload.unload_window_fallback_applied = false;
+      unload.unload_window_fallback_reason = "existing_window_kept";
+      continue;
+    }
+
     const ladenummer = transportNumberToLadenummer(transport.transport_number);
     const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
     const unloadStart = windowStartForStop(windowRow, "UNLOADING");
     const localDate = localDateForUnloadWindowFallback(transport);
-
-    if (hadExistingWindow && !unloadStart) {
-      unload.unload_window_fallback_applied = false;
-      unload.unload_window_fallback_reason =
-        "existing_window_kept_no_excel_match";
-      continue;
-    }
 
     if (!unloadStart || !localDate) {
       unload.unload_window_fallback_applied = false;
@@ -1936,18 +1934,7 @@ function applyMissingUnloadWindowsFallback(transports, unloadWindowIndex) {
 
     unload.window_local = `${localDate} ${unloadStart}`;
     unload.unload_window_fallback_applied = true;
-    if (hadExistingWindow) {
-      if (previousWindow === unload.window_local) {
-        unload.unload_window_fallback_reason = "already_matching_excel_window";
-        alreadyMatching += 1;
-      } else {
-        unload.unload_window_fallback_reason = "excel_overrode_existing_window";
-        unload.unload_window_previous = previousWindow || null;
-        overriddenExisting += 1;
-      }
-    } else {
-      unload.unload_window_fallback_reason = "applied_missing_window";
-    }
+    unload.unload_window_fallback_reason = "applied_missing_window";
     applied += 1;
   }
 
