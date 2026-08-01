@@ -967,9 +967,11 @@ function sourceClass(stop) {
 }
 
 function plateCheckLabel(stop) {
-  if (!stop.gps_checked || !stop.gps_plate_match) return "-";
   const excelPlate = (stop.excel_license_plate || "").trim();
   const gpsPlate = (stop.gps_license_plate || "").trim();
+  // Reine Sixfold-Touren haben kein Excel-Kennzeichen zum Abgleichen -> GPS-Kennzeichen direkt zeigen.
+  if (stop.origin === "sixfold_only") return gpsPlate || excelPlate || "-";
+  if (!stop.gps_checked || !stop.gps_plate_match) return "-";
   return excelPlate || gpsPlate || "-";
 }
 
