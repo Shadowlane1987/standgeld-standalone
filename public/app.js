@@ -459,6 +459,74 @@ function groupByTransportNumber(stops) {
   return Array.from(groups.values()).flat();
 }
 
+const TYPE_LABELS = {
+  LOADING: "Laden",
+  UNLOADING: "Entladen",
+};
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function euro(value) {
+  return Number(value || 0).toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+  });
+}
+
+function minutesToHoursChip(value) {
+  if (value === null || value === undefined) return "-";
+  const total = Math.max(0, Math.round(Number(value)));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${h}:${String(m).padStart(2, "0")} h`;
+}
+
+function formatDateTimeForJustification(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "-") return "-";
+
+  const withYear = text.match(/^(\d{2}\.\d{2}\.\d{4}),\s*(\d{2}:\d{2})$/);
+  if (withYear) return `${withYear[1].slice(0, 5)} / ${withYear[2]}`;
+
+  const shortDate = text.match(/^(\d{2}\.\d{2})\.?[,]?\s*(\d{2}:\d{2})$/);
+  if (shortDate) return `${shortDate[1]} / ${shortDate[2]}`;
+
+  const direct = new Date(text);
+  if (!Number.isNaN(direct.getTime())) {
+    const local = direct.toLocaleString("de-DE", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return local.replace(/\.\s*,\s*/, " / ");
+  }
+  return text;
+}
+
+function timeCellHtml(value, toneClass, hint) {
+  const text = value || "-";
+  const chip = toneClass ? ` time-chip ${toneClass}` : "";
+  const suffix =
+    hint && text !== "-" ? `<span class="time-hint">${hint}</span>` : "";
+  return `<span class="time-stack"><span class="${chip.trim()}">${text}</span>${suffix}</span>`;
+}
+
+// Status-Text ohne Prüffall: analog zu den Batch-Gründen.
+function singleReasonLabel(stop) {
+  if (Number(stop.amount_eur || 0) > 0) return "Abrechenbar";
+  const free = Number(stop.free_minutes || 120);
+  if (Number(stop.effective_minutes || 0) <= free) return "Innerhalb Freizeit";
+  return "Unter Auslöser";
+}
+
 function renderStops(stops) {
   const inRange = (Array.isArray(stops) ? stops : []).filter(dateInRange);
   const sortedStops = groupByTransportNumber(
@@ -474,37 +542,75 @@ function renderStops(stops) {
     tr.className = "result-row";
     if (Number(stop.amount_eur || 0) > 0) tr.classList.add("chargeable-row");
     if (stop.needs_review) tr.classList.add("review-row");
+    if (stop.window_override_applied) tr.classList.add("fallback-row");
     if (selectedKey && stopKeyValue === selectedKey) {
       tr.classList.add("selected-row");
       tr.setAttribute("aria-current", "true");
     }
     tr.tabIndex = 0;
-    const arrival = compactDateTimeDisplay(stop.arrival_display);
-    const departure = compactDateTimeDisplay(stop.departure_display);
-    const ruleStart = compactDateTimeDisplay(stop.rule_start_display);
-    const window = resolveWindowDisplay(stop);
-    const windowSource = getTimeWindowSource(stop);
-    const tracking = getTrackingState(stop);
-    const effective = formatMinutesAsHours(stop.effective_minutes);
-    const billable = formatMinutesAsHours(stop.billable_minutes);
+
+    const typeUpper = String(stop.type || "").toUpperCase();
+    const typeLabel = TYPE_LABELS[typeUpper] || stop.type || "-";
+    const gpsVerified = Boolean(stop.gps_verified);
+    const srcLabel = gpsVerified ? "GPS" : "XP";
+    const srcClass = gpsVerified ? "src-gps" : "src-neutral";
+    const boundaryTone = gpsVerified ? "time-chip-gps" : "time-chip-xp";
+
+    const arrivalCell = timeCellHtml(
+      formatDateTimeForJustification(stop.arrival_display),
+      boundaryTone,
+      srcLabel,
+    );
+    const departureCell = timeCellHtml(
+      formatDateTimeForJustification(stop.departure_display),
+      boundaryTone,
+      srcLabel,
+    );
+
+    const startTone = stop.late_arrival_grace_applied
+      ? { cls: "time-chip-late", hint: "3h frei ab Ankunft" }
+      : { cls: "time-chip-neutral", hint: "Start" };
+    const startCell = timeCellHtml(
+      formatDateTimeForJustification(stop.rule_start_display),
+      startTone.cls,
+      startTone.hint,
+    );
+
+    const windowValue = resolveWindowDisplay(stop);
+    const windowTone = stop.window_override_applied
+      ? { cls: "time-chip-excel", hint: "Excel" }
+      : windowValue !== "-"
+        ? { cls: "time-chip-neutral", hint: "Fenster" }
+        : { cls: "time-chip-muted", hint: "-" };
+    const windowCell = timeCellHtml(windowValue, windowTone.cls, windowTone.hint);
+
+    const statusLabel = stop.needs_review
+      ? "Prüfen"
+      : singleReasonLabel(stop);
+
     const bk = getBookkeepingEntry(stop);
     const checkedAttr = bk.billed ? "checked" : "";
+    const submittedCell = bk.submitted
+      ? '<span class="tp-done">✓ Abgerechnet</span>'
+      : '<span class="tp-open">—</span>';
+
     tr.innerHTML = `
       <td>${stop.transport_number || stop.tour_id || "-"}</td>
-      <td>${stop.plate || "-"}</td>
-      <td>${stop.type || "-"}</td>
-      <td><span class="tracking-pill ${tracking.className}">${tracking.label}</span></td>
-      <td>${stop.booking_location || stop.address || "-"}</td>
-      <td>${arrival}</td>
-      <td>${departure}</td>
-      <td>${window}</td>
-      <td><span class="source-pill ${windowSource.className}">${windowSource.label}</span></td>
-      <td>${ruleStart}</td>
-      <td>${effective}</td>
-      <td>${billable}</td>
+      <td>${escapeHtml(stop.plate || "-")}</td>
+      <td>${typeLabel}</td>
+      <td>${escapeHtml(stop.booking_location || stop.address || "-")}</td>
+      <td><span class="${srcClass}">${srcLabel}</span></td>
+      <td>${arrivalCell}</td>
+      <td>${departureCell}</td>
+      <td>${startCell}</td>
+      <td>${windowCell}</td>
+      <td>${minutesToHoursChip(stop.effective_minutes)}</td>
+      <td>${minutesToHoursChip(stop.billable_minutes)}</td>
+      <td>${euro(stop.amount_eur)}</td>
       <td>${stop.billed_units || 0}</td>
-      <td>${Number(stop.amount_eur || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</td>
+      <td>${statusLabel}</td>
       <td><input type="checkbox" data-bk="billed" ${checkedAttr} /></td>
+      <td>${submittedCell}</td>
     `;
     tr.querySelectorAll("input[data-bk]").forEach((input) => {
       input.addEventListener("click", (event) => event.stopPropagation());
