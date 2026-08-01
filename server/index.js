@@ -43,9 +43,10 @@ const app = express();
 const PORT = Number(process.env.PORT || 3100);
 const importStore = new ImportStore();
 // Version der Abrechnungs-/Fensterlogik. Hochzaehlen, wenn eine Logikaenderung
-// alte persistierte Ergebnisse ungueltig macht (6 = Excel-Entladezeit ist bei
-// Entladestellen massgeblich, gewinnt auch gegen Sixfold-/Platzhalter-Fenster).
-const BILLING_CACHE_VERSION = 6;
+// alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
+// Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
+// gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
+const BILLING_CACHE_VERSION = 7;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
