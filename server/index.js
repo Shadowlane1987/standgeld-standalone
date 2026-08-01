@@ -43,9 +43,9 @@ const app = express();
 const PORT = Number(process.env.PORT || 3100);
 const importStore = new ImportStore();
 // Version der Abrechnungs-/Fensterlogik. Hochzaehlen, wenn eine Logikaenderung
-// alte persistierte Ergebnisse ungueltig macht (4 = Ganztags-Fenster per Dauer
-// als Platzhalter erkennen, Sixfold-Pfad).
-const BILLING_CACHE_VERSION = 4;
+// alte persistierte Ergebnisse ungueltig macht (5 = Ganztags-/Mitternachts-
+// Fenster robust als Platzhalter erkennen, auch bei ISO ohne Zeitzone-Offset).
+const BILLING_CACHE_VERSION = 5;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");

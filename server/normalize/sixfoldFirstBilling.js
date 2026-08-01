@@ -55,11 +55,12 @@ function localWallClockFromIso(iso, timeZone) {
 }
 
 // Ganztaegiges Buchungsfenster aus Transporeon (z.B. 00:01-23:59) ist KEIN
-// echtes Zeitfenster, sondern nur ein Lueckenfueller. Zwei Signale erkennen es:
-//  1) Dauer begin->end >= ~22h (ganzer Tag). Zeitzonen-UNABHAENGIG, weil eine
-//     Differenz zweier absoluter Zeitstempel nicht von der Zone abhaengt -> auf
-//     UTC-Servern (Render) genauso sicher wie lokal.
-//  2) Lokale Startuhrzeit 00:00/00:01 (Fallback, falls kein Ende geliefert).
+// echtes Zeitfenster, sondern nur ein Lueckenfueller. Drei Signale erkennen es,
+// alle ROBUST auf UTC-Servern (Render):
+//  1) Dauer begin->end >= ~22h (ganzer Tag). Zeitzonen-UNABHAENGIG.
+//  2) Rohe Startuhrzeit im ISO-String ist 00:00/00:01 (ohne Zeitzonen-Mathe;
+//     faengt auch ISO-Strings OHNE Offset ab, die sonst falsch umgerechnet wuerden).
+//  3) Lokale Startuhrzeit 00:00/00:01 (letzter Fallback).
 const PLACEHOLDER_MIN_SPAN_MS = 22 * 60 * 60 * 1000;
 
 function isAllDaySpan(beginIso, endIso) {
@@ -69,8 +70,18 @@ function isAllDaySpan(beginIso, endIso) {
   return b - a >= PLACEHOLDER_MIN_SPAN_MS;
 }
 
+// Uhrzeit direkt aus dem ISO-String lesen (kein Date/Zeitzonen-Umrechnen).
+function rawIsoTimeIsMidnight(iso) {
+  const m = String(iso || "").match(/T(\d{2}):(\d{2})/);
+  if (!m) return false;
+  const hh = m[1];
+  const mm = m[2];
+  return hh === "00" && (mm === "00" || mm === "01");
+}
+
 function isPlaceholderTimeslot(beginIso, endIso, timeZone) {
   if (isAllDaySpan(beginIso, endIso)) return true;
+  if (rawIsoTimeIsMidnight(beginIso)) return true;
   const local = localWallClockFromIso(beginIso, timeZone);
   return local ? isPlaceholderWindowTime(local) : false;
 }

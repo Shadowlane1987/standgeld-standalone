@@ -219,6 +219,36 @@ test("Ganztags-Spanne (begin->end ~24h) gilt als Platzhalter, auch ohne 00:01", 
   assert.equal(s.fee_eur, 60);
 });
 
+test("ISO ohne Zeitzone-Offset (00:01) gilt als Platzhalter (Render/UTC-sicher)", () => {
+  const tn = "B2_20260723_0006655499";
+  const ladenummer = transportNumberToLadenummer(tn); // "6655499"
+  const unloadWindowIndex = buildWindowIndex([
+    { ladenummer, entladezeit_start: "16:30" },
+  ]);
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [
+      sixfoldStop({
+        transport_number: tn,
+        type: "UNLOADING",
+        arrival_time: "2026-07-23T15:00:00.000Z",
+        departure_time: "2026-07-23T19:30:00.000Z",
+        // ISO OHNE Offset -> auf UTC-Server wuerde die Umrechnung 00:01
+        // verfehlen; die Roh-Uhrzeit-Pruefung faengt es trotzdem ab.
+        timeslot_begin: "2026-07-23T00:01:00",
+        timeslot_end: null,
+        timeslot_timezone: null,
+      }),
+    ],
+    unloadWindowIndex,
+  });
+  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
+  const s = result.stops[0];
+  assert.equal(s.unload_window_fallback_applied, true);
+  assert.equal(s.window_local, "2026-07-23 16:30");
+  assert.equal(s.fee_eur, 60);
+});
+
 test("Platzhalter-Fenster ohne Excel-Treffer -> ab Ankunft zaehlen, kein 00:01", () => {
   const result = appendSixfoldOnlyStops(excelResult([]), {
     transports: [],
