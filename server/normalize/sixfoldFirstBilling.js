@@ -221,11 +221,10 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     // Ohne verifizierte GPS-Zeit gibt es keinen Beleg -> nicht abrechnen.
     if (!g.arrival_iso && !g.departure_iso) continue;
 
-    // ENTLADESTELLEN: Die Zeitfenster-Excel (Entladezeit je Ladenummer) ist die
-    // massgebliche Terminquelle. Gibt es eine Excel-Zeile, GEWINNT die Excel.
-    // Nur ohne Excel-Treffer zaehlt das Sixfold-Fenster - und ein ganztaegiges
-    // Platzhalter-Fenster (z.B. 00:01-23:59) gilt dann NICHT als Fenster.
-    // LADESTELLEN: nie aus der Excel; dort ist immer ein echtes Fenster da.
+    // Excel-Entladefenster ergaenzen, wenn Sixfold KEIN echtes Fenster liefert.
+    // Ein ganztaegiges Platzhalter-Fenster (lokal 00:01) gilt NICHT als Fenster.
+    // Vorhandenes echtes Sixfold-Fenster wird nie ersetzt; Ladestellen (LOADING)
+    // nie aus der Excel gefuellt (dort ist immer ein Fenster vorhanden).
     const isPlaceholderWindow =
       g.stop_type === "UNLOADING" &&
       isPlaceholderTimeslot(g.window_iso, g.window_end_iso, g.window_timezone);
@@ -234,7 +233,7 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     let windowIso = hasRealSixfoldWindow ? g.window_iso : null;
     let windowLocal = null;
     let windowFromExcel = false;
-    if (g.stop_type === "UNLOADING") {
+    if (g.stop_type === "UNLOADING" && !hasRealSixfoldWindow) {
       const ladenummer = transportNumberToLadenummer(g.transport_number);
       const windowRow =
         unloadWindowIndex && ladenummer
@@ -246,17 +245,13 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
         ? applyTimeToIsoDate(refIso, unloadStart)
         : null;
       if (built) {
-        // Excel-Entladezeit gefunden -> massgeblich, ersetzt auch ein
-        // Platzhalter- ODER Sixfold-Fenster.
         windowIso = built.iso;
         windowLocal = built.local;
         windowFromExcel = true;
         unloadWindowFromExcel += 1;
-      } else if (!hasRealSixfoldWindow) {
-        // Keine Excel-Zeile UND nur ein Platzhalter -> kein Fenster: ab Ankunft
-        // zaehlen, kein irrefuehrendes 00:01. (windowIso bleibt null.)
-        windowIso = null;
       }
+      // Kein Excel-Treffer: windowIso bleibt null -> ab Ankunft zaehlen, kein
+      // irrefuehrendes 00:01-Platzhalterfenster mehr.
     }
 
     const fee = computeStandgeld(
