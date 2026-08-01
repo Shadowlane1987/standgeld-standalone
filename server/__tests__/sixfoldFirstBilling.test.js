@@ -104,7 +104,7 @@ test("Mehrfachbesuch: früheste Ankunft + späteste Abfahrt gewinnen", () => {
   assert.equal(s.gps_departure_time, "2026-07-23T12:00:00.000Z");
 });
 
-test("Vorhandenes Sixfold-Entladefenster wird NICHT durch die Excel ersetzt", () => {
+test("Excel-Entladezeit ist massgeblich und ersetzt auch ein Sixfold-Fenster", () => {
   const tn = "B2_20260723_0006654477";
   const ladenummer = transportNumberToLadenummer(tn); // "6654477"
   const unloadWindowIndex = buildWindowIndex([
@@ -118,18 +118,18 @@ test("Vorhandenes Sixfold-Entladefenster wird NICHT durch die Excel ersetzt", ()
         type: "UNLOADING",
         arrival_time: "2026-07-23T15:00:00.000Z",
         departure_time: "2026-07-23T19:30:00.000Z",
-        // Sixfold LIEFERT ein Fenster (06:00) -> Excel darf nicht ersetzen.
+        // Sixfold liefert 06:00, aber die Excel-Entladezeit (16:30) gewinnt.
         timeslot_begin: "2026-07-23T06:00:00.000Z",
       }),
     ],
     unloadWindowIndex,
   });
-  assert.equal(result.summary.sixfold_unload_window_from_excel, 0);
+  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
   const s = result.stops[0];
-  assert.equal(s.unload_window_fallback_applied, false);
-  // Zaehlbeginn ab Sixfold-Fenster 06:00 bzw. Ankunft 15:00 -> 15:00->19:30
-  // = 270 min, 120 frei, 150 ueber -> 5 Bloecke -> 150 EUR (Sixfold-Fenster).
-  assert.equal(s.fee_eur, 150);
+  assert.equal(s.unload_window_fallback_applied, true);
+  assert.equal(s.window_local, "2026-07-23 16:30");
+  // Zaehlbeginn ab Excel 16:30 -> 19:30 = 180 min, 120 frei, 60 ueber -> 2 -> 60 EUR.
+  assert.equal(s.fee_eur, 60);
 });
 
 test("Excel-Entladefenster wird ergaenzt, wenn Sixfold KEIN Fenster hat", () => {
