@@ -20,7 +20,11 @@
 const { computeStandgeld } = require("./standgeld");
 const { normalizeTransportNumber } = require("./exportBilling");
 const { transportNumberToLadenummer } = require("./ladenummer");
-const { windowStartForStop } = require("./zeitfenster");
+const {
+  windowStartForStop,
+  isPlaceholderWindowTime,
+} = require("./zeitfenster");
+const { isValidTimeZone } = require("./datetime");
 
 const DEFAULT_TZ = "Europe/Berlin";
 
@@ -28,6 +32,34 @@ function parseMs(iso) {
   if (!iso) return null;
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? null : ms;
+}
+
+// Lokale Wanduhrzeit ("YYYY-MM-DD HH:MM") eines ISO-Zeitstempels in der Zone.
+function localWallClockFromIso(iso, timeZone) {
+  const ms = parseMs(iso);
+  if (ms === null) return null;
+  const tz = isValidTimeZone(timeZone) ? timeZone : DEFAULT_TZ;
+  const dtf = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const p = Object.create(null);
+  for (const part of dtf.formatToParts(new Date(ms))) p[part.type] = part.value;
+  const hh = p.hour === "24" ? "00" : p.hour;
+  return `${p.year}-${p.month}-${p.day} ${hh}:${p.minute}`;
+}
+
+// Ganztaegiges Buchungsfenster aus Transporeon (00:01-23:59) ist KEIN echtes
+// Zeitfenster, sondern nur ein Lueckenfueller. Sixfold liefert das teils als
+// timeslot_begin -> lokal 00:00/00:01 als Platzhalter erkennen.
+function isPlaceholderTimeslot(iso, timeZone) {
+  const local = localWallClockFromIso(iso, timeZone);
+  return local ? isPlaceholderWindowTime(local) : false;
 }
 
 // Setzt die Uhrzeit (HH:MM) aus dem Zeitfenster-Excel auf das Datum + die
@@ -144,6 +176,7 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
         arrival_iso: null,
         departure_iso: null,
         window_iso: null,
+        window_timezone: null,
         booking_location: null,
         plate: null,
       });
@@ -151,6 +184,7 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     prev.arrival_iso = earliest(prev.arrival_iso, g.arrival_iso);
     prev.departure_iso = latest(prev.departure_iso, g.departure_iso);
     prev.window_iso = prev.window_iso || s.timeslot_begin || null;
+    prev.window_timezone = prev.window_timezone || s.timeslot_timezone || null;
     prev.booking_location = prev.booking_location || s.booking_location || null;
     prev.plate = prev.plate || String(s.license_plate || "").trim() || null;
     groups.set(key, prev);
@@ -161,15 +195,24 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     // Ohne verifizierte GPS-Zeit gibt es keinen Beleg -> nicht abrechnen.
     if (!g.arrival_iso && !g.departure_iso) continue;
 
-    // Excel-Entladefenster NUR ergaenzen, wenn Sixfold KEIN Fenster liefert.
-    // Vorhandenes Sixfold-Fenster wird nie ersetzt; Ladestellen (LOADING) nie
-    // aus der Excel gefuellt (dort ist immer ein Fenster vorhanden).
-    let windowIso = g.window_iso;
+    // Excel-Entladefenster ergaenzen, wenn Sixfold KEIN echtes Fenster liefert.
+    // Ein ganztaegiges Platzhalter-Fenster (lokal 00:01) gilt NICHT als Fenster.
+    // Vorhandenes echtes Sixfold-Fenster wird nie ersetzt; Ladestellen (LOADING)
+    // nie aus der Excel gefuellt (dort ist immer ein Fenster vorhanden).
+    const isPlaceholderWindow =
+      g.stop_type === "UNLOADING" &&
+      isPlaceholderTimeslot(g.window_iso, g.window_timezone);
+    const hasRealSixfoldWindow = Boolean(g.window_iso) && !isPlaceholderWindow;
+
+    let windowIso = hasRealSixfoldWindow ? g.window_iso : null;
     let windowLocal = null;
     let windowFromExcel = false;
-    if (unloadWindowIndex && g.stop_type === "UNLOADING" && !g.window_iso) {
+    if (g.stop_type === "UNLOADING" && !hasRealSixfoldWindow) {
       const ladenummer = transportNumberToLadenummer(g.transport_number);
-      const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
+      const windowRow =
+        unloadWindowIndex && ladenummer
+          ? unloadWindowIndex.get(ladenummer)
+          : null;
       const unloadStart = windowStartForStop(windowRow, "UNLOADING");
       const refIso = g.arrival_iso || g.departure_iso;
       const built = unloadStart
@@ -181,6 +224,8 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
         windowFromExcel = true;
         unloadWindowFromExcel += 1;
       }
+      // Kein Excel-Treffer: windowIso bleibt null -> ab Ankunft zaehlen, kein
+      // irrefuehrendes 00:01-Platzhalterfenster mehr.
     }
 
     const fee = computeStandgeld(

@@ -161,6 +161,58 @@ test("Excel-Entladefenster wird ergaenzt, wenn Sixfold KEIN Fenster hat", () => 
   assert.equal(s.fee_eur, 60);
 });
 
+test("Platzhalter-Fenster (Sixfold 00:01) gilt NICHT als Fenster -> Excel greift", () => {
+  const tn = "B2_20260723_0006654477";
+  const ladenummer = transportNumberToLadenummer(tn); // "6654477"
+  const unloadWindowIndex = buildWindowIndex([
+    { ladenummer, entladezeit_start: "16:30" },
+  ]);
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [
+      sixfoldStop({
+        transport_number: tn,
+        type: "UNLOADING",
+        arrival_time: "2026-07-23T15:00:00.000Z",
+        departure_time: "2026-07-23T19:30:00.000Z",
+        // Ganztags-Buchung 00:01 lokal -> Platzhalter, KEIN echtes Fenster.
+        timeslot_begin: "2026-07-23T00:01:00+02:00",
+        timeslot_timezone: "Europe/Berlin",
+      }),
+    ],
+    unloadWindowIndex,
+  });
+  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
+  const s = result.stops[0];
+  assert.equal(s.unload_window_fallback_applied, true);
+  assert.equal(s.window_local, "2026-07-23 16:30");
+  // Excel-Fenster 16:30 statt Platzhalter 00:01 -> 60 EUR.
+  assert.equal(s.fee_eur, 60);
+});
+
+test("Platzhalter-Fenster ohne Excel-Treffer -> ab Ankunft zaehlen, kein 00:01", () => {
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [
+      sixfoldStop({
+        transport_number: "B2_20260723_0006654477",
+        type: "UNLOADING",
+        arrival_time: "2026-07-23T15:00:00.000Z",
+        departure_time: "2026-07-23T19:30:00.000Z",
+        timeslot_begin: "2026-07-23T00:01:00+02:00",
+        timeslot_timezone: "Europe/Berlin",
+      }),
+    ],
+    // Kein Zeitfenster-Excel-Index -> Platzhalter faellt weg.
+  });
+  assert.equal(result.summary.sixfold_unload_window_from_excel, 0);
+  const s = result.stops[0];
+  assert.equal(s.unload_window_fallback_applied, false);
+  assert.equal(s.window_local, null);
+  // Ab Ankunft 15:00 -> 19:30 = 270 min, 120 frei, 150 ueber -> 5 -> 150 EUR.
+  assert.equal(s.fee_eur, 150);
+});
+
 test("bestehende Excel-Stops bleiben erhalten und Summe stimmt", () => {
   const base = excelResult([
     { fee_eur: 30, needs_review: false, transport_number: "X1" },
