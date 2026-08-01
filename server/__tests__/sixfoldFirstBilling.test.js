@@ -190,6 +190,35 @@ test("Platzhalter-Fenster (Sixfold 00:01) gilt NICHT als Fenster -> Excel greift
   assert.equal(s.fee_eur, 60);
 });
 
+test("Ganztags-Spanne (begin->end ~24h) gilt als Platzhalter, auch ohne 00:01", () => {
+  const tn = "B2_20260723_0006655499";
+  const ladenummer = transportNumberToLadenummer(tn); // "6655499"
+  const unloadWindowIndex = buildWindowIndex([
+    { ladenummer, entladezeit_start: "16:30" },
+  ]);
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    transports: [],
+    sixfoldStops: [
+      sixfoldStop({
+        transport_number: tn,
+        type: "UNLOADING",
+        arrival_time: "2026-07-23T15:00:00.000Z",
+        departure_time: "2026-07-23T19:30:00.000Z",
+        // Startzeit sieht real aus (lokal 12:00), aber Spanne ~23h -> Ganztag.
+        timeslot_begin: "2026-07-23T10:00:00.000Z",
+        timeslot_end: "2026-07-24T09:00:00.000Z",
+        timeslot_timezone: "Europe/Berlin",
+      }),
+    ],
+    unloadWindowIndex,
+  });
+  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
+  const s = result.stops[0];
+  assert.equal(s.unload_window_fallback_applied, true);
+  assert.equal(s.window_local, "2026-07-23 16:30");
+  assert.equal(s.fee_eur, 60);
+});
+
 test("Platzhalter-Fenster ohne Excel-Treffer -> ab Ankunft zaehlen, kein 00:01", () => {
   const result = appendSixfoldOnlyStops(excelResult([]), {
     transports: [],

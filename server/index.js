@@ -43,9 +43,9 @@ const app = express();
 const PORT = Number(process.env.PORT || 3100);
 const importStore = new ImportStore();
 // Version der Abrechnungs-/Fensterlogik. Hochzaehlen, wenn eine Logikaenderung
-// alte persistierte Ergebnisse ungueltig macht (3 = Platzhalter-Fenster 00:01
-// auch im reinen Sixfold-Pfad).
-const BILLING_CACHE_VERSION = 3;
+// alte persistierte Ergebnisse ungueltig macht (4 = Ganztags-Fenster per Dauer
+// als Platzhalter erkennen, Sixfold-Pfad).
+const BILLING_CACHE_VERSION = 4;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2027,6 +2027,8 @@ async function resolveGpsIndexFromHeaders(
       gps: stop?.gps || {},
       booking_location: stop?.booking_location || stop?.address || null,
       timeslot_begin: stop?.timeslot_begin || null,
+      timeslot_end: stop?.timeslot_end || null,
+      timeslot_timezone: stop?.timeslot_timezone || null,
     }));
   }
 

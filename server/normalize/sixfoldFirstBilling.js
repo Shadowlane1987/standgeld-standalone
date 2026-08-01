@@ -54,11 +54,24 @@ function localWallClockFromIso(iso, timeZone) {
   return `${p.year}-${p.month}-${p.day} ${hh}:${p.minute}`;
 }
 
-// Ganztaegiges Buchungsfenster aus Transporeon (00:01-23:59) ist KEIN echtes
-// Zeitfenster, sondern nur ein Lueckenfueller. Sixfold liefert das teils als
-// timeslot_begin -> lokal 00:00/00:01 als Platzhalter erkennen.
-function isPlaceholderTimeslot(iso, timeZone) {
-  const local = localWallClockFromIso(iso, timeZone);
+// Ganztaegiges Buchungsfenster aus Transporeon (z.B. 00:01-23:59) ist KEIN
+// echtes Zeitfenster, sondern nur ein Lueckenfueller. Zwei Signale erkennen es:
+//  1) Dauer begin->end >= ~22h (ganzer Tag). Zeitzonen-UNABHAENGIG, weil eine
+//     Differenz zweier absoluter Zeitstempel nicht von der Zone abhaengt -> auf
+//     UTC-Servern (Render) genauso sicher wie lokal.
+//  2) Lokale Startuhrzeit 00:00/00:01 (Fallback, falls kein Ende geliefert).
+const PLACEHOLDER_MIN_SPAN_MS = 22 * 60 * 60 * 1000;
+
+function isAllDaySpan(beginIso, endIso) {
+  const a = parseMs(beginIso);
+  const b = parseMs(endIso);
+  if (a === null || b === null) return false;
+  return b - a >= PLACEHOLDER_MIN_SPAN_MS;
+}
+
+function isPlaceholderTimeslot(beginIso, endIso, timeZone) {
+  if (isAllDaySpan(beginIso, endIso)) return true;
+  const local = localWallClockFromIso(beginIso, timeZone);
   return local ? isPlaceholderWindowTime(local) : false;
 }
 
@@ -176,6 +189,7 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
         arrival_iso: null,
         departure_iso: null,
         window_iso: null,
+        window_end_iso: null,
         window_timezone: null,
         booking_location: null,
         plate: null,
@@ -184,6 +198,7 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     prev.arrival_iso = earliest(prev.arrival_iso, g.arrival_iso);
     prev.departure_iso = latest(prev.departure_iso, g.departure_iso);
     prev.window_iso = prev.window_iso || s.timeslot_begin || null;
+    prev.window_end_iso = prev.window_end_iso || s.timeslot_end || null;
     prev.window_timezone = prev.window_timezone || s.timeslot_timezone || null;
     prev.booking_location = prev.booking_location || s.booking_location || null;
     prev.plate = prev.plate || String(s.license_plate || "").trim() || null;
@@ -201,7 +216,7 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     // nie aus der Excel gefuellt (dort ist immer ein Fenster vorhanden).
     const isPlaceholderWindow =
       g.stop_type === "UNLOADING" &&
-      isPlaceholderTimeslot(g.window_iso, g.window_timezone);
+      isPlaceholderTimeslot(g.window_iso, g.window_end_iso, g.window_timezone);
     const hasRealSixfoldWindow = Boolean(g.window_iso) && !isPlaceholderWindow;
 
     let windowIso = hasRealSixfoldWindow ? g.window_iso : null;
