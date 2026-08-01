@@ -1451,16 +1451,13 @@ function calculateWithSafeOverride(stop, rules, windows) {
 
   // Prioritaet: Lade-Stellen behalten Sixfold, Entlade-Stellen nutzen Excel.
   if (isUnloadStop) {
-    const hasSixfoldWindow =
-      toDate(stop?.timeslot_begin) || toDate(stop?.timeslot_end);
-
-    // Excel-Fenster NUR ergaenzen, wenn Sixfold KEIN Entlade-Fenster hat.
-    // Vorhandenes Sixfold-Fenster wird nie mit der Excel ersetzt.
-    if (!hasSixfoldWindow) {
-      const overriddenStop = applyTimeWindowOverride(stop, windows);
-      if (overriddenStop !== stop) {
-        return calcStop(overriddenStop, rules);
-      }
+    // Entlade-Stellen: Die Excel-Entladezeit ist massgeblich. Gibt es ein
+    // passendes Excel-Fenster, gewinnt es - auch gegen ein (oft nur als
+    // Platzhalter 00:01 geliefertes) Sixfold-Fenster. Nur ohne Excel-Treffer
+    // bleibt das Sixfold-Fenster bzw. die Ankunft massgeblich.
+    const overriddenStop = applyTimeWindowOverride(stop, windows);
+    if (overriddenStop !== stop) {
+      return calcStop(overriddenStop, rules);
     }
 
     return {
