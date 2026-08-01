@@ -1554,7 +1554,12 @@ function calcStop(stop, rules) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, app: "standgeld-standalone" });
+  res.json({
+    ok: true,
+    app: "standgeld-standalone",
+    cache_version: BILLING_CACHE_VERSION,
+    unloading_rule: "excel_entladezeit_authoritative",
+  });
 });
 
 app.get("/api/imports", (req, res) => {
