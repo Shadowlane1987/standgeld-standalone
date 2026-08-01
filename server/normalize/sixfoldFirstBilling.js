@@ -20,11 +20,7 @@
 const { computeStandgeld } = require("./standgeld");
 const { normalizeTransportNumber } = require("./exportBilling");
 const { transportNumberToLadenummer } = require("./ladenummer");
-const {
-  windowStartForStop,
-  isPlaceholderWindowTime,
-} = require("./zeitfenster");
-const { isValidTimeZone } = require("./datetime");
+const { windowStartForStop } = require("./zeitfenster");
 
 const DEFAULT_TZ = "Europe/Berlin";
 
@@ -32,58 +28,6 @@ function parseMs(iso) {
   if (!iso) return null;
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? null : ms;
-}
-
-// Lokale Wanduhrzeit ("YYYY-MM-DD HH:MM") eines ISO-Zeitstempels in der Zone.
-function localWallClockFromIso(iso, timeZone) {
-  const ms = parseMs(iso);
-  if (ms === null) return null;
-  const tz = isValidTimeZone(timeZone) ? timeZone : DEFAULT_TZ;
-  const dtf = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  const p = Object.create(null);
-  for (const part of dtf.formatToParts(new Date(ms))) p[part.type] = part.value;
-  const hh = p.hour === "24" ? "00" : p.hour;
-  return `${p.year}-${p.month}-${p.day} ${hh}:${p.minute}`;
-}
-
-// Ganztaegiges Buchungsfenster aus Transporeon (z.B. 00:01-23:59) ist KEIN
-// echtes Zeitfenster, sondern nur ein Lueckenfueller. Drei Signale erkennen es,
-// alle ROBUST auf UTC-Servern (Render):
-//  1) Dauer begin->end >= ~22h (ganzer Tag). Zeitzonen-UNABHAENGIG.
-//  2) Rohe Startuhrzeit im ISO-String ist 00:00/00:01 (ohne Zeitzonen-Mathe;
-//     faengt auch ISO-Strings OHNE Offset ab, die sonst falsch umgerechnet wuerden).
-//  3) Lokale Startuhrzeit 00:00/00:01 (letzter Fallback).
-const PLACEHOLDER_MIN_SPAN_MS = 22 * 60 * 60 * 1000;
-
-function isAllDaySpan(beginIso, endIso) {
-  const a = parseMs(beginIso);
-  const b = parseMs(endIso);
-  if (a === null || b === null) return false;
-  return b - a >= PLACEHOLDER_MIN_SPAN_MS;
-}
-
-// Uhrzeit direkt aus dem ISO-String lesen (kein Date/Zeitzonen-Umrechnen).
-function rawIsoTimeIsMidnight(iso) {
-  const m = String(iso || "").match(/T(\d{2}):(\d{2})/);
-  if (!m) return false;
-  const hh = m[1];
-  const mm = m[2];
-  return hh === "00" && (mm === "00" || mm === "01");
-}
-
-function isPlaceholderTimeslot(beginIso, endIso, timeZone) {
-  if (isAllDaySpan(beginIso, endIso)) return true;
-  if (rawIsoTimeIsMidnight(beginIso)) return true;
-  const local = localWallClockFromIso(beginIso, timeZone);
-  return local ? isPlaceholderWindowTime(local) : false;
 }
 
 // Setzt die Uhrzeit (HH:MM) aus dem Zeitfenster-Excel auf das Datum + die
@@ -200,8 +144,6 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
         arrival_iso: null,
         departure_iso: null,
         window_iso: null,
-        window_end_iso: null,
-        window_timezone: null,
         booking_location: null,
         plate: null,
       });
@@ -209,8 +151,6 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     prev.arrival_iso = earliest(prev.arrival_iso, g.arrival_iso);
     prev.departure_iso = latest(prev.departure_iso, g.departure_iso);
     prev.window_iso = prev.window_iso || s.timeslot_begin || null;
-    prev.window_end_iso = prev.window_end_iso || s.timeslot_end || null;
-    prev.window_timezone = prev.window_timezone || s.timeslot_timezone || null;
     prev.booking_location = prev.booking_location || s.booking_location || null;
     prev.plate = prev.plate || String(s.license_plate || "").trim() || null;
     groups.set(key, prev);
@@ -221,41 +161,25 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     // Ohne verifizierte GPS-Zeit gibt es keinen Beleg -> nicht abrechnen.
     if (!g.arrival_iso && !g.departure_iso) continue;
 
-    // ENTLADESTELLEN: Die Zeitfenster-Excel (Entladezeit je Ladenummer) ist die
-    // massgebliche Terminquelle. Gibt es eine Excel-Zeile, GEWINNT die Excel.
-    // Nur ohne Excel-Treffer zaehlt das Sixfold-Fenster - und ein ganztaegiges
-    // Platzhalter-Fenster (z.B. 00:01-23:59) gilt dann NICHT als Fenster.
-    // LADESTELLEN: nie aus der Excel; dort ist immer ein echtes Fenster da.
-    const isPlaceholderWindow =
-      g.stop_type === "UNLOADING" &&
-      isPlaceholderTimeslot(g.window_iso, g.window_end_iso, g.window_timezone);
-    const hasRealSixfoldWindow = Boolean(g.window_iso) && !isPlaceholderWindow;
-
-    let windowIso = hasRealSixfoldWindow ? g.window_iso : null;
+    // Excel-Entladefenster NUR ergaenzen, wenn Sixfold KEIN Fenster liefert.
+    // Vorhandenes Sixfold-Fenster wird nie ersetzt; Ladestellen (LOADING) nie
+    // aus der Excel gefuellt (dort ist immer ein Fenster vorhanden).
+    let windowIso = g.window_iso;
     let windowLocal = null;
     let windowFromExcel = false;
-    if (g.stop_type === "UNLOADING") {
+    if (unloadWindowIndex && g.stop_type === "UNLOADING" && !g.window_iso) {
       const ladenummer = transportNumberToLadenummer(g.transport_number);
-      const windowRow =
-        unloadWindowIndex && ladenummer
-          ? unloadWindowIndex.get(ladenummer)
-          : null;
+      const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
       const unloadStart = windowStartForStop(windowRow, "UNLOADING");
       const refIso = g.arrival_iso || g.departure_iso;
       const built = unloadStart
         ? applyTimeToIsoDate(refIso, unloadStart)
         : null;
       if (built) {
-        // Excel-Entladezeit gefunden -> massgeblich, ersetzt auch ein
-        // Platzhalter- ODER Sixfold-Fenster.
         windowIso = built.iso;
         windowLocal = built.local;
         windowFromExcel = true;
         unloadWindowFromExcel += 1;
-      } else if (!hasRealSixfoldWindow) {
-        // Keine Excel-Zeile UND nur ein Platzhalter -> kein Fenster: ab Ankunft
-        // zaehlen, kein irrefuehrendes 00:01. (windowIso bleibt null.)
-        windowIso = null;
       }
     }
 

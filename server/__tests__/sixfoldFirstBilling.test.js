@@ -104,7 +104,7 @@ test("Mehrfachbesuch: früheste Ankunft + späteste Abfahrt gewinnen", () => {
   assert.equal(s.gps_departure_time, "2026-07-23T12:00:00.000Z");
 });
 
-test("Excel-Entladezeit ist massgeblich und ersetzt auch ein Sixfold-Fenster", () => {
+test("Vorhandenes Sixfold-Entladefenster wird NICHT durch die Excel ersetzt", () => {
   const tn = "B2_20260723_0006654477";
   const ladenummer = transportNumberToLadenummer(tn); // "6654477"
   const unloadWindowIndex = buildWindowIndex([
@@ -118,18 +118,18 @@ test("Excel-Entladezeit ist massgeblich und ersetzt auch ein Sixfold-Fenster", (
         type: "UNLOADING",
         arrival_time: "2026-07-23T15:00:00.000Z",
         departure_time: "2026-07-23T19:30:00.000Z",
-        // Sixfold liefert 06:00, aber die Excel-Entladezeit (16:30) gewinnt.
+        // Sixfold LIEFERT ein Fenster (06:00) -> Excel darf nicht ersetzen.
         timeslot_begin: "2026-07-23T06:00:00.000Z",
       }),
     ],
     unloadWindowIndex,
   });
-  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
+  assert.equal(result.summary.sixfold_unload_window_from_excel, 0);
   const s = result.stops[0];
-  assert.equal(s.unload_window_fallback_applied, true);
-  assert.equal(s.window_local, "2026-07-23 16:30");
-  // Zaehlbeginn ab Excel 16:30 -> 19:30 = 180 min, 120 frei, 60 ueber -> 2 -> 60 EUR.
-  assert.equal(s.fee_eur, 60);
+  assert.equal(s.unload_window_fallback_applied, false);
+  // Zaehlbeginn ab Sixfold-Fenster 06:00 bzw. Ankunft 15:00 -> 15:00->19:30
+  // = 270 min, 120 frei, 150 ueber -> 5 Bloecke -> 150 EUR (Sixfold-Fenster).
+  assert.equal(s.fee_eur, 150);
 });
 
 test("Excel-Entladefenster wird ergaenzt, wenn Sixfold KEIN Fenster hat", () => {
@@ -159,117 +159,6 @@ test("Excel-Entladefenster wird ergaenzt, wenn Sixfold KEIN Fenster hat", () => 
   assert.equal(s.window_local, "2026-07-23 16:30");
   // 16:30 -> 19:30 = 180 min, 120 frei, 60 ueber -> 2 Bloecke -> 60 EUR.
   assert.equal(s.fee_eur, 60);
-});
-
-test("Platzhalter-Fenster (Sixfold 00:01) gilt NICHT als Fenster -> Excel greift", () => {
-  const tn = "B2_20260723_0006654477";
-  const ladenummer = transportNumberToLadenummer(tn); // "6654477"
-  const unloadWindowIndex = buildWindowIndex([
-    { ladenummer, entladezeit_start: "16:30" },
-  ]);
-  const result = appendSixfoldOnlyStops(excelResult([]), {
-    transports: [],
-    sixfoldStops: [
-      sixfoldStop({
-        transport_number: tn,
-        type: "UNLOADING",
-        arrival_time: "2026-07-23T15:00:00.000Z",
-        departure_time: "2026-07-23T19:30:00.000Z",
-        // Ganztags-Buchung 00:01 lokal -> Platzhalter, KEIN echtes Fenster.
-        timeslot_begin: "2026-07-23T00:01:00+02:00",
-        timeslot_timezone: "Europe/Berlin",
-      }),
-    ],
-    unloadWindowIndex,
-  });
-  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
-  const s = result.stops[0];
-  assert.equal(s.unload_window_fallback_applied, true);
-  assert.equal(s.window_local, "2026-07-23 16:30");
-  // Excel-Fenster 16:30 statt Platzhalter 00:01 -> 60 EUR.
-  assert.equal(s.fee_eur, 60);
-});
-
-test("Ganztags-Spanne (begin->end ~24h) gilt als Platzhalter, auch ohne 00:01", () => {
-  const tn = "B2_20260723_0006655499";
-  const ladenummer = transportNumberToLadenummer(tn); // "6655499"
-  const unloadWindowIndex = buildWindowIndex([
-    { ladenummer, entladezeit_start: "16:30" },
-  ]);
-  const result = appendSixfoldOnlyStops(excelResult([]), {
-    transports: [],
-    sixfoldStops: [
-      sixfoldStop({
-        transport_number: tn,
-        type: "UNLOADING",
-        arrival_time: "2026-07-23T15:00:00.000Z",
-        departure_time: "2026-07-23T19:30:00.000Z",
-        // Startzeit sieht real aus (lokal 12:00), aber Spanne ~23h -> Ganztag.
-        timeslot_begin: "2026-07-23T10:00:00.000Z",
-        timeslot_end: "2026-07-24T09:00:00.000Z",
-        timeslot_timezone: "Europe/Berlin",
-      }),
-    ],
-    unloadWindowIndex,
-  });
-  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
-  const s = result.stops[0];
-  assert.equal(s.unload_window_fallback_applied, true);
-  assert.equal(s.window_local, "2026-07-23 16:30");
-  assert.equal(s.fee_eur, 60);
-});
-
-test("ISO ohne Zeitzone-Offset (00:01) gilt als Platzhalter (Render/UTC-sicher)", () => {
-  const tn = "B2_20260723_0006655499";
-  const ladenummer = transportNumberToLadenummer(tn); // "6655499"
-  const unloadWindowIndex = buildWindowIndex([
-    { ladenummer, entladezeit_start: "16:30" },
-  ]);
-  const result = appendSixfoldOnlyStops(excelResult([]), {
-    transports: [],
-    sixfoldStops: [
-      sixfoldStop({
-        transport_number: tn,
-        type: "UNLOADING",
-        arrival_time: "2026-07-23T15:00:00.000Z",
-        departure_time: "2026-07-23T19:30:00.000Z",
-        // ISO OHNE Offset -> auf UTC-Server wuerde die Umrechnung 00:01
-        // verfehlen; die Roh-Uhrzeit-Pruefung faengt es trotzdem ab.
-        timeslot_begin: "2026-07-23T00:01:00",
-        timeslot_end: null,
-        timeslot_timezone: null,
-      }),
-    ],
-    unloadWindowIndex,
-  });
-  assert.equal(result.summary.sixfold_unload_window_from_excel, 1);
-  const s = result.stops[0];
-  assert.equal(s.unload_window_fallback_applied, true);
-  assert.equal(s.window_local, "2026-07-23 16:30");
-  assert.equal(s.fee_eur, 60);
-});
-
-test("Platzhalter-Fenster ohne Excel-Treffer -> ab Ankunft zaehlen, kein 00:01", () => {
-  const result = appendSixfoldOnlyStops(excelResult([]), {
-    transports: [],
-    sixfoldStops: [
-      sixfoldStop({
-        transport_number: "B2_20260723_0006654477",
-        type: "UNLOADING",
-        arrival_time: "2026-07-23T15:00:00.000Z",
-        departure_time: "2026-07-23T19:30:00.000Z",
-        timeslot_begin: "2026-07-23T00:01:00+02:00",
-        timeslot_timezone: "Europe/Berlin",
-      }),
-    ],
-    // Kein Zeitfenster-Excel-Index -> Platzhalter faellt weg.
-  });
-  assert.equal(result.summary.sixfold_unload_window_from_excel, 0);
-  const s = result.stops[0];
-  assert.equal(s.unload_window_fallback_applied, false);
-  assert.equal(s.window_local, null);
-  // Ab Ankunft 15:00 -> 19:30 = 270 min, 120 frei, 150 ueber -> 5 -> 150 EUR.
-  assert.equal(s.fee_eur, 150);
 });
 
 test("bestehende Excel-Stops bleiben erhalten und Summe stimmt", () => {
