@@ -14,7 +14,10 @@ const {
 } = require("./normalize/exportBilling");
 const { billFromLiveData } = require("./normalize/liveBilling");
 const { appendSixfoldOnlyStops } = require("./normalize/sixfoldFirstBilling");
-const { filterBillingByGpsScope } = require("./normalize/gpsScope");
+const {
+  filterBillingByGpsScope,
+  summarizeStops,
+} = require("./normalize/gpsScope");
 const { classifySixfoldStop } = require("./normalize/sixfoldGps");
 const {
   loadTransporeonExportFromBuffer,
@@ -47,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 14;
+const BILLING_CACHE_VERSION = 15;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -60,6 +63,37 @@ function isNahverkehrPlate(plate) {
     .replace(/\s+/g, "")
     .toUpperCase()
     .startsWith(NAHVERKEHR_PLATE_PREFIX);
+}
+
+// Entfernt Nahverkehr-Touren (PEBL) endgueltig aus dem Batch-Ergebnis - egal ob
+// das Kennzeichen aus dem Sixfold-GPS (gps_license_plate) oder der Transporeon-
+// Excel (excel_license_plate) stammt. Sobald EIN Stopp einer Tour ein PEBL-
+// Kennzeichen zeigt, faellt die GANZE Tour raus (Nahverkehr laeuft ueber die
+// Einzelabrechnung). Kennzahlen werden auf der verbliebenen Menge neu gerechnet.
+function stripNahverkehrTransports(result) {
+  if (!result || !Array.isArray(result.stops)) return result;
+  const peblKeys = new Set();
+  const plateless = new Set();
+  for (const s of result.stops) {
+    const isPebl =
+      isNahverkehrPlate(s?.gps_license_plate) ||
+      isNahverkehrPlate(s?.excel_license_plate);
+    if (!isPebl) continue;
+    const key = String(s?.transport_number || "").trim();
+    if (key) peblKeys.add(key);
+    else plateless.add(s);
+  }
+  if (peblKeys.size === 0 && plateless.size === 0) return result;
+  const kept = result.stops.filter((s) => {
+    if (plateless.has(s)) return false;
+    const key = String(s?.transport_number || "").trim();
+    return !(key && peblKeys.has(key));
+  });
+  return {
+    ...result,
+    stops: kept,
+    summary: { ...(result.summary || {}), ...summarizeStops(kept) },
+  };
 }
 
 app.use(express.json({ limit: "2mb" }));
@@ -2166,15 +2200,20 @@ app.get("/api/billing/export", async (req, res) => {
 
     const transports = hasExcel ? loadTransporeonExport(filePath) : [];
 
-    // Nutze Datums-Filter, falls gesetzt
-    let window = hasExcel ? computeTransportsWindow(transports) : {};
+    // Sixfold ist die BASIS: Das Fenster fuer den Sixfold-Abruf kommt allein aus
+    // dem gewaehlten Zeitraum (von/bis) - NICHT aus der Excel-Spanne. Sonst
+    // wuerde eine Excel, die nur wenige Tage abdeckt, den Sixfold-Abruf auf
+    // diese Tage schrumpfen und reine Sixfold-Touren wuerden verschwinden.
+    // Ohne Zeitraum faellt es (nur ohne GPS relevant) auf die Excel-Spanne
+    // zurueck.
+    let window;
     if (sixfoldDateFrom || sixfoldDateTo) {
       window = {
-        fromTime: sixfoldDateFrom
-          ? `${sixfoldDateFrom}T00:00:00Z`
-          : window.fromTime,
-        toTime: sixfoldDateTo ? `${sixfoldDateTo}T23:59:59Z` : window.toTime,
+        fromTime: sixfoldDateFrom ? `${sixfoldDateFrom}T00:00:00Z` : undefined,
+        toTime: sixfoldDateTo ? `${sixfoldDateTo}T23:59:59Z` : undefined,
       };
+    } else {
+      window = hasExcel ? computeTransportsWindow(transports) : {};
     }
 
     const filteredTransports = filterTransportsByUnloadDate(
@@ -2240,9 +2279,12 @@ app.get("/api/billing/export", async (req, res) => {
           unloadWindowIndex,
         })
       : gatedResult;
+    // Nahverkehr (PEBL) endgueltig entfernen - auch wenn das Kennzeichen ueber
+    // den Excel-/GPS-Weg wieder reingerutscht ist.
+    const cleanResult = stripNahverkehrTransports(result);
     // Optional: Aufteilung nach GPS-Nachweisbarkeit (Seite 1 = verified,
     // Seite 2 = gaps). Ohne Parameter bleibt alles unveraendert ("all").
-    const scopedResult = filterBillingByGpsScope(result, req.query.gpsScope);
+    const scopedResult = filterBillingByGpsScope(cleanResult, req.query.gpsScope);
     if (importId) {
       persistBillingResult(importId, cacheKey, {
         file: filePath,
