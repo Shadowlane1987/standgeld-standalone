@@ -5,10 +5,9 @@
  * (Nutzer-Vorgabe 2026-08-02):
  *
  *   - "sixfold" (Batch, Abrechnung 1): NUR Transporte, die an Sixfold
- *     angebunden sind = Sixfold liefert ein Kennzeichen UND kann eine
- *     GPS-Verknuepfung herstellen (gps_available). Diese werden ueber die
- *     Sixfold-/GPS-Zeiten abgerechnet. Transporte OHNE Kennzeichen erscheinen
- *     hier NICHT.
+ *     angebunden sind = es liegt ein KENNZEICHEN vor (nur eigene/angebundene
+ *     LKW haben in Sixfold eins). Diese werden ueber die Sixfold-/GPS-Zeiten
+ *     abgerechnet. Transporte OHNE Kennzeichen erscheinen hier NICHT.
  *
  *   - "spot" (Spotmarkt, Abrechnung 2): NUR Transporte OHNE Kennzeichen
  *     (nicht an Sixfold angebunden) UND NUR, wenn XP-Service-Zeiten aus der
@@ -36,13 +35,22 @@ function transportKey(stop) {
 }
 
 /**
- * An Sixfold angebunden: Sixfold kennt das Kennzeichen und kann eine
- * GPS-Verknuepfung herstellen. gps_available ist genau dieses Signal
- * (Sixfold-Eintrag vorhanden UND Kennzeichen passt). Reine Sixfold-Touren
- * (origin "sixfold_only") sind ebenfalls angebunden.
+ * An Sixfold angebunden = es liegt ein KENNZEICHEN vor. Nur eigene/angebundene
+ * LKW haben in Sixfold ein Kennzeichen (aus der Fleet-Plate-Map); Spot-Carrier
+ * haben keins. Dieses Signal spiegelt exakt die KFZ-Spalte der Oberflaeche:
+ *
+ *   - Reine Sixfold-Touren (origin "sixfold_only"): angebunden, wenn ein
+ *     Sixfold- oder Excel-Kennzeichen hinterlegt ist.
+ *   - Excel-/GPS-Overlay-Touren: angebunden, wenn das Kennzeichen geprueft
+ *     wurde UND passt (gps_plate_match).
+ *
+ * Ohne Kennzeichen -> NICHT angebunden -> Spotmarkt (Excel-/XP-Zeiten).
  */
 function stopIsSixfoldConnected(stop) {
-  return Boolean(stop?.gps_available) || stop?.origin === "sixfold_only";
+  if (stop?.origin === "sixfold_only") {
+    return Boolean(stop?.gps_license_plate || stop?.excel_license_plate);
+  }
+  return Boolean(stop?.gps_checked && stop?.gps_plate_match);
 }
 
 /**

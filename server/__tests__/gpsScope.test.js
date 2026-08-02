@@ -32,10 +32,24 @@ test("normalizeScope faellt bei Unbekanntem auf all zurueck", () => {
   assert.equal(normalizeScope(undefined), "all");
 });
 
-test("stopIsSixfoldConnected nur bei Kennzeichen/GPS-Verknuepfung", () => {
-  assert.equal(stopIsSixfoldConnected(stop({ gps_available: true })), true);
-  assert.equal(stopIsSixfoldConnected(stop({ origin: "sixfold_only" })), true);
-  assert.equal(stopIsSixfoldConnected(stop({ gps_available: false })), false);
+test("stopIsSixfoldConnected nur wenn Kennzeichen vorhanden", () => {
+  // Excel-/GPS-Overlay: geprueft UND passendes Kennzeichen
+  assert.equal(
+    stopIsSixfoldConnected(stop({ gps_checked: true, gps_plate_match: true })),
+    true,
+  );
+  // Reine Sixfold-Tour MIT Kennzeichen
+  assert.equal(
+    stopIsSixfoldConnected(
+      stop({ origin: "sixfold_only", gps_license_plate: "B-XY 123" }),
+    ),
+    true,
+  );
+  // Reine Sixfold-Tour OHNE Kennzeichen -> nicht angebunden
+  assert.equal(stopIsSixfoldConnected(stop({ origin: "sixfold_only" })), false);
+  // gps_available allein ist kein Kennzeichen
+  assert.equal(stopIsSixfoldConnected(stop({ gps_available: true })), false);
+  // Kennzeichen-Treffer ohne Pruefung zaehlt nicht
   assert.equal(stopIsSixfoldConnected(stop({ gps_plate_match: true })), false);
 });
 
@@ -58,10 +72,14 @@ test("stopHasExcelTimes nur wenn Ankunft UND Abfahrt aus Excel", () => {
 
 test("classifyTransportsByGps: angebunden vs. nicht angebunden", () => {
   const stops = [
-    // A: Kennzeichen/GPS-Verknuepfung -> Sixfold
-    stop({ transport_number: "A", gps_available: true }),
-    // B: reine Sixfold-Tour -> Sixfold
-    stop({ transport_number: "B", origin: "sixfold_only" }),
+    // A: Kennzeichen geprueft + passt -> Sixfold
+    stop({ transport_number: "A", gps_checked: true, gps_plate_match: true }),
+    // B: reine Sixfold-Tour MIT Kennzeichen -> Sixfold
+    stop({
+      transport_number: "B",
+      origin: "sixfold_only",
+      gps_license_plate: "B-XY 123",
+    }),
     // C: kein Kennzeichen -> nicht angebunden
     stop({
       transport_number: "C",
@@ -83,17 +101,19 @@ test("filterBillingByGpsScope all gibt Ergebnis unveraendert zurueck", () => {
 test("filterBillingByGpsScope sixfold/spot trennt Transporte und rechnet Summe neu", () => {
   const result = {
     stops: [
-      // Transport A: an Sixfold angebunden -> Batch
+      // Transport A: an Sixfold angebunden (Kennzeichen passt) -> Batch
       stop({
         transport_number: "A",
         stop_type: "LOADING",
-        gps_available: true,
+        gps_checked: true,
+        gps_plate_match: true,
         fee_eur: 30,
       }),
       stop({
         transport_number: "A",
         stop_type: "UNLOADING",
-        gps_available: true,
+        gps_checked: true,
+        gps_plate_match: true,
         fee_eur: 60,
       }),
       // Transport B: kein Kennzeichen, aber Excel-Zeiten -> Spotmarkt
@@ -176,11 +196,12 @@ test("filterBillingByGpsScope: Prueffall zaehlt nicht in die Summe, Sixfold-Tran
         needs_review: true,
         fee_eur: 0,
       }),
-      // C: angebunden, aber Prueffall -> Summe 0
+      // C: angebunden (Kennzeichen passt), aber Prueffall -> Summe 0
       stop({
         transport_number: "C",
         stop_type: "UNLOADING",
-        gps_available: true,
+        gps_checked: true,
+        gps_plate_match: true,
         needs_review: true,
         fee_eur: 50,
       }),

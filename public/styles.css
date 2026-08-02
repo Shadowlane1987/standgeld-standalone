@@ -497,6 +497,12 @@ textarea {
   box-shadow: inset 3px 0 0 rgba(99, 44, 167, 0.6);
 }
 
+/* Fake-Kennzeichen (Handynummer): ueber XP-Zeiten abgerechnet, ans Ende sortiert. */
+.fake-plate-row {
+  background: rgba(214, 158, 46, 0.1);
+  box-shadow: inset 3px 0 0 rgba(214, 158, 46, 0.75);
+}
+
 .actions-row {
   margin-top: 10px;
 }

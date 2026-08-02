@@ -18,7 +18,10 @@
  */
 
 const { computeStandgeld } = require("./standgeld");
-const { normalizeTransportNumber } = require("./exportBilling");
+const {
+  normalizeTransportNumber,
+  looksLikeRealPlate,
+} = require("./exportBilling");
 const { transportNumberToLadenummer } = require("./ladenummer");
 const { windowStartForStop } = require("./zeitfenster");
 
@@ -160,6 +163,9 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
   for (const g of groups.values()) {
     // Ohne verifizierte GPS-Zeit gibt es keinen Beleg -> nicht abrechnen.
     if (!g.arrival_iso && !g.departure_iso) continue;
+    // Nur ECHTE Kennzeichen werden hier aus GPS abgerechnet. Fake-Kennzeichen
+    // (Handynummer) gehoeren in die XP-/Excel-Abrechnung, nicht in den GPS-Pfad.
+    if (!looksLikeRealPlate(g.plate)) continue;
 
     // Entladestellen: Die Excel-Entladezeit ist massgeblich. Gibt es eine
     // passende Excel-Zeile, gewinnt sie - auch gegen ein (oft nur als
@@ -207,7 +213,8 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
         timezone,
         excel_license_plate: null,
         gps_license_plate: g.plate,
-        gps_plate_match: false,
+        gps_plate_match: true,
+        plate_fake: false,
         gps_checked: true,
         gps_available: true,
         gps_missing: false,

@@ -953,7 +953,10 @@ function filteredStops() {
     list = list.filter(
       (s) => s.unload_window_fallback_applied === true && s.fee_eur > 0,
     );
-  return list.filter(dateInRange);
+  // Fake-Kennzeichen (Handynummer, XP-Zeiten) IMMER ans Ende der Liste.
+  return list
+    .filter(dateInRange)
+    .sort((a, b) => (a.plate_fake ? 1 : 0) - (b.plate_fake ? 1 : 0));
 }
 
 function sourceLabel(stop) {
@@ -976,6 +979,8 @@ function sourceClass(stop) {
 function plateCheckLabel(stop) {
   const excelPlate = (stop.excel_license_plate || "").trim();
   const gpsPlate = (stop.gps_license_plate || "").trim();
+  // Fake-Kennzeichen (Handynummer): klar markieren, abgerechnet ueber XP-Zeiten.
+  if (stop.plate_fake) return `⚠ Fake (${gpsPlate || "?"})`;
   // Reine Sixfold-Touren haben kein Excel-Kennzeichen zum Abgleichen -> GPS-Kennzeichen direkt zeigen.
   if (stop.origin === "sixfold_only") return gpsPlate || excelPlate || "-";
   if (!stop.gps_checked || !stop.gps_plate_match) return "-";
@@ -1287,6 +1292,7 @@ function render() {
     if (stop.needs_review) tr.classList.add("review-row");
     else if (stop.fee_eur > 0) tr.classList.add("chargeable-row");
     if (stop.unload_window_fallback_applied) tr.classList.add("fallback-row");
+    if (stop.plate_fake) tr.classList.add("fake-plate-row");
     if (selectedKey && stopKeyValue === selectedKey) {
       tr.classList.add("selected-row");
       tr.setAttribute("aria-current", "true");

@@ -157,7 +157,7 @@ test("billFromExport mit gpsIndex: laengere GPS-Abfahrt gewinnt = mehr Standgeld
   assert.equal(withGps.summary.gps_used_count, 1);
 });
 
-test("billFromExport mit gpsIndex aber ohne Kennzeichen in Export: nur XP", () => {
+test("billFromExport mit Fake-Kennzeichen (Handynummer): nur XP", () => {
   const transports = [
     {
       transport_number: "T1",
@@ -173,7 +173,7 @@ test("billFromExport mit gpsIndex aber ohne Kennzeichen in Export: nur XP", () =
   const gpsIndex = buildGpsIndex([
     {
       transport_number: "T1",
-      license_plate: "B-AB 123",
+      license_plate: "015112345678",
       type: "loading",
       arrival_time: "2026-07-16T06:00:00.000Z",
       departure_time: "2026-07-16T10:00:00.000Z",
@@ -186,6 +186,7 @@ test("billFromExport mit gpsIndex aber ohne Kennzeichen in Export: nur XP", () =
   assert.equal(result.stops[0].arrival_source, "XP");
   assert.equal(result.stops[0].departure_source, "XP");
   assert.equal(result.stops[0].gps_available, false);
+  assert.equal(result.stops[0].plate_fake, true);
   assert.equal(result.summary.gps_used_count, 0);
 });
 

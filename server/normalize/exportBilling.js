@@ -40,6 +40,32 @@ function normalizeLicensePlate(value) {
     .replace(/[\s-]+/g, "");
 }
 
+/**
+ * Unterscheidet ein ECHTES Kennzeichen von einem FAKE (Handynummer). In Sixfold
+ * tragen manuell gesetzte Touren statt eines Kennzeichens eine Telefonnummer.
+ *
+ * Echtes Kennzeichen: beginnt mit Ortskuerzel-Buchstaben, enthaelt Buchstaben
+ * UND Ziffern, keine lange reine Ziffernkette (z. B. "B-XY 1234", "HH AB 123").
+ * Fake: reine Ziffernkette / Telefonnummer (z. B. "015112345678", "+49151...").
+ */
+function looksLikeRealPlate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  // Reine Telefonnummer (nur Ziffern, evtl. fuehrendes +, Trenner egal) -> Fake.
+  const digitsOnly = raw.replace(/[\s\-/.()]+/g, "");
+  if (/^\+?\d+$/.test(digitsOnly)) return false;
+  const compact = raw.replace(/[^0-9A-Za-zÄÖÜäöü]/g, "");
+  if (compact.length < 3) return false;
+  const letters = (compact.match(/[A-Za-zÄÖÜäöü]/g) || []).length;
+  const digits = (compact.match(/\d/g) || []).length;
+  // Echtes Kennzeichen: mind. 2 Buchstaben + mind. 1 Ziffer, Start mit Buchstabe.
+  if (letters < 2 || digits < 1) return false;
+  if (!/^[A-Za-zÄÖÜäöü]/.test(compact)) return false;
+  // 7+ Ziffern am Stueck kommen bei Kennzeichen nicht vor -> getarnte Nummer.
+  if (/\d{7,}/.test(compact)) return false;
+  return true;
+}
+
 function parseMs(iso) {
   if (!iso) return null;
   const ms = Date.parse(iso);
@@ -218,37 +244,26 @@ function billFromExport(transports, options = {}) {
         }
       }
 
-      // GPS ist nur verfügbar wenn:
-      // 1) Sixfold-Eintrag vorhanden
-      // 2) Excel-Kennzeichen vorhanden
-      // 3) Sixfold-Kennzeichen vorhanden
-      // 4) Kennzeichen identisch (normalisiert)
-      //
-      // WICHTIG: Wenn TN stimmt aber Kennzeichen NICHT -> trotzdem abrechnen mit XP-Zeiten!
-      // (chooseArrival/chooseDeparture nehmen automatisch XP wenn kein GPS verfuegbar)
+      // GPS ist nur verfügbar wenn ein ECHTES Sixfold-Kennzeichen vorliegt.
+      // Fake-Kennzeichen (Handynummer) = manuell gesetzte Tour -> KEIN GPS,
+      // die XP-Zeiten aus der Transporeon-Excel ersetzen die Zeiten komplett.
       const excelLicensePlate = (t.vehicle_registration || "").trim() || null;
       const sixfoldLicensePlate = gpsEntry?.license_plate || null;
-
-      const hasExcelPlate = Boolean(excelLicensePlate);
-      const hasSixfoldPlate = Boolean(sixfoldLicensePlate);
-      const licensePlateValid =
-        hasExcelPlate &&
-        hasSixfoldPlate &&
-        normalizeLicensePlate(sixfoldLicensePlate) ===
-          normalizeLicensePlate(excelLicensePlate);
+      const sixfoldPlateReal = looksLikeRealPlate(sixfoldLicensePlate);
+      const plateFake = Boolean(sixfoldLicensePlate) && !sixfoldPlateReal;
 
       const gpsAvailable = Boolean(
-        gpsEntry && gpsEntry.present && licensePlateValid,
+        gpsEntry && gpsEntry.present && sixfoldPlateReal,
       );
 
       const gpsArrivalIso = gpsAvailable ? gpsEntry?.arrival_iso : null;
       const gpsDepartureIso = gpsAvailable ? gpsEntry?.departure_iso : null;
 
-      // Nutzer-Regel (2026-07-31):
-      // - Mit Kennzeichen (verifiziertes GPS vorhanden): Ankunft = ECHTE GPS-Zeit.
+      // Nutzer-Regel (2026-08-02):
+      // - Echtes Kennzeichen (echte GPS-Anbindung): Ankunft = ECHTE GPS-Zeit.
       // - Abfahrt = die SPAETERE aus {XP, GPS} -> ist die XP-Abfahrt spaeter,
       //   gewinnt XP (Start bleibt GPS, Abfahrt XP).
-      // - Ohne Kennzeichen ist kein GPS verfuegbar -> XP fuer Ankunft UND Abfahrt.
+      // - Fake-Kennzeichen (Handynummer): kein GPS -> XP fuer Ankunft UND Abfahrt.
       const arrivalChoice =
         gpsArrivalIso != null
           ? { iso: gpsArrivalIso, source: "GPS" }
@@ -287,7 +302,9 @@ function billFromExport(transports, options = {}) {
           timezone: tz,
           excel_license_plate: excelLicensePlate,
           gps_license_plate: sixfoldLicensePlate,
-          gps_plate_match: licensePlateValid,
+          gps_plate_match: sixfoldPlateReal,
+          // Fake-Kennzeichen (Handynummer): manuell gesetzt -> XP-Zeiten, ans Ende.
+          plate_fake: plateFake,
           // Wurde ueberhaupt eine GPS-Quelle abgefragt? Sonst "nicht geprueft".
           gps_checked: gpsChecked,
           gps_available: gpsAvailable,
@@ -352,4 +369,5 @@ module.exports = {
   chooseDeparture,
   normalizeTransportNumber,
   normalizeLicensePlate,
+  looksLikeRealPlate,
 };
