@@ -2342,7 +2342,9 @@ if (el.openTransporeonBtn) {
   el.openTransporeonBtn.addEventListener("click", openTransporeonSession);
 }
 if (el.applyTransporeonBtn) {
-  el.applyTransporeonBtn.addEventListener("click", applyTransporeonSurcharges);
+  el.applyTransporeonBtn.addEventListener("click", () =>
+    applyTransporeonSurcharges(false),
+  );
 }
 if (el.retryFailedTransporeonBtn) {
   el.retryFailedTransporeonBtn.addEventListener("click", () =>
