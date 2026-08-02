@@ -567,15 +567,6 @@ function renderStops(stops) {
       srcLabel,
     );
 
-    const startTone = stop.late_arrival_grace_applied
-      ? { cls: "time-chip-late", hint: "3h frei ab Ankunft" }
-      : { cls: "time-chip-neutral", hint: "Start" };
-    const startCell = timeCellHtml(
-      formatDateTimeForJustification(stop.rule_start_display),
-      startTone.cls,
-      startTone.hint,
-    );
-
     const windowValue = resolveWindowDisplay(stop);
     const windowTone = stop.window_override_applied
       ? { cls: "time-chip-excel", hint: "Excel" }
@@ -586,6 +577,24 @@ function renderStops(stops) {
       windowValue,
       windowTone.cls,
       windowTone.hint,
+    );
+
+    // Zaehlbeginn: bei Puenktlichkeit gleiche Farbe wie das Zeitfenster,
+    // bei Verspaetung rot markiert (auf einen Blick erkennbar).
+    const hasWindow = windowValue !== "-";
+    const startTone =
+      hasWindow && stop.arrived_late
+        ? {
+            cls: "time-chip-alert",
+            hint: stop.late_arrival_grace_applied ? "3h-Regel" : "verspätet",
+          }
+        : hasWindow
+          ? { cls: windowTone.cls, hint: "pünktlich" }
+          : { cls: "time-chip-neutral", hint: "Start" };
+    const startCell = timeCellHtml(
+      formatDateTimeForJustification(stop.rule_start_display),
+      startTone.cls,
+      startTone.hint,
     );
 
     const statusLabel = stop.needs_review ? "Prüfen" : singleReasonLabel(stop);
@@ -1346,20 +1355,15 @@ function buildWindowStatus(stop) {
   if (!hasWindow) {
     return { className: "detail-window-missing", text: "Kein Zeitfenster" };
   }
-  if (stop?.within_window === true) {
-    return { className: "detail-window-hit", text: "Zeitfenster getroffen" };
-  }
-  const lateMinutes = Number(stop?.minutes_after_window_end || 0);
-  if (stop?.arrived_late || lateMinutes > 0) {
+  if (stop?.arrived_late) {
     return {
       className: "detail-window-late",
-      text:
-        lateMinutes > 0
-          ? `Verspätet (+${formatMinutesAsHours(lateMinutes)})`
-          : "Verspätet",
+      text: stop.late_arrival_grace_applied
+        ? "Verspätet · 3h-Regel"
+        : "Verspätet",
     };
   }
-  return { className: "detail-window-neutral", text: "Zeitfenster prüfen" };
+  return { className: "detail-window-hit", text: "Pünktlich" };
 }
 
 function detailWindowRowHtml(windowValue, status) {
@@ -1548,6 +1552,10 @@ function openSurchargeModal(stop) {
   const arrival = compactDateTimeDisplay(stop.arrival_display);
   const departure = compactDateTimeDisplay(stop.departure_display);
   const countStart = compactDateTimeDisplay(stop.rule_start_display);
+  const countStartUsed =
+    countStart === "-"
+      ? "-"
+      : `<span class="time-chip ${stop.arrived_late ? "time-chip-alert" : "time-chip-match"}">${countStart}</span>`;
   const windowText = resolveWindowDisplay(stop);
   const effective = formatMinutesAsHours(stop.effective_minutes);
   const counted = formatMinutesAsHours(stop.counted_standing_minutes);
@@ -1564,7 +1572,7 @@ function openSurchargeModal(stop) {
   if (el.surchargeDetailRows) {
     el.surchargeDetailRows.innerHTML =
       detailWindowRowHtml(windowText, buildWindowStatus(stop)) +
-      detailRowHtml("Ankunft", arrival, "-", countStart) +
+      detailRowHtml("Ankunft", arrival, "-", countStartUsed) +
       detailRowHtml("Abfahrt", departure, "-", departure) +
       detailRowHtml("Standzeit (Ist)", effective, "-", effective) +
       detailRowHtml(

@@ -590,44 +590,40 @@ function sourceTone(source) {
 }
 
 function timeContext(stop) {
-  const startAtWindow = isSameTimestamp(stop.count_start, stop.window_start);
-  if (stop.rebooking_suspected) {
+  const hasWindow = Boolean(stop.window_start || stop.window_local);
+  const windowClass = stop.unload_window_fallback_applied
+    ? "time-chip-excel"
+    : "time-chip-neutral";
+  const windowHint = stop.unload_window_fallback_applied ? "Excel" : "Fenster";
+
+  if (!hasWindow) {
     return {
-      windowClass: "time-chip-muted",
+      windowClass: "time-chip-neutral",
+      startClass: "time-chip-neutral",
+      windowHint: "Fenster",
+      startHint: "Start",
+    };
+  }
+
+  // Verspaetung -> Zaehlbeginn rot markieren (auf einen Blick erkennbar).
+  if (stop.arrived_late || stop.rebooking_suspected) {
+    let startHint = "verspätet";
+    if (stop.rebooking_suspected) startHint = "Prüffall GPS-Start";
+    else if (stop.late_arrival_grace_applied) startHint = "3h-Regel";
+    return {
+      windowClass,
       startClass: "time-chip-alert",
-      windowHint: "Fenster",
-      startHint: "Prüffall GPS-Start",
+      windowHint,
+      startHint,
     };
   }
-  if (stop.late_arrival_grace_applied) {
-    return {
-      windowClass: "time-chip-muted",
-      startClass: "time-chip-late",
-      windowHint: "Fenster",
-      startHint: "3h frei ab Ankunft",
-    };
-  }
-  if (startAtWindow) {
-    return {
-      windowClass: "time-chip-match",
-      startClass: "time-chip-match",
-      windowHint: "Fenster = Start",
-      startHint: "Fenster = Start",
-    };
-  }
-  if (stop.arrived_late) {
-    return {
-      windowClass: "time-chip-muted",
-      startClass: "time-chip-shift",
-      windowHint: "Fenster",
-      startHint: "ab Ankunft",
-    };
-  }
+
+  // Puenktlich -> Zaehlbeginn gleiche Farbe wie das Zeitfenster.
   return {
-    windowClass: "time-chip-neutral",
-    startClass: "time-chip-neutral",
-    windowHint: "Fenster",
-    startHint: "Start",
+    windowClass,
+    startClass: windowClass,
+    windowHint,
+    startHint: "pünktlich",
   };
 }
 
@@ -706,28 +702,18 @@ function buildWindowStatus(stop) {
     };
   }
 
-  if (stop?.within_window === true) {
-    return {
-      className: "detail-window-hit",
-      text: "Zeitfenster getroffen",
-    };
-  }
-
-  const lateMinutesRaw = Number(stop?.minutes_after_window_end || 0);
-  const lateMinutes = Number.isFinite(lateMinutesRaw) ? lateMinutesRaw : 0;
-  if (stop?.arrived_late || lateMinutes > 0) {
+  if (stop?.arrived_late) {
     return {
       className: "detail-window-late",
-      text:
-        lateMinutes > 0
-          ? `Verspätet (+${minutesToHours(lateMinutes)})`
-          : "Verspätet",
+      text: stop.late_arrival_grace_applied
+        ? "Verspätet · 3h-Regel"
+        : "Verspätet",
     };
   }
 
   return {
-    className: "detail-window-neutral",
-    text: "Zeitfenster prüfen",
+    className: "detail-window-hit",
+    text: "Pünktlich",
   };
 }
 
@@ -798,6 +784,10 @@ function openStopDetailModal(stop) {
   const gpsDeparture = formatDateTimeForJustification(stop.gps_departure_time);
   const usedDeparture = departureUsed;
   const usedCountStart = formatDateTimeForJustification(stop.count_start);
+  const usedCountStartCell =
+    usedCountStart === "-"
+      ? "-"
+      : `<span class="time-chip ${stop.arrived_late ? "time-chip-alert" : "time-chip-match"}">${usedCountStart}</span>`;
 
   const xpStanding = minutesToHours(
     standingMinutesFromIso(stop.xp_arrival_time, stop.xp_departure_time),
@@ -808,7 +798,7 @@ function openStopDetailModal(stop) {
 
   el.stopDetailRows.innerHTML =
     detailWindowRowHtml(windowLocal, windowStatus) +
-    detailRowHtml("Ankunft", xpArrival, gpsArrival, usedCountStart) +
+    detailRowHtml("Ankunft", xpArrival, gpsArrival, usedCountStartCell) +
     detailRowHtml("Abfahrt", xpDeparture, gpsDeparture, usedDeparture) +
     detailRowHtml("Standzeit (Ist)", xpStanding, gpsStanding, usedStanding) +
     detailRowHtml(

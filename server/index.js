@@ -1505,6 +1505,7 @@ function calcStop(stop, rules) {
       billable_minutes: 0,
       billed_units: 0,
       amount_eur: 0,
+      arrived_late: false,
       gps_verified: Boolean(stop?.gps?.gps_connected),
     };
   }
@@ -1540,6 +1541,7 @@ function calcStop(stop, rules) {
     billed_units: billedUnits,
     amount_eur: amount,
     free_minutes: freeMinutesForCharge,
+    arrived_late: arrivedLate,
     late_arrival_grace_applied: lateGraceApplies,
     threshold_reached: amount >= rules.thresholdEur,
     // GPS ist nur Zusatz-Info. Die gesetzten (XP-)Zeiten werden IMMER abgerechnet.
