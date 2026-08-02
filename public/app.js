@@ -493,10 +493,10 @@ function formatDateTimeForJustification(value) {
   if (!text || text === "-") return "-";
 
   const withYear = text.match(/^(\d{2}\.\d{2}\.\d{4}),\s*(\d{2}:\d{2})$/);
-  if (withYear) return `${withYear[1].slice(0, 5)} / ${withYear[2]}`;
+  if (withYear) return `${withYear[1].slice(0, 6)} / ${withYear[2]}`;
 
   const shortDate = text.match(/^(\d{2}\.\d{2})\.?[,]?\s*(\d{2}:\d{2})$/);
-  if (shortDate) return `${shortDate[1]} / ${shortDate[2]}`;
+  if (shortDate) return `${shortDate[1]}. / ${shortDate[2]}`;
 
   const direct = new Date(text);
   if (!Number.isNaN(direct.getTime())) {
@@ -506,7 +506,7 @@ function formatDateTimeForJustification(value) {
       hour: "2-digit",
       minute: "2-digit",
     });
-    return local.replace(/\.\s*,\s*/, " / ");
+    return local.replace(", ", " / ");
   }
   return text;
 }
@@ -1373,6 +1373,45 @@ function detailWindowRowHtml(windowValue, status) {
   `;
 }
 
+function detailFallbackStatusRowHtml(stop) {
+  const typeUpper = String(stop?.type || "").toUpperCase();
+  if (typeUpper !== "UNLOADING") return "";
+
+  const replaced = Boolean(stop?.window_override_applied);
+  const hasWindow = resolveWindowDisplay(stop) !== "-";
+
+  let statusClass = "fallback-status-neutral";
+  let statusText = "Nicht ersetzt";
+
+  if (replaced) {
+    statusClass = "fallback-status-replaced";
+    statusText = "Ersetzt";
+  } else if (!hasWindow) {
+    statusClass = "fallback-status-missing";
+    statusText = "Fehlt weiterhin";
+  }
+
+  return `
+    <tr>
+      <td>Entladezeitfenster</td>
+      <td>-</td>
+      <td>-</td>
+      <td class="detail-used"><span class="fallback-status ${statusClass}">${statusText}</span></td>
+    </tr>
+  `;
+}
+
+function detailTotalRowHtml(amount) {
+  return `
+    <tr class="detail-total-row">
+      <td>Abrechenbare Summe</td>
+      <td>-</td>
+      <td>-</td>
+      <td class="detail-used">${amount}</td>
+    </tr>
+  `;
+}
+
 function excelSingleWindowValue(stop) {
   const raw = String(stop?.excel_window_display || "").trim();
   if (!raw) return "-";
@@ -1445,23 +1484,22 @@ function formatDateTimeForText(value) {
   const text = String(value || "").trim();
   if (!text || text === "-") return "-";
 
+  const withYear = text.match(/^(\d{2}\.\d{2}\.\d{4}),\s*(\d{2}:\d{2})$/);
+  if (withYear) return `${withYear[1].slice(0, 6)} / ${withYear[2]}`;
+
+  const shortDate = text.match(/^(\d{2}\.\d{2})\.?[,]?\s*(\d{2}:\d{2})$/);
+  if (shortDate) return `${shortDate[1]}. / ${shortDate[2]}`;
+
   const direct = new Date(text);
   if (!Number.isNaN(direct.getTime())) {
     const local = direct.toLocaleString("de-DE", {
       day: "2-digit",
       month: "2-digit",
-      year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     });
     return local.replace(", ", " / ");
   }
-
-  const withYear = text.match(/^(\d{2}\.\d{2}\.\d{4}),\s*(\d{2}:\d{2})$/);
-  if (withYear) return `${withYear[1]} / ${withYear[2]}`;
-
-  const shortDate = text.match(/^(\d{2}\.\d{2})\.?[,]?\s*(\d{2}:\d{2})$/);
-  if (shortDate) return `${shortDate[1]}. / ${shortDate[2]}`;
 
   return text;
 }
@@ -1492,10 +1530,10 @@ function buildSurchargeDescription(stop) {
   const billable = formatMinutesAsHours(stop.billable_minutes);
 
   return [
-    `Ankunft: ${arrival}`,
     `Zeitfenster: ${windowText}`,
+    `Ankunft: ${arrival}`,
     `Abfahrt: ${departure}`,
-    `Effektive Standzeit: ${effective}`,
+    `Standzeit: ${effective}`,
     `Abzurechnende Standzeit: ${billable}`,
   ].join("\n");
 }
@@ -1504,25 +1542,22 @@ function openSurchargeModal(stop) {
   const transportId = String(
     stop.transport_number || stop.tour_id || "",
   ).trim();
-  el.surchargeTitle.textContent = transportId
-    ? `Transport ${transportId}`
-    : "Zuschlagstext";
+  const typeUpper = String(stop.type || "").toUpperCase();
+  const typeLabel = TYPE_LABELS[typeUpper] || stop.type || "-";
+  el.surchargeTitle.textContent = `${transportId || "-"} · ${typeLabel}`;
   const arrival = compactDateTimeDisplay(stop.arrival_display);
   const departure = compactDateTimeDisplay(stop.departure_display);
   const windowText = resolveWindowDisplay(stop);
-  const source = getTimeWindowSource(stop).label;
   const effective = formatMinutesAsHours(stop.effective_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
   const freeWindow = formatMinutesAsHours(
     stop.free_minutes || el.freeMinutes.value || 120,
   );
-  const amount = Number(stop.amount_eur || 0).toLocaleString("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  });
+  const amount = euro(stop.amount_eur);
 
   if (el.surchargeMeta) {
-    el.surchargeMeta.textContent = `Zeitfenster: ${windowText} · Quelle: ${source} · Abrechenbare Summe: ${amount}`;
+    el.surchargeMeta.textContent = "";
+    el.surchargeMeta.hidden = true;
   }
   if (el.surchargeDetailRows) {
     el.surchargeDetailRows.innerHTML =
@@ -1532,7 +1567,9 @@ function openSurchargeModal(stop) {
       detailRowHtml("Standzeit (Ist)", effective, "-", effective) +
       detailRowHtml("Standzeit ab Zählbeginn", "-", "-", effective) +
       detailRowHtml("Freigrenze", "-", "-", freeWindow) +
-      detailRowHtml("Über Frei", "-", "-", billable);
+      detailRowHtml("Über Frei", "-", "-", billable) +
+      detailFallbackStatusRowHtml(stop) +
+      detailTotalRowHtml(amount);
   }
   el.surchargeText.value = buildSurchargeDescription(stop);
   el.surchargeModal.hidden = false;

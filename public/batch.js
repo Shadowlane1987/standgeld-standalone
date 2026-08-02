@@ -547,14 +547,14 @@ function formatDateTimeForJustification(value) {
       hour: "2-digit",
       minute: "2-digit",
     });
-    return local.replace(/\.\s*,\s*/, " / ");
+    return local.replace(", ", " / ");
   }
 
   const withYear = text.match(/^(\d{2}\.\d{2}\.\d{4}),\s*(\d{2}:\d{2})$/);
-  if (withYear) return `${withYear[1].slice(0, 5)} / ${withYear[2]}`;
+  if (withYear) return `${withYear[1].slice(0, 6)} / ${withYear[2]}`;
 
   const shortDate = text.match(/^(\d{2}\.\d{2})\.?[,]?\s*(\d{2}:\d{2})$/);
-  if (shortDate) return `${shortDate[1]} / ${shortDate[2]}`;
+  if (shortDate) return `${shortDate[1]}. / ${shortDate[2]}`;
 
   return text;
 }
