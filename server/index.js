@@ -1501,6 +1501,7 @@ function calcStop(stop, rules) {
     return {
       ...stop,
       effective_minutes: 0,
+      counted_standing_minutes: 0,
       billable_minutes: 0,
       billed_units: 0,
       amount_eur: 0,
@@ -1534,6 +1535,7 @@ function calcStop(stop, rules) {
   return {
     ...stop,
     effective_minutes: effectiveMinutes,
+    counted_standing_minutes: rawBillableMinutes,
     billable_minutes: billableAfterFree,
     billed_units: billedUnits,
     amount_eur: amount,

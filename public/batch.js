@@ -796,10 +796,8 @@ function openStopDetailModal(stop) {
   const xpDeparture = formatDateTimeForJustification(stop.xp_departure_time);
   const gpsArrival = formatDateTimeForJustification(stop.gps_arrival_time);
   const gpsDeparture = formatDateTimeForJustification(stop.gps_departure_time);
-  const usedArrival = arrivalUsed;
   const usedDeparture = departureUsed;
-  const usedArrivalWithSource = `${usedArrival}${usedArrival !== "-" ? ` ${arrivalSrc}` : ""}`;
-  const usedDepartureWithSource = `${usedDeparture}${usedDeparture !== "-" ? ` ${departureSrc}` : ""}`;
+  const usedCountStart = formatDateTimeForJustification(stop.count_start);
 
   const xpStanding = minutesToHours(
     standingMinutesFromIso(stop.xp_arrival_time, stop.xp_departure_time),
@@ -810,13 +808,8 @@ function openStopDetailModal(stop) {
 
   el.stopDetailRows.innerHTML =
     detailWindowRowHtml(windowLocal, windowStatus) +
-    detailRowHtml("Ankunft", xpArrival, gpsArrival, usedArrivalWithSource) +
-    detailRowHtml(
-      "Abfahrt",
-      xpDeparture,
-      gpsDeparture,
-      usedDepartureWithSource,
-    ) +
+    detailRowHtml("Ankunft", xpArrival, gpsArrival, usedCountStart) +
+    detailRowHtml("Abfahrt", xpDeparture, gpsDeparture, usedDeparture) +
     detailRowHtml("Standzeit (Ist)", xpStanding, gpsStanding, usedStanding) +
     detailRowHtml(
       "Standzeit ab Zählbeginn",
@@ -873,17 +866,14 @@ function buildJustificationText(stop) {
   const departureUsed = formatDateTimeForJustification(
     stop.departure_time_used,
   );
-  const effectiveStanding = minutesToHours(
-    standingMinutesFromIso(stop.arrival_time_used, stop.departure_time_used) ??
-      stop.counted_standing_minutes,
-  );
+  const countedStanding = minutesToHours(stop.counted_standing_minutes);
   const billableStanding = minutesToHours(stop.minutes_over_free);
 
   return [
     `Zeitfenster: ${windowLocal}`,
     `Ankunft: ${arrivalUsed}`,
     `Abfahrt: ${departureUsed}`,
-    `Standzeit: ${effectiveStanding}`,
+    `Standzeit: ${countedStanding}`,
     `Abzurechnende Standzeit: ${billableStanding}`,
   ].join("\n");
 }

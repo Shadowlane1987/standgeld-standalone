@@ -606,7 +606,7 @@ function renderStops(stops) {
       <td>${departureCell}</td>
       <td>${startCell}</td>
       <td>${windowCell}</td>
-      <td>${minutesToHoursChip(stop.effective_minutes)}</td>
+      <td>${minutesToHoursChip(stop.counted_standing_minutes)}</td>
       <td>${minutesToHoursChip(stop.billable_minutes)}</td>
       <td>${euro(stop.amount_eur)}</td>
       <td>${stop.billed_units || 0}</td>
@@ -1526,14 +1526,14 @@ function buildSurchargeDescription(stop) {
     stop.departure_time || stop.departure_display,
   );
   const windowText = resolveWindowTextForSurcharge(stop);
-  const effective = formatMinutesAsHours(stop.effective_minutes);
+  const counted = formatMinutesAsHours(stop.counted_standing_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
 
   return [
     `Zeitfenster: ${windowText}`,
     `Ankunft: ${arrival}`,
     `Abfahrt: ${departure}`,
-    `Standzeit: ${effective}`,
+    `Standzeit: ${counted}`,
     `Abzurechnende Standzeit: ${billable}`,
   ].join("\n");
 }
@@ -1547,8 +1547,10 @@ function openSurchargeModal(stop) {
   el.surchargeTitle.textContent = `${transportId || "-"} · ${typeLabel}`;
   const arrival = compactDateTimeDisplay(stop.arrival_display);
   const departure = compactDateTimeDisplay(stop.departure_display);
+  const countStart = compactDateTimeDisplay(stop.rule_start_display);
   const windowText = resolveWindowDisplay(stop);
   const effective = formatMinutesAsHours(stop.effective_minutes);
+  const counted = formatMinutesAsHours(stop.counted_standing_minutes);
   const billable = formatMinutesAsHours(stop.billable_minutes);
   const freeWindow = formatMinutesAsHours(
     stop.free_minutes || el.freeMinutes.value || 120,
@@ -1562,10 +1564,15 @@ function openSurchargeModal(stop) {
   if (el.surchargeDetailRows) {
     el.surchargeDetailRows.innerHTML =
       detailWindowRowHtml(windowText, buildWindowStatus(stop)) +
-      detailRowHtml("Ankunft", arrival, "-", arrival) +
+      detailRowHtml("Ankunft", arrival, "-", countStart) +
       detailRowHtml("Abfahrt", departure, "-", departure) +
       detailRowHtml("Standzeit (Ist)", effective, "-", effective) +
-      detailRowHtml("Standzeit ab Zählbeginn", "-", "-", effective) +
+      detailRowHtml(
+        "Standzeit ab Zählbeginn",
+        "-",
+        "-",
+        `${counted}${stop.late_arrival_grace_applied ? " · 3h-Regel" : ""}`,
+      ) +
       detailRowHtml("Freigrenze", "-", "-", freeWindow) +
       detailRowHtml("Über Frei", "-", "-", billable) +
       detailFallbackStatusRowHtml(stop) +
