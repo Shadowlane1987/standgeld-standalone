@@ -27,7 +27,23 @@ function sleep(ms) {
 async function isContextUsable(context) {
   if (!context) return false;
   try {
-    context.pages();
+    const browser = context.browser();
+    if (
+      browser &&
+      typeof browser.isConnected === "function" &&
+      !browser.isConnected()
+    ) {
+      return false;
+    }
+    const pages = context.pages();
+    // Ein geschlossener persistenter Kontext hat keine Seiten mehr.
+    if (
+      Array.isArray(pages) &&
+      pages.length === 0 &&
+      (!browser || !browser.isConnected())
+    ) {
+      return false;
+    }
     return true;
   } catch {
     return false;
@@ -47,6 +63,9 @@ async function closeActiveContext() {
 async function getOrCreateContext(options = {}) {
   if (await isContextUsable(activeContext)) return activeContext;
 
+  // Toter/geschlossener Kontext -> verwerfen, damit ein frischer gestartet wird.
+  activeContext = null;
+
   if (activeContextLaunch) return activeContextLaunch;
 
   activeContextLaunch = chromium
@@ -56,6 +75,13 @@ async function getOrCreateContext(options = {}) {
       locale: "de-DE",
     })
     .then((context) => {
+      // Kein Standard-Timeout -> einzelne Aktionen wuerden bis 30s blockieren
+      // ("haengt"). Kurzes Limit: lieber schnell scheitern als endlos warten.
+      try {
+        context.setDefaultTimeout(8000);
+      } catch {
+        // ignore
+      }
       activeContext = context;
       return context;
     })
@@ -571,45 +597,95 @@ async function fillDescription(context, text) {
   throw new Error("Beschreibungsfeld wurde nicht gefunden.");
 }
 
+function stationValueMatches(value, station) {
+  const current = String(value || "")
+    .trim()
+    .toLowerCase();
+  const wanted = String(station || "")
+    .trim()
+    .toLowerCase();
+  if (!current || !wanted) return false;
+  // Belade- und Entladestelle sind eindeutig: der gewuenschte Begriff muss als
+  // ganzes Wort im Feldwert vorkommen. So schlaegt "Beladestelle" niemals faelsch-
+  // licherweise fuer "Entladestelle" an (und umgekehrt).
+  return current.includes(wanted);
+}
+
 async function selectStation(contexts, stationLabel) {
   const station = String(stationLabel || "").trim();
   if (!station) return;
 
   for (const ctx of contexts) {
+    const field = ctx.locator('input[name="occuredStation"]').first();
     try {
-      const field = ctx.locator('input[name="occuredStation"]').first();
       if ((await field.count()) < 1) continue;
       if (!(await field.isVisible())) continue;
+    } catch {
+      continue;
+    }
 
-      // Schnell per Tastatur: Feld fokussieren, Label tippen, Enter waehlt.
-      await field.click({ timeout: 4000, force: true });
-      await sleep(250);
-      await field.pressSequentially(station, { delay: 30 });
-      await sleep(250);
+    // Schon korrekt? Nichts zu tun.
+    if (
+      stationValueMatches(await field.inputValue().catch(() => ""), station)
+    ) {
+      return;
+    }
+
+    // Schnellpfad (best effort): Feld leeren, Label tippen, Enter waehlt.
+    // Einzeln abgesichert, damit ein Fehler NICHT den Dropdown-Fallback
+    // ueberspringt.
+    try {
+      await field.click({ timeout: 3000, force: true });
+      await sleep(200);
+      await field.fill("", { timeout: 2500 }).catch(() => {});
+      await sleep(80);
+      await field.pressSequentially(station, { delay: 25, timeout: 3000 });
+      await sleep(200);
       await field.press("Enter").catch(() => {});
       await sleep(150);
-      if (String(await field.inputValue().catch(() => "")).trim()) {
-        return;
-      }
-
-      // Fallback: exakte Option im Dropdown anklicken (langsamere Textsuche).
-      await field.click({ timeout: 4000, force: true });
-      await sleep(300);
-      const exact = ctx
-        .getByText(new RegExp(`^${escapeRegExp(station)}$`, "i"))
-        .first();
-      if (await exact.isVisible().catch(() => false)) {
-        await exact.click({ timeout: 4000, force: true });
-        return;
-      }
+    } catch {
+      // Schnellpfad fehlgeschlagen -> Dropdown-Fallback unten.
+    }
+    if (
+      stationValueMatches(await field.inputValue().catch(() => ""), station)
+    ) {
       return;
+    }
+
+    // Fallback: Dropdown oeffnen und die exakte Option anklicken.
+    try {
+      await field.click({ timeout: 3000, force: true });
+      await sleep(300);
+      // Erste SICHTBARE passende Option (versteckte cropText-Vorlagen kommen im
+      // GXT-DOM zuerst -> nicht .first()/.last(), sondern sichtbar filtern).
+      const options = ctx.getByText(
+        new RegExp(`^\\s*${escapeRegExp(station)}\\s*$`, "i"),
+      );
+      const count = await options.count().catch(() => 0);
+      for (let i = 0; i < count; i += 1) {
+        const opt = options.nth(i);
+        if (!(await opt.isVisible().catch(() => false))) continue;
+        await opt.click({ timeout: 3000, force: true }).catch(() => {});
+        await sleep(200);
+        if (
+          stationValueMatches(await field.inputValue().catch(() => ""), station)
+        ) {
+          return;
+        }
+      }
     } catch {
       // naechsten Kontext versuchen
     }
+    if (
+      stationValueMatches(await field.inputValue().catch(() => ""), station)
+    ) {
+      return;
+    }
+    // Nicht verifiziert -> naechsten Kontext versuchen (kein stilles OK).
   }
 
   throw new Error(
-    `Ladestelle/Entladestelle konnte nicht auf '${station}' gesetzt werden.`,
+    `Ladestelle/Entladestelle konnte nicht zuverlaessig auf '${station}' gesetzt werden. Zuschlag wurde NICHT gespeichert.`,
   );
 }
 
@@ -685,6 +761,82 @@ function normalizeStopType(value) {
   return "LOADING";
 }
 
+async function detectExistingStandgeld(contexts, { timeoutMs = 12000 } = {}) {
+  // Duplikat-Schutz (GELD-KRITISCH). Das GXT-Zuschlags-Grid nutzt KEINE
+  // <tr>-Elemente. Ausserdem existiert der Text "Standzeit"/"Referenzpreis"
+  // MEHRFACH im DOM - u.a. als UNSICHTBARE div.cropText-Vorlage, die in
+  // DOM-Reihenfolge ZUERST kommt. Deshalb ist getByText(...).first() unbrauchbar
+  // (traf das unsichtbare Element). Wir scannen daher per evaluate ALLE Elemente
+  // und zaehlen nur SICHTBARE Treffer (eigener Textknoten == "Standzeit").
+  // Sicherheits-Gate: Erst wenn die Preis-Daten sicher geladen sind
+  // (Referenzpreis sichtbar) duerfen wir "keine vorhanden" schliessen.
+  //   Rueckgabe: { loaded: boolean, exists: boolean }
+  //   loaded=false => Aufrufer MUSS abbrechen (kein Zuschlag), statt zu riskieren.
+  const scan = async (ctx) => {
+    try {
+      return await ctx.evaluate(() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 2 || rect.height < 2) return false;
+          const style = window.getComputedStyle(el);
+          return style.visibility !== "hidden" && style.display !== "none";
+        };
+        const ownText = (el) => {
+          let t = "";
+          for (const node of el.childNodes) {
+            if (node.nodeType === 3) t += node.textContent;
+          }
+          return t.trim();
+        };
+        let standzeit = 0;
+        let referenz = 0;
+        for (const el of Array.from(
+          document.querySelectorAll("span, div, td, label"),
+        )) {
+          if (!isVisible(el)) continue;
+          const own = ownText(el);
+          if (!own) continue;
+          if (/^Standzeit$/i.test(own)) standzeit += 1;
+          else if (/Referenzpreis/i.test(own)) referenz += 1;
+        }
+        return { standzeit, referenz };
+      });
+    } catch {
+      return { standzeit: 0, referenz: 0 };
+    }
+  };
+
+  const deadline = Date.now() + timeoutMs;
+  let priceLoaded = false;
+
+  while (Date.now() < deadline) {
+    for (const ctx of contexts) {
+      const r = await scan(ctx);
+      if (r.standzeit > 0) return { loaded: true, exists: true };
+      if (r.referenz > 0) priceLoaded = true;
+    }
+
+    // Preis-Daten geladen und (bis hier) keine Standzeit gefunden: kurze
+    // Nachprueffrist fuer verzoegertes Grid-Rendering, dann sicher entscheiden.
+    if (priceLoaded) {
+      const graceDeadline = Date.now() + 2000;
+      while (Date.now() < graceDeadline) {
+        for (const ctx of contexts) {
+          const r = await scan(ctx);
+          if (r.standzeit > 0) return { loaded: true, exists: true };
+        }
+        await sleep(300);
+      }
+      return { loaded: true, exists: false };
+    }
+
+    await sleep(300);
+  }
+
+  // Timeout ohne bestaetigte Preis-Daten: NICHT riskieren.
+  return { loaded: false, exists: false };
+}
+
 async function applySurchargeForItem(frame, page, item, prelocatedRow) {
   const transportNumber = String(item?.transport_number || "").trim();
   if (!transportNumber) {
@@ -714,6 +866,31 @@ async function applySurchargeForItem(frame, page, item, prelocatedRow) {
     throw new Error("Transportzeile konnte nicht angeklickt werden.");
   }
   await sleep(400);
+
+  // Duplikat-Schutz (GELD-KRITISCH): Preis-Reiter aktivieren und pruefen, ob
+  // bereits IRGENDEINE "Standzeit"-Kostenzeile existiert. Falls ja, KEINEN
+  // weiteren Zuschlag anlegen, ueberspringen und die Tour kennzeichnen. Falls die
+  // Preisliste nicht sicher gelesen werden kann, wird ABGEBROCHEN (kein Zuschlag),
+  // statt einen moeglichen Doppel-Eintrag zu riskieren.
+  await waitForPriceTabActive(contexts).catch(() => {});
+  await sleep(300);
+  const existing = await detectExistingStandgeld(contexts);
+  if (!existing.loaded) {
+    throw new Error(
+      "Preis-/Zuschlagsliste konnte nicht sicher gelesen werden. Kein Zuschlag gebucht (Sicherheitsabbruch gegen Doppel-Standgeld).",
+    );
+  }
+  if (existing.exists) {
+    return {
+      transport_number: transportNumber,
+      matched_transport_number: String(row?.text || ""),
+      stop_type: stopType,
+      station: stationLabel,
+      amount_eur: amount,
+      decision_requested: false,
+      status: "already_exists",
+    };
+  }
 
   const dialogContext = await openSurchargeDialog(contexts);
   // Station + Beschreibung zuerst, Preis ZULETZT (Station-/Beschreibungswechsel
@@ -852,7 +1029,10 @@ async function applyTransporeonSurcharges(items, options = {}) {
           ...result,
           stop_key: String(item?.stop_key || "").trim() || null,
           description: String(item?.description || ""),
-          message: "Zuschlag gespeichert und Entscheidung angefragt.",
+          message:
+            result.status === "already_exists"
+              ? "Es existiert bereits eine Standzeit-Kostenzeile. Kein weiterer Zuschlag gebucht."
+              : "Zuschlag gespeichert und Entscheidung angefragt.",
         });
       } catch (error) {
         processed.push({
@@ -876,7 +1056,11 @@ async function applyTransporeonSurcharges(items, options = {}) {
       dryRun ? item.status === "ready" : item.status === "applied",
     ).length;
 
-    const failureCount = processed.length - successCount;
+    const alreadyExistsCount = processed.filter(
+      (item) => item.status === "already_exists",
+    ).length;
+
+    const failureCount = processed.length - successCount - alreadyExistsCount;
 
     return {
       dryRun,
@@ -884,6 +1068,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
       summary: {
         requested: list.length,
         success_count: successCount,
+        already_exists_count: alreadyExistsCount,
         failure_count: failureCount,
       },
     };
@@ -1272,6 +1457,116 @@ async function debugPriceTabContent(transportNumber) {
   return { opened, tabClicked, ...content };
 }
 
+// TROCKENLAUF-PRUEFUNG (Geld-sicher): Oeffnet einen Transport, aktiviert den
+// Preis-Reiter und prueft NUR, ob der Motor Standgeld beantragen WUERDE. Es wird
+// NIEMALS ein Zuschlag-Dialog geoeffnet oder gespeichert. Liefert ausserdem die
+// echte Grid-Struktur (Elemente rund um "Standzeit"/"Referenzpreis"), damit wir
+// sehen, was der Motor tatsaechlich lesen kann.
+async function dryRunStandgeldCheck(transportNumber) {
+  const context = await getOrCreateContext({ headless: false });
+  const found = await findListFrame(context);
+  if (!found) {
+    return {
+      error:
+        "Kein Listen-Frame gefunden. Bitte im Automations-Fenster einloggen und 'Zugewiesene Transporte' oeffnen.",
+    };
+  }
+  const { page, frame } = found;
+  const contexts = [frame, page];
+
+  let opened = false;
+  let matchedRow = "";
+  if (transportNumber) {
+    const search = await searchAndLocateRow(frame, page, transportNumber);
+    if (!search.found) {
+      return { error: `Transport ${transportNumber} nicht gefunden.` };
+    }
+    matchedRow = String(search.row?.text || "");
+    opened = await clickTransportCell(frame, matchedRow);
+    await sleep(1200);
+  }
+
+  const priceActive = await waitForPriceTabActive(contexts).catch(() => false);
+  await sleep(400);
+
+  const detection = await detectExistingStandgeld(contexts);
+
+  // Echte Grid-Struktur auslesen: alle Elemente, deren EIGENER Text (ohne
+  // verschachtelte Kinder) "Standzeit" bzw. "Referenzpreis" enthaelt.
+  const dumpFrom = async (ctx) => {
+    try {
+      return await ctx.evaluate(() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 2 || rect.height < 2) return false;
+          const style = window.getComputedStyle(el);
+          return style.visibility !== "hidden" && style.display !== "none";
+        };
+        const ownText = (el) => {
+          let t = "";
+          for (const node of el.childNodes) {
+            if (node.nodeType === 3) t += node.textContent;
+          }
+          return t.trim();
+        };
+        const describe = (el) => ({
+          tag: el.tagName.toLowerCase(),
+          cls: String(el.className || "").slice(0, 120),
+          visible: isVisible(el),
+          text: String(el.textContent || "")
+            .trim()
+            .slice(0, 80),
+        });
+        const standzeitOwn = [];
+        const referenzOwn = [];
+        for (const el of Array.from(document.querySelectorAll("*"))) {
+          const own = ownText(el);
+          if (!own) continue;
+          if (/^Standzeit$/i.test(own)) standzeitOwn.push(describe(el));
+          else if (/Referenzpreis/i.test(own)) referenzOwn.push(describe(el));
+        }
+        const body = String(document.body.innerText || "");
+        return {
+          standzeitExactCount: standzeitOwn.length,
+          standzeitVisibleCount: standzeitOwn.filter((d) => d.visible).length,
+          standzeitElements: standzeitOwn.slice(0, 10),
+          referenzElements: referenzOwn.slice(0, 5),
+          hasStandzeitWordAnywhere: /Standzeit/i.test(body),
+          detailTextSnippet: body.slice(0, 1500),
+        };
+      });
+    } catch (error) {
+      return { evaluateError: String(error?.message || error) };
+    }
+  };
+
+  const frameDump = await dumpFrom(frame);
+  const pageDump = await dumpFrom(page);
+
+  let verdict;
+  if (!detection.loaded) {
+    verdict =
+      "ABBRUCH: Preisliste nicht sicher lesbar -> es wuerde KEIN Zuschlag gebucht.";
+  } else if (detection.exists) {
+    verdict =
+      "UEBERSPRINGEN: Es existiert bereits eine Standzeit-Zeile -> kein neuer Zuschlag.";
+  } else {
+    verdict =
+      "WUERDE BEANTRAGEN: Keine vorhandene Standzeit-Zeile -> Motor wuerde einen Zuschlag anlegen (hier NICHT gespeichert).";
+  }
+
+  return {
+    transport_number: transportNumber || null,
+    matched_row: matchedRow || null,
+    opened,
+    price_tab_active: priceActive,
+    detection,
+    verdict,
+    frame_dump: frameDump,
+    page_dump: pageDump,
+  };
+}
+
 // Oeffnet den kompletten Zuschlag-Dialog und listet ALLE sichtbaren Eingabefelder
 // mit Position/Label/Wert auf, um das Preisfeld exakt zu bestimmen.
 async function debugSurchargeDialogFields(transportNumber) {
@@ -1364,4 +1659,5 @@ module.exports = {
   debugDetailTabs,
   debugPriceTabContent,
   debugSurchargeDialogFields,
+  dryRunStandgeldCheck,
 };

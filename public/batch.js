@@ -69,6 +69,9 @@ const el = {
   transporeonDryRun: document.getElementById("transporeonDryRun"),
   openTransporeonBtn: document.getElementById("openTransporeonBtn"),
   applyTransporeonBtn: document.getElementById("applyTransporeonBtn"),
+  retryFailedTransporeonBtn: document.getElementById(
+    "retryFailedTransporeonBtn",
+  ),
   rows: document.getElementById("rows"),
   tabSettled: document.getElementById("tabSettled"),
   tabAll: document.getElementById("tabAll"),
@@ -130,6 +133,26 @@ function setStatus(text, type = "info") {
   el.status.textContent = text;
   el.status.style.color =
     type === "error" ? "#b91c1c" : type === "success" ? "#166534" : "#73675a";
+}
+
+// Baut aus dem Zuschlagslauf-Ergebnis eine lesbare Liste der Problemfaelle
+// (fehlgeschlagene + serverseitig uebersprungene Touren mit Grund).
+function buildProblemDetails(data) {
+  const problems = [];
+  for (const item of data?.processed || []) {
+    if (item.status !== "failed") continue;
+    const station = item.station ? ` (${item.station})` : "";
+    problems.push(
+      `${item.transport_number || "?"}${station}: ${item.message || "Fehler"}`,
+    );
+  }
+  for (const item of data?.skipped || []) {
+    problems.push(
+      `${item.transport_number || "?"}: ${item.message || "Uebersprungen"}`,
+    );
+  }
+  if (!problems.length) return "";
+  return ` Fehlgeschlagen: ${problems.join(" | ")}`;
 }
 
 function formatImportTimestamp(isoValue) {
@@ -478,6 +501,8 @@ function loadBookkeepingForImport(importId) {
     bookkeepingByKey.set(key, {
       billed: Boolean(value && value.billed),
       submitted: Boolean(value && value.submitted),
+      failed: Boolean(value && value.failed),
+      existing: Boolean(value && value.existing),
     });
   }
 }
@@ -492,6 +517,8 @@ function persistBookkeepingForCurrentImport() {
     snapshot[key] = {
       billed: Boolean(entry && entry.billed),
       submitted: Boolean(entry && entry.submitted),
+      failed: Boolean(entry && entry.failed),
+      existing: Boolean(entry && entry.existing),
     };
   }
   storage[id] = snapshot;
@@ -971,6 +998,8 @@ function getBookkeepingEntry(stop) {
     bookkeepingByKey.set(key, {
       billed: false,
       submitted: false,
+      failed: false,
+      existing: false,
     });
   }
   return bookkeepingByKey.get(key);
@@ -995,7 +1024,7 @@ function buildBookkeepingRows(onlyMarked) {
   return rows;
 }
 
-function buildTransporeonSurchargeRows() {
+function buildTransporeonSurchargeRows(onlyFailed = false) {
   const rows = [];
   for (const stop of currentStops || []) {
     if (!stop || Number(stop.fee_eur || 0) <= 0) continue;
@@ -1003,6 +1032,11 @@ function buildTransporeonSurchargeRows() {
 
     const entry = getBookkeepingEntry(stop);
     if (!entry.billed) continue;
+    // Bereits erfolgreich abgerechnete Zeilen in einem normalen Lauf NICHT
+    // erneut senden (sonst kaemen sie als "already_exists" zurueck und wuerden
+    // faelschlich zurueckgestuft).
+    if (!onlyFailed && entry.submitted && !entry.failed) continue;
+    if (onlyFailed && !(entry.failed && !entry.submitted)) continue;
 
     rows.push({
       transport_number: String(stop.transport_number || "").trim(),
@@ -1052,11 +1086,13 @@ async function openTransporeonSession() {
   }
 }
 
-async function applyTransporeonSurcharges() {
-  const rows = buildTransporeonSurchargeRows();
+async function applyTransporeonSurcharges(onlyFailed = false) {
+  const rows = buildTransporeonSurchargeRows(onlyFailed);
   if (!rows.length) {
     setStatus(
-      "Keine markierten Positionen für Transporeon vorhanden.",
+      onlyFailed
+        ? "Keine fehlgeschlagenen Positionen zum erneuten Beantragen vorhanden."
+        : "Keine markierten Positionen für Transporeon vorhanden.",
       "error",
     );
     return;
@@ -1065,10 +1101,14 @@ async function applyTransporeonSurcharges() {
   const dryRun = Boolean(el.transporeonDryRun?.checked);
   const confirmText = dryRun
     ? `Trockenlauf für ${rows.length} Positionen starten?`
-    : `Automatisch ${rows.length} Zuschläge in Transporeon anlegen und Entscheidung einholen?`;
+    : onlyFailed
+      ? `${rows.length} fehlgeschlagene Zuschläge erneut in Transporeon beantragen?`
+      : `Automatisch ${rows.length} Zuschläge in Transporeon anlegen und Entscheidung einholen?`;
   if (!window.confirm(confirmText)) return;
 
   if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = true;
+  if (el.retryFailedTransporeonBtn)
+    el.retryFailedTransporeonBtn.disabled = true;
   setStatus(
     dryRun
       ? `Prüfe ${rows.length} markierte Positionen per Transporeon-Suche …`
@@ -1102,14 +1142,47 @@ async function applyTransporeonSurcharges() {
           .map((item) => String(item.stop_key || "").trim())
           .filter(Boolean),
       );
-      if (successKeys.size) {
+      // Bereits vorhandene Standzeit-Zeilen: eigener Zustand. Diese Touren
+      // wurden NICHT von diesem Lauf abgerechnet -> als Problem markieren,
+      // aus "Abgerechnet" und der Excel herausnehmen (billed=false).
+      const alreadyExistsKeys = new Set(
+        data.processed
+          .filter((item) => item.status === "already_exists")
+          .map((item) => String(item.stop_key || "").trim())
+          .filter(Boolean),
+      );
+      const failedKeys = new Set(
+        [
+          ...data.processed.filter((item) => item.status === "failed"),
+          ...(Array.isArray(data.skipped) ? data.skipped : []),
+        ]
+          .map((item) => String(item.stop_key || "").trim())
+          .filter(Boolean),
+      );
+      if (successKeys.size || alreadyExistsKeys.size || failedKeys.size) {
         for (const stop of currentStops || []) {
           const key = stopKey(stop);
-          if (!successKeys.has(key)) continue;
-          const entry = getBookkeepingEntry(stop);
-          entry.billed = true;
-          entry.submitted = true;
-          doneTransports.push(String(stop.transport_number || "").trim());
+          if (successKeys.has(key)) {
+            const entry = getBookkeepingEntry(stop);
+            entry.billed = true;
+            entry.submitted = true;
+            entry.failed = false;
+            entry.existing = false;
+            doneTransports.push(String(stop.transport_number || "").trim());
+          } else if (alreadyExistsKeys.has(key)) {
+            // Eigener Status: Standzeit-Zeile existiert schon -> NICHT in Excel,
+            // nicht gruen, sondern klar als "Bereits vorhanden" markieren.
+            const entry = getBookkeepingEntry(stop);
+            entry.billed = false;
+            entry.submitted = false;
+            entry.failed = false;
+            entry.existing = true;
+          } else if (failedKeys.has(key)) {
+            const entry = getBookkeepingEntry(stop);
+            entry.submitted = false;
+            entry.failed = true;
+            entry.existing = false;
+          }
         }
         persistBookkeepingForCurrentImport();
         render();
@@ -1117,19 +1190,24 @@ async function applyTransporeonSurcharges() {
     }
 
     const success = Number(data.summary?.success_count || 0);
+    const alreadyExists = Number(data.summary?.already_exists_count || 0);
     const failure = Number(data.summary?.failure_count || 0);
     if (dryRun) {
       setStatus(
-        `Trockenlauf fertig: ${success} bereit, ${failure} nicht gefunden/fehlerhaft.`,
-        failure > 0 ? "info" : "success",
+        `Trockenlauf fertig: ${success} bereit, ${failure + alreadyExists} nicht gefunden/fehlerhaft.`,
+        failure + alreadyExists > 0 ? "info" : "success",
       );
     } else {
       const doneText = doneTransports.length
         ? ` Abgerechnet: ${doneTransports.join(", ")}.`
         : "";
+      const existsText = alreadyExists
+        ? ` ${alreadyExists} bereits vorhanden (übersprungen).`
+        : "";
+      const failedDetails = buildProblemDetails(data);
       setStatus(
-        `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.${doneText}`,
-        failure > 0 ? "info" : "success",
+        `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.${existsText}${doneText}${failedDetails}`,
+        failure + alreadyExists > 0 ? "info" : "success",
       );
     }
   } catch (error) {
@@ -1140,6 +1218,8 @@ async function applyTransporeonSurcharges() {
     setStatus(msg, "error");
   } finally {
     if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = false;
+    if (el.retryFailedTransporeonBtn)
+      el.retryFailedTransporeonBtn.disabled = false;
   }
 }
 
@@ -1224,9 +1304,15 @@ function render() {
     const bk = getBookkeepingEntry(stop);
     const checkedAttr = bk.billed ? "checked" : "";
     if (bk.submitted) tr.classList.add("submitted-row");
+    else if (bk.existing) tr.classList.add("existing-row");
+    else if (bk.failed) tr.classList.add("failed-row");
     const submittedCell = bk.submitted
       ? '<span class="tp-done">✓ Abgerechnet</span>'
-      : '<span class="tp-open">—</span>';
+      : bk.existing
+        ? '<span class="tp-existing">● Bereits vorhanden</span>'
+        : bk.failed
+          ? '<span class="tp-failed">✗ Fehlgeschlagen</span>'
+          : '<span class="tp-open">—</span>';
 
     tr.innerHTML = `
       <td>${stop.transport_number || "-"}</td>
@@ -1336,8 +1422,29 @@ function renderSettled() {
       <td>${formatDateTimeForJustification(stop.window_local || stop.window_start)}</td>
       <td>${minutesToHours(stop.counted_standing_minutes)}</td>
       <td>${euro(stop.fee_eur)}</td>
-      <td><span class="tp-done">✓ Abgerechnet</span></td>
+      <td>
+        <span class="tp-done">✓ Abgerechnet</span>
+        <button type="button" class="settled-remove" title="Aus Abgerechnet entfernen">Entfernen</button>
+      </td>
     `;
+    const removeBtn = tr.querySelector(".settled-remove");
+    if (removeBtn) {
+      removeBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (
+          !window.confirm(
+            `Tour ${stop.transport_number || ""} aus den abgerechneten Touren entfernen? Sie kommt dann nicht in die Excel.`,
+          )
+        ) {
+          return;
+        }
+        const entry = getBookkeepingEntry(stop);
+        entry.submitted = false;
+        entry.billed = false;
+        persistBookkeepingForCurrentImport();
+        render();
+      });
+    }
     tr.addEventListener("click", () => selectStop(stop));
     el.settledRows.appendChild(tr);
   }
@@ -1684,12 +1791,14 @@ function sixfoldParams() {
   // Harte Voreinstellung: keine Teil-Abrechnung mit Luecken.
   params.set("allowPartialLive", "0");
 
-  // Seiten-Aufteilung nach GPS-Nachweisbarkeit (Seite 1 = verified,
-  // Seite 2 = gaps). Ohne Flag bleibt alles zusammen ("all").
+  // Seiten-Aufteilung: Seite 1 (Batch) = "sixfold" (nur an Sixfold
+  // angebundene Transporte mit Kennzeichen), Seite 2 (Spotmarkt) = "spot"
+  // (nur Touren ohne Kennzeichen mit Excel-Zeiten). Ohne Flag bleibt alles
+  // zusammen ("all").
   const gpsScope = String(window.STANDGELD_GPS_SCOPE || "all")
     .trim()
     .toLowerCase();
-  if (gpsScope === "verified" || gpsScope === "gaps") {
+  if (gpsScope === "sixfold" || gpsScope === "spot") {
     params.set("gpsScope", gpsScope);
   }
 
@@ -2228,6 +2337,11 @@ if (el.openTransporeonBtn) {
 }
 if (el.applyTransporeonBtn) {
   el.applyTransporeonBtn.addEventListener("click", applyTransporeonSurcharges);
+}
+if (el.retryFailedTransporeonBtn) {
+  el.retryFailedTransporeonBtn.addEventListener("click", () =>
+    applyTransporeonSurcharges(true),
+  );
 }
 if (el.tabSettled) {
   el.tabSettled.addEventListener("click", () => switchResultTab("settled"));

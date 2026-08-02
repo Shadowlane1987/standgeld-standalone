@@ -33,6 +33,9 @@ const el = {
   transporeonDryRun: document.getElementById("transporeonDryRun"),
   openTransporeonBtn: document.getElementById("openTransporeonBtn"),
   applyTransporeonBtn: document.getElementById("applyTransporeonBtn"),
+  retryFailedTransporeonBtn: document.getElementById(
+    "retryFailedTransporeonBtn",
+  ),
   tabAll: document.getElementById("tabAll"),
   tabSettled: document.getElementById("tabSettled"),
   allView: document.getElementById("allView"),
@@ -110,7 +113,12 @@ function writeSingleBookkeepingStorage(storage) {
 function getBookkeepingEntry(stop) {
   const key = stopKey(stop);
   if (!bookkeepingByKey.has(key)) {
-    bookkeepingByKey.set(key, { billed: false });
+    bookkeepingByKey.set(key, {
+      billed: false,
+      submitted: false,
+      failed: false,
+      existing: false,
+    });
   }
   return bookkeepingByKey.get(key);
 }
@@ -126,6 +134,9 @@ function restoreBookkeepingEntries(stops) {
     const key = stopKey(stop);
     bookkeepingByKey.set(key, {
       billed: Boolean(storage[key]?.billed),
+      submitted: Boolean(storage[key]?.submitted),
+      failed: Boolean(storage[key]?.failed),
+      existing: Boolean(storage[key]?.existing),
     });
   }
 }
@@ -133,7 +144,12 @@ function restoreBookkeepingEntries(stops) {
 function persistBookkeepingEntries() {
   const storage = {};
   for (const [key, entry] of bookkeepingByKey.entries()) {
-    storage[key] = { billed: Boolean(entry?.billed) };
+    storage[key] = {
+      billed: Boolean(entry?.billed),
+      submitted: Boolean(entry?.submitted),
+      failed: Boolean(entry?.failed),
+      existing: Boolean(entry?.existing),
+    };
   }
   writeSingleBookkeepingStorage(storage);
 }
@@ -152,7 +168,7 @@ function buildBookkeepingRows(onlyMarked) {
   return rows;
 }
 
-function buildTransporeonSurchargeRows() {
+function buildTransporeonSurchargeRows(onlyFailed = false) {
   const rows = [];
   for (const stop of latestStops || []) {
     if (!stop || Number(stop.amount_eur || 0) <= 0) continue;
@@ -160,6 +176,11 @@ function buildTransporeonSurchargeRows() {
 
     const entry = getBookkeepingEntry(stop);
     if (!entry.billed) continue;
+    // Bereits erfolgreich abgerechnete Zeilen in einem normalen Lauf NICHT
+    // erneut senden (sonst kaemen sie als "already_exists" zurueck und wuerden
+    // faelschlich zurueckgestuft).
+    if (!onlyFailed && entry.submitted && !entry.failed) continue;
+    if (onlyFailed && !(entry.failed && !entry.submitted)) continue;
 
     rows.push({
       transport_number: String(stop.transport_number || "").trim(),
@@ -207,11 +228,13 @@ async function openTransporeonSession() {
   }
 }
 
-async function applyTransporeonSurcharges() {
-  const rows = buildTransporeonSurchargeRows();
+async function applyTransporeonSurcharges(onlyFailed = false) {
+  const rows = buildTransporeonSurchargeRows(onlyFailed);
   if (!rows.length) {
     setStatus(
-      "Keine als „abgerechnet“ markierten Positionen für Transporeon vorhanden.",
+      onlyFailed
+        ? "Keine fehlgeschlagenen Positionen zum erneuten Beantragen vorhanden."
+        : "Keine als „abgerechnet“ markierten Positionen für Transporeon vorhanden.",
       "error",
     );
     return;
@@ -220,10 +243,14 @@ async function applyTransporeonSurcharges() {
   const dryRun = Boolean(el.transporeonDryRun?.checked);
   const confirmText = dryRun
     ? `Trockenlauf für ${rows.length} Positionen starten?`
-    : `Automatisch ${rows.length} Zuschläge in Transporeon anlegen und Entscheidung einholen?`;
+    : onlyFailed
+      ? `${rows.length} fehlgeschlagene Zuschläge erneut in Transporeon beantragen?`
+      : `Automatisch ${rows.length} Zuschläge in Transporeon anlegen und Entscheidung einholen?`;
   if (!window.confirm(confirmText)) return;
 
   if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = true;
+  if (el.retryFailedTransporeonBtn)
+    el.retryFailedTransporeonBtn.disabled = true;
   setStatus(
     dryRun
       ? `Prüfe ${rows.length} markierte Positionen per Transporeon-Suche …`
@@ -250,11 +277,46 @@ async function applyTransporeonSurcharges() {
           .map((item) => String(item.stop_key || "").trim())
           .filter(Boolean),
       );
-      if (successKeys.size) {
+      // Bereits vorhandene Standzeit-Zeilen: eigener Zustand. Nicht von diesem
+      // Lauf abgerechnet -> markieren, aus "Abgerechnet"/Excel nehmen.
+      const alreadyExistsKeys = new Set(
+        data.processed
+          .filter((item) => item.status === "already_exists")
+          .map((item) => String(item.stop_key || "").trim())
+          .filter(Boolean),
+      );
+      const failedKeys = new Set(
+        [
+          ...data.processed.filter((item) => item.status === "failed"),
+          ...(Array.isArray(data.skipped) ? data.skipped : []),
+        ]
+          .map((item) => String(item.stop_key || "").trim())
+          .filter(Boolean),
+      );
+      if (successKeys.size || alreadyExistsKeys.size || failedKeys.size) {
         for (const stop of latestStops || []) {
-          if (!successKeys.has(stopKey(stop))) continue;
-          getBookkeepingEntry(stop).billed = true;
-          doneTransports.push(String(stop.transport_number || "").trim());
+          const key = stopKey(stop);
+          if (successKeys.has(key)) {
+            const entry = getBookkeepingEntry(stop);
+            entry.billed = true;
+            entry.submitted = true;
+            entry.failed = false;
+            entry.existing = false;
+            doneTransports.push(String(stop.transport_number || "").trim());
+          } else if (alreadyExistsKeys.has(key)) {
+            // Eigener Status: Standzeit-Zeile existiert schon -> NICHT in Excel,
+            // nicht gruen, sondern klar als "Bereits vorhanden" markieren.
+            const entry = getBookkeepingEntry(stop);
+            entry.billed = false;
+            entry.submitted = false;
+            entry.failed = false;
+            entry.existing = true;
+          } else if (failedKeys.has(key)) {
+            const entry = getBookkeepingEntry(stop);
+            entry.submitted = false;
+            entry.failed = true;
+            entry.existing = false;
+          }
         }
         persistBookkeepingEntries();
         renderStops(latestStops);
@@ -262,19 +324,24 @@ async function applyTransporeonSurcharges() {
     }
 
     const success = Number(data.summary?.success_count || 0);
+    const alreadyExists = Number(data.summary?.already_exists_count || 0);
     const failure = Number(data.summary?.failure_count || 0);
     if (dryRun) {
       setStatus(
-        `Trockenlauf fertig: ${success} bereit, ${failure} nicht gefunden/fehlerhaft.`,
-        failure > 0 ? "info" : "success",
+        `Trockenlauf fertig: ${success} bereit, ${failure + alreadyExists} nicht gefunden/fehlerhaft.`,
+        failure + alreadyExists > 0 ? "info" : "success",
       );
     } else {
       const doneText = doneTransports.length
         ? ` Abgerechnet: ${doneTransports.join(", ")}.`
         : "";
+      const existsText = alreadyExists
+        ? ` ${alreadyExists} bereits vorhanden (übersprungen).`
+        : "";
+      const failedDetails = buildProblemDetails(data);
       setStatus(
-        `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.${doneText}`,
-        failure > 0 ? "info" : "success",
+        `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.${existsText}${doneText}${failedDetails}`,
+        failure + alreadyExists > 0 ? "info" : "success",
       );
     }
   } catch (error) {
@@ -285,6 +352,8 @@ async function applyTransporeonSurcharges() {
     setStatus(msg, "error");
   } finally {
     if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = false;
+    if (el.retryFailedTransporeonBtn)
+      el.retryFailedTransporeonBtn.disabled = false;
   }
 }
 
@@ -601,9 +670,16 @@ function renderStops(stops) {
 
     const bk = getBookkeepingEntry(stop);
     const checkedAttr = bk.billed ? "checked" : "";
+    if (bk.submitted) tr.classList.add("submitted-row");
+    else if (bk.existing) tr.classList.add("existing-row");
+    else if (bk.failed) tr.classList.add("failed-row");
     const submittedCell = bk.submitted
       ? '<span class="tp-done">✓ Abgerechnet</span>'
-      : '<span class="tp-open">—</span>';
+      : bk.existing
+        ? '<span class="tp-existing">● Bereits vorhanden</span>'
+        : bk.failed
+          ? '<span class="tp-failed">✗ Fehlgeschlagen</span>'
+          : '<span class="tp-open">—</span>';
 
     tr.innerHTML = `
       <td>${stop.transport_number || stop.tour_id || "-"}</td>
@@ -772,6 +848,26 @@ function setStatus(text, type = "info") {
   el.status.textContent = text;
   el.status.style.color =
     type === "error" ? "#b91c1c" : type === "success" ? "#166534" : "#73675a";
+}
+
+// Baut aus dem Zuschlagslauf-Ergebnis eine lesbare Liste der Problemfaelle
+// (fehlgeschlagene + serverseitig uebersprungene Touren mit Grund).
+function buildProblemDetails(data) {
+  const problems = [];
+  for (const item of data?.processed || []) {
+    if (item.status !== "failed") continue;
+    const station = item.station ? ` (${item.station})` : "";
+    problems.push(
+      `${item.transport_number || "?"}${station}: ${item.message || "Fehler"}`,
+    );
+  }
+  for (const item of data?.skipped || []) {
+    problems.push(
+      `${item.transport_number || "?"}: ${item.message || "Uebersprungen"}`,
+    );
+  }
+  if (!problems.length) return "";
+  return ` Fehlgeschlagen: ${problems.join(" | ")}`;
 }
 
 function normalizeHeader(value) {
@@ -1741,6 +1837,11 @@ if (el.openTransporeonBtn) {
 }
 if (el.applyTransporeonBtn) {
   el.applyTransporeonBtn.addEventListener("click", applyTransporeonSurcharges);
+}
+if (el.retryFailedTransporeonBtn) {
+  el.retryFailedTransporeonBtn.addEventListener("click", () =>
+    applyTransporeonSurcharges(true),
+  );
 }
 
 if (el.tabAll) {

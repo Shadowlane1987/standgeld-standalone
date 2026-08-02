@@ -3,21 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Standgeld · Alle Transporte</title>
+    <title>Standgeld · Batch (Sixfold)</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="layout">
       <section class="panel hero">
-        <span class="hero-eyebrow">Batch-Abrechnung · GPS belegt</span>
-        <h1>Standgeld · Transporte mit GPS</h1>
+        <span class="hero-eyebrow">Batch-Abrechnung · Sixfold</span>
+        <h1>Standgeld · Batch (Sixfold)</h1>
         <p>
-          Zeigt nur Transporte, bei denen jeder Stopp per GPS belegt ist
-          (Ankunft und Abfahrt). Transporte ohne GPS-Beleg werden auf der Seite
-          „GPS-Lücken“ mit der Transporeon-Excel abgeglichen.
-          <a href="/gps-luecken.html">Zu den GPS-Lücken &rarr;</a>
+          Reine Sixfold-Abrechnung: zeigt nur Transporte, die an Sixfold
+          angebunden sind (Kennzeichen vorhanden). Abgerechnet wird über die
+          Sixfold-/GPS-Zeiten. Transporte ohne Kennzeichen werden hier nicht
+          abgerechnet – dafür gibt es den Spotmarkt.
+          <a href="/spotmarkt.html">Zum Spotmarkt &rarr;</a>
           <a href="/">Zur Einzelberechnung &rarr;</a>
-          <a href="/nahverkehr.html">Zum Nahverkehr &rarr;</a>
         </p>
       </section>
 
@@ -290,6 +290,13 @@
             >
               Zuschläge in Transporeon beantragen
             </button>
+            <button
+              id="retryFailedTransporeonBtn"
+              type="button"
+              class="btn-secondary"
+            >
+              Nur fehlgeschlagene erneut beantragen
+            </button>
           </div>
 
           <div class="table-wrap">
@@ -374,8 +381,9 @@
 
     <script>
       window.STANDGELD_SCOPE = "fernverkehr";
-      // Seite 1 zeigt nur Transporte mit vollstaendigem GPS-Beleg.
-      window.STANDGELD_GPS_SCOPE = "verified";
+      // Batch = reine Sixfold-Abrechnung: nur an Sixfold angebundene
+      // Transporte (Kennzeichen vorhanden).
+      window.STANDGELD_GPS_SCOPE = "sixfold";
     </script>
     <script src="/batch.js"></script>
   </body>

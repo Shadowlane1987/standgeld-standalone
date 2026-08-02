@@ -5,7 +5,8 @@ const assert = require("node:assert/strict");
 
 const {
   normalizeScope,
-  isStopGpsBacked,
+  stopIsSixfoldConnected,
+  stopHasExcelTimes,
   classifyTransportsByGps,
   filterBillingByGpsScope,
 } = require("../normalize/gpsScope");
@@ -24,33 +25,54 @@ function stop(overrides = {}) {
 }
 
 test("normalizeScope faellt bei Unbekanntem auf all zurueck", () => {
-  assert.equal(normalizeScope("verified"), "verified");
-  assert.equal(normalizeScope("gaps"), "gaps");
+  assert.equal(normalizeScope("sixfold"), "sixfold");
+  assert.equal(normalizeScope("spot"), "spot");
   assert.equal(normalizeScope("ALL"), "all");
   assert.equal(normalizeScope("quatsch"), "all");
   assert.equal(normalizeScope(undefined), "all");
 });
 
-test("isStopGpsBacked nur wenn Ankunft UND Abfahrt GPS", () => {
-  assert.equal(isStopGpsBacked(stop()), true);
-  assert.equal(isStopGpsBacked(stop({ departure_source: "XP" })), false);
-  assert.equal(isStopGpsBacked(stop({ arrival_source: null })), false);
+test("stopIsSixfoldConnected nur bei Kennzeichen/GPS-Verknuepfung", () => {
+  assert.equal(stopIsSixfoldConnected(stop({ gps_available: true })), true);
+  assert.equal(stopIsSixfoldConnected(stop({ origin: "sixfold_only" })), true);
+  assert.equal(stopIsSixfoldConnected(stop({ gps_available: false })), false);
+  assert.equal(stopIsSixfoldConnected(stop({ gps_plate_match: true })), false);
 });
 
-test("classifyTransportsByGps: ein fehlender Stopp macht Transport zur Luecke", () => {
+test("stopHasExcelTimes nur wenn Ankunft UND Abfahrt aus Excel", () => {
+  assert.equal(
+    stopHasExcelTimes(
+      stop({
+        xp_arrival_time: "2026-01-01T08:00:00Z",
+        xp_departure_time: "2026-01-01T09:00:00Z",
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    stopHasExcelTimes(stop({ xp_arrival_time: "2026-01-01T08:00:00Z" })),
+    false,
+  );
+  assert.equal(stopHasExcelTimes(stop()), false);
+});
+
+test("classifyTransportsByGps: angebunden vs. nicht angebunden", () => {
   const stops = [
-    stop({ transport_number: "A", stop_type: "LOADING" }),
+    // A: Kennzeichen/GPS-Verknuepfung -> Sixfold
+    stop({ transport_number: "A", gps_available: true }),
+    // B: reine Sixfold-Tour -> Sixfold
+    stop({ transport_number: "B", origin: "sixfold_only" }),
+    // C: kein Kennzeichen -> nicht angebunden
     stop({
-      transport_number: "A",
-      stop_type: "UNLOADING",
+      transport_number: "C",
+      arrival_source: "XP",
       departure_source: "XP",
     }),
-    stop({ transport_number: "B", stop_type: "LOADING" }),
-    stop({ transport_number: "B", stop_type: "UNLOADING" }),
   ];
-  const status = classifyTransportsByGps(stops);
-  assert.equal(status.get("A"), false);
-  assert.equal(status.get("B"), true);
+  const connected = classifyTransportsByGps(stops);
+  assert.equal(connected.get("A"), true);
+  assert.equal(connected.get("B"), true);
+  assert.equal(connected.get("C"), false);
 });
 
 test("filterBillingByGpsScope all gibt Ergebnis unveraendert zurueck", () => {
@@ -58,45 +80,95 @@ test("filterBillingByGpsScope all gibt Ergebnis unveraendert zurueck", () => {
   assert.equal(filterBillingByGpsScope(result, "all"), result);
 });
 
-test("filterBillingByGpsScope verified/gaps trennt Transporte und rechnet Summe neu", () => {
+test("filterBillingByGpsScope sixfold/spot trennt Transporte und rechnet Summe neu", () => {
   const result = {
     stops: [
-      // Transport A: vollstaendig GPS -> verified
-      stop({ transport_number: "A", stop_type: "LOADING", fee_eur: 30 }),
-      stop({ transport_number: "A", stop_type: "UNLOADING", fee_eur: 60 }),
-      // Transport B: Abfahrt XP -> Luecke
+      // Transport A: an Sixfold angebunden -> Batch
+      stop({
+        transport_number: "A",
+        stop_type: "LOADING",
+        gps_available: true,
+        fee_eur: 30,
+      }),
+      stop({
+        transport_number: "A",
+        stop_type: "UNLOADING",
+        gps_available: true,
+        fee_eur: 60,
+      }),
+      // Transport B: kein Kennzeichen, aber Excel-Zeiten -> Spotmarkt
       stop({
         transport_number: "B",
         stop_type: "UNLOADING",
+        arrival_source: "XP",
         departure_source: "XP",
+        xp_arrival_time: "2026-01-01T08:00:00Z",
+        xp_departure_time: "2026-01-01T11:00:00Z",
         fee_eur: 90,
       }),
     ],
     summary: { total_fee_eur: 180, transport_count: 2 },
   };
 
-  const verified = filterBillingByGpsScope(result, "verified");
+  const sixfold = filterBillingByGpsScope(result, "sixfold");
   assert.deepEqual(
-    verified.stops.map((s) => s.transport_number),
+    sixfold.stops.map((s) => s.transport_number),
     ["A", "A"],
   );
-  assert.equal(verified.summary.total_fee_eur, 90);
-  assert.equal(verified.summary.transport_count, 1);
-  assert.equal(verified.summary.gps_scope, "verified");
+  assert.equal(sixfold.summary.total_fee_eur, 90);
+  assert.equal(sixfold.summary.transport_count, 1);
+  assert.equal(sixfold.summary.gps_scope, "sixfold");
 
-  const gaps = filterBillingByGpsScope(result, "gaps");
+  const spot = filterBillingByGpsScope(result, "spot");
   assert.deepEqual(
-    gaps.stops.map((s) => s.transport_number),
+    spot.stops.map((s) => s.transport_number),
     ["B"],
   );
-  assert.equal(gaps.summary.total_fee_eur, 90);
-  assert.equal(gaps.summary.transport_count, 1);
-  assert.equal(gaps.summary.gps_scope, "gaps");
+  assert.equal(spot.summary.total_fee_eur, 90);
+  assert.equal(spot.summary.transport_count, 1);
+  assert.equal(spot.summary.gps_scope, "spot");
 });
 
-test("filterBillingByGpsScope: Prueffall zaehlt nicht in die Summe, Transport ohne Nummer ist Luecke", () => {
+test("filterBillingByGpsScope spot: Tour ohne Excel-Zeiten kommt nicht mit hinein", () => {
   const result = {
     stops: [
+      // kein Kennzeichen, aber KEINE Excel-Zeiten -> ausgeschlossen
+      stop({
+        transport_number: "N",
+        stop_type: "UNLOADING",
+        arrival_source: "XP",
+        departure_source: "XP",
+        fee_eur: 45,
+      }),
+      // kein Kennzeichen, MIT Excel-Zeiten -> bleibt
+      stop({
+        transport_number: "M",
+        stop_type: "UNLOADING",
+        arrival_source: "XP",
+        departure_source: "XP",
+        xp_arrival_time: "2026-01-01T08:00:00Z",
+        xp_departure_time: "2026-01-01T10:00:00Z",
+        fee_eur: 60,
+      }),
+    ],
+    summary: { total_fee_eur: 105 },
+  };
+  const spot = filterBillingByGpsScope(result, "spot");
+  assert.deepEqual(
+    spot.stops.map((s) => s.transport_number),
+    ["M"],
+  );
+  assert.equal(spot.summary.total_fee_eur, 60);
+
+  // Auf der Batch-Seite tauchen diese Touren ohne Kennzeichen nicht auf.
+  const sixfold = filterBillingByGpsScope(result, "sixfold");
+  assert.equal(sixfold.stops.length, 0);
+});
+
+test("filterBillingByGpsScope: Prueffall zaehlt nicht in die Summe, Sixfold-Transport bleibt in Batch", () => {
+  const result = {
+    stops: [
+      // Stopp ohne Transportnummer -> nicht angebunden, ohne Excel-Zeiten
       stop({
         transport_number: "",
         arrival_source: null,
@@ -104,24 +176,25 @@ test("filterBillingByGpsScope: Prueffall zaehlt nicht in die Summe, Transport oh
         needs_review: true,
         fee_eur: 0,
       }),
+      // C: angebunden, aber Prueffall -> Summe 0
       stop({
         transport_number: "C",
         stop_type: "UNLOADING",
+        gps_available: true,
         needs_review: true,
         fee_eur: 50,
       }),
     ],
     summary: { total_fee_eur: 0 },
   };
-  const gaps = filterBillingByGpsScope(result, "gaps");
-  // Beide sind Luecken (leere Nummer + C hat Prueffall/XP nicht vollstaendig GPS? C ist GPS aber needs_review)
-  const verified = filterBillingByGpsScope(result, "verified");
-  // C ist arrival/departure GPS -> verified-Kandidat, aber needs_review -> Summe 0
+  const sixfold = filterBillingByGpsScope(result, "sixfold");
   assert.equal(
-    verified.stops.map((s) => s.transport_number).includes("C"),
+    sixfold.stops.map((s) => s.transport_number).includes("C"),
     true,
   );
-  assert.equal(verified.summary.total_fee_eur, 0);
-  // Stopp ohne Transportnummer landet in gaps
-  assert.equal(gaps.stops.length >= 1, true);
+  assert.equal(sixfold.summary.total_fee_eur, 0);
+
+  // Stopp ohne Transportnummer und ohne Excel-Zeiten landet in keiner Sicht.
+  const spot = filterBillingByGpsScope(result, "spot");
+  assert.equal(spot.stops.length, 0);
 });

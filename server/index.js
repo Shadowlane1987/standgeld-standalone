@@ -34,6 +34,7 @@ const {
   debugDetailTabs,
   debugPriceTabContent,
   debugSurchargeDialogFields,
+  dryRunStandgeldCheck,
 } = require("./services/transporeonSurchargeAutomation");
 const { ImportStore, normalizeScope } = require("./storage/importStore");
 
@@ -46,7 +47,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 7;
+const BILLING_CACHE_VERSION = 9;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2842,6 +2843,19 @@ app.post("/api/transporeon/debug/fields", async (req, res) => {
   }
 });
 
+// Trockenlauf-Pruefung: Wuerde der Motor Standgeld beantragen? (ohne Speichern)
+app.post("/api/transporeon/debug/standgeld", async (req, res) => {
+  try {
+    const tn = String(req.body?.transport_number || "").trim();
+    const result = await dryRunStandgeldCheck(tn);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Standgeld-Trockenlauf fehlgeschlagen.",
+    });
+  }
+});
+
 app.post("/api/transporeon/surcharges/apply", async (req, res) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -2851,37 +2865,63 @@ app.post("/api/transporeon/surcharges/apply", async (req, res) => {
       });
     }
 
-    const prepared = items
-      .map((item) => {
-        const transportNumber = String(item?.transport_number || "").trim();
-        const stopType = String(item?.stop_type || "")
-          .trim()
-          .toUpperCase();
-        const amountEur = Number(item?.amount_eur || 0);
-        const description = String(item?.description || "").trim();
-        const stopKey = String(item?.stop_key || "").trim();
+    const prepared = [];
+    const skipped = [];
+    for (const item of items) {
+      const transportNumber = String(item?.transport_number || "").trim();
+      const stopTypeRaw = String(item?.stop_type || "")
+        .trim()
+        .toUpperCase();
+      const amountEur = Number(item?.amount_eur || 0);
+      const description = String(item?.description || "").trim();
+      const stopKey = String(item?.stop_key || "").trim();
 
-        return {
+      // Geld-kritisch: Die Stelle (Belade-/Entladestelle) NIEMALS raten.
+      // Nur explizit bekannte Werte zulassen; alles andere wird uebersprungen,
+      // damit kein Zuschlag an die falsche Stelle gebucht wird.
+      let stopType = null;
+      if (stopTypeRaw === "UNLOAD" || stopTypeRaw === "UNLOADING") {
+        stopType = "UNLOADING";
+      } else if (stopTypeRaw === "LOAD" || stopTypeRaw === "LOADING") {
+        stopType = "LOADING";
+      }
+
+      if (!transportNumber || !Number.isFinite(amountEur) || amountEur <= 0) {
+        skipped.push({
+          transport_number: transportNumber || null,
+          stop_type: stopType,
+          stop_key: stopKey || null,
+          status: "skipped",
+          message: "Transportnummer oder Betrag fehlt/ungueltig.",
+        });
+        continue;
+      }
+
+      if (!stopType) {
+        skipped.push({
           transport_number: transportNumber,
-          stop_type:
-            stopType === "UNLOAD" || stopType === "UNLOADING"
-              ? "UNLOADING"
-              : "LOADING",
-          amount_eur: amountEur,
-          description,
-          stop_key: stopKey,
-        };
-      })
-      .filter(
-        (item) =>
-          item.transport_number &&
-          Number.isFinite(item.amount_eur) &&
-          item.amount_eur > 0,
-      );
+          stop_type: null,
+          stop_key: stopKey || null,
+          status: "skipped",
+          message:
+            "Stelle (Belade-/Entladestelle) unbekannt. Zuschlag NICHT gebucht.",
+        });
+        continue;
+      }
+
+      prepared.push({
+        transport_number: transportNumber,
+        stop_type: stopType,
+        amount_eur: amountEur,
+        description,
+        stop_key: stopKey,
+      });
+    }
 
     if (!prepared.length) {
       return res.status(400).json({
         error: "Keine gültigen Zuschlagsdaten übergeben.",
+        skipped,
       });
     }
 
@@ -2910,6 +2950,7 @@ app.post("/api/transporeon/surcharges/apply", async (req, res) => {
     return res.json({
       ok: true,
       ...result,
+      skipped,
     });
   } catch (error) {
     return res.status(500).json({

@@ -1,25 +1,28 @@
 "use strict";
 
 /**
- * Aufteilung eines Abrechnungs-Ergebnisses nach GPS-Nachweisbarkeit (§7/§10).
+ * Aufteilung eines Abrechnungs-Ergebnisses in zwei getrennte Abrechnungen
+ * (Nutzer-Vorgabe 2026-08-02):
  *
- * Zweck (Nutzer-Vorgabe 2026-08-01): Der Sixfold-Lauf liefert ALLE Transporte.
- * Sie werden auf zwei Seiten getrennt:
- *   - Seite 1 ("verified"): Transporte, bei denen JEDER Stopp Ankunft UND
- *     Abfahrt per GPS belegt hat.
- *   - Seite 2 ("gaps"): alle uebrigen -> hier gleicht der Nutzer mit der
- *     Transporeon-Excel (XP-Service-Account-Zeiten) ab.
+ *   - "sixfold" (Batch, Abrechnung 1): NUR Transporte, die an Sixfold
+ *     angebunden sind = Sixfold liefert ein Kennzeichen UND kann eine
+ *     GPS-Verknuepfung herstellen (gps_available). Diese werden ueber die
+ *     Sixfold-/GPS-Zeiten abgerechnet. Transporte OHNE Kennzeichen erscheinen
+ *     hier NICHT.
  *
- * Regel (Nutzer): "sobald eine Zeit fehlt" -> der gesamte Transport ist eine
- * GPS-Luecke. Ein Transport gilt nur dann als GPS-belegt, wenn ALLE seine
- * Stopps arrival_source==="GPS" UND departure_source==="GPS" haben.
+ *   - "spot" (Spotmarkt, Abrechnung 2): NUR Transporte OHNE Kennzeichen
+ *     (nicht an Sixfold angebunden) UND NUR, wenn XP-Service-Zeiten aus der
+ *     Transporeon-Excel vorhanden sind (Ankunft UND Abfahrt). Touren ohne
+ *     Excel-Zeiten kommen gar nicht mit hinein. Abrechnung mit den Excel-Zeiten.
+ *
+ *   - "all": keine Filterung (Gesamtsicht).
  *
  * Reine Funktion ohne Seiteneffekte -> voll unit-testbar. Die Geldsumme der
  * Teilmenge wird IMMER frisch aus den gefilterten Stopps berechnet, damit die
  * angezeigte Summe je Seite korrekt ist (Prueffaelle zaehlen nicht mit).
  */
 
-const VALID_SCOPES = Object.freeze(["all", "verified", "gaps"]);
+const VALID_SCOPES = Object.freeze(["all", "sixfold", "spot"]);
 
 function normalizeScope(scope) {
   const value = String(scope || "all")
@@ -33,29 +36,40 @@ function transportKey(stop) {
 }
 
 /**
- * Ein Stopp ist GPS-belegt, wenn Ankunft UND Abfahrt aus der GPS-Quelle stammen.
+ * An Sixfold angebunden: Sixfold kennt das Kennzeichen und kann eine
+ * GPS-Verknuepfung herstellen. gps_available ist genau dieses Signal
+ * (Sixfold-Eintrag vorhanden UND Kennzeichen passt). Reine Sixfold-Touren
+ * (origin "sixfold_only") sind ebenfalls angebunden.
  */
-function isStopGpsBacked(stop) {
-  return stop?.arrival_source === "GPS" && stop?.departure_source === "GPS";
+function stopIsSixfoldConnected(stop) {
+  return Boolean(stop?.gps_available) || stop?.origin === "sixfold_only";
 }
 
 /**
- * Ermittelt je Transportnummer, ob der gesamte Transport GPS-belegt ist.
- * Transporte ohne verwertbare Transportnummer werden als GPS-Luecke behandelt
- * (kein sicherer Nachweis -> Abgleich auf Seite 2).
+ * XP-Service-Zeiten aus der Transporeon-Excel vorhanden (Ankunft UND Abfahrt).
+ * Nur dann kann eine Tour ohne Kennzeichen auf dem Spotmarkt abgerechnet werden.
+ */
+function stopHasExcelTimes(stop) {
+  return Boolean(stop?.xp_arrival_time) && Boolean(stop?.xp_departure_time);
+}
+
+/**
+ * Ermittelt je Transportnummer, ob der Transport an Sixfold angebunden ist
+ * (mind. ein Stopp mit Kennzeichen/GPS-Verknuepfung). Transporte ohne
+ * verwertbare Transportnummer gelten als NICHT angebunden (-> Spotmarkt).
  *
  * @param {Array<object>} stops
- * @returns {Map<string, boolean>} key -> true (verified) / false (gap)
+ * @returns {Map<string, boolean>} key -> true (Sixfold) / false (kein Kennzeichen)
  */
 function classifyTransportsByGps(stops) {
-  const status = new Map();
+  const connected = new Map();
   for (const stop of Array.isArray(stops) ? stops : []) {
     const key = transportKey(stop);
     if (!key) continue;
-    const prev = status.has(key) ? status.get(key) : true;
-    status.set(key, prev && isStopGpsBacked(stop));
+    const prev = connected.get(key) === true;
+    connected.set(key, prev || stopIsSixfoldConnected(stop));
   }
-  return status;
+  return connected;
 }
 
 /**
@@ -91,12 +105,12 @@ function summarizeStops(stops) {
 }
 
 /**
- * Filtert ein Abrechnungs-Ergebnis auf die gewaehlte GPS-Sicht und rechnet die
+ * Filtert ein Abrechnungs-Ergebnis auf die gewaehlte Abrechnung und rechnet die
  * Kennzahlen der Teilmenge neu. scope "all" gibt das Ergebnis unveraendert
- * zurueck (Rueckwaertskompatibilitaet).
+ * zurueck.
  *
  * @param {{stops: Array<object>, summary: object}} result
- * @param {"all"|"verified"|"gaps"} scope
+ * @param {"all"|"sixfold"|"spot"} scope
  * @returns {{stops: Array<object>, summary: object}}
  */
 function filterBillingByGpsScope(result, scope) {
@@ -105,14 +119,22 @@ function filterBillingByGpsScope(result, scope) {
     return result;
   }
 
-  const status = classifyTransportsByGps(result.stops);
-  const wantVerified = normalized === "verified";
-  const keptStops = result.stops.filter((stop) => {
+  const connected = classifyTransportsByGps(result.stops);
+  const wantSixfold = normalized === "sixfold";
+  const keptStops = [];
+  for (const stop of result.stops) {
     const key = transportKey(stop);
-    // Ohne Transportnummer: nie "verified" (kein sicherer Nachweis).
-    const isVerified = key ? status.get(key) === true : false;
-    return wantVerified ? isVerified : !isVerified;
-  });
+    const isSixfold = key ? connected.get(key) === true : false;
+    if (wantSixfold) {
+      // Batch: nur an Sixfold angebundene Transporte.
+      if (!isSixfold) continue;
+    } else {
+      // Spotmarkt: nur Touren OHNE Kennzeichen UND mit Excel-Zeiten.
+      if (isSixfold) continue;
+      if (!stopHasExcelTimes(stop)) continue;
+    }
+    keptStops.push(stop);
+  }
 
   return {
     ...result,
@@ -128,7 +150,8 @@ function filterBillingByGpsScope(result, scope) {
 module.exports = {
   VALID_SCOPES,
   normalizeScope,
-  isStopGpsBacked,
+  stopIsSixfoldConnected,
+  stopHasExcelTimes,
   classifyTransportsByGps,
   summarizeStops,
   filterBillingByGpsScope,
