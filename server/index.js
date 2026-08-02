@@ -47,10 +47,20 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 12;
+const BILLING_CACHE_VERSION = 13;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
+
+// Nahverkehr-Flotte: Kennzeichen mit diesem Praefix werden ueber die
+// Einzelabrechnung erfasst und gehoeren nicht in die Sixfold-/Batch-Abrechnung.
+const NAHVERKEHR_PLATE_PREFIX = "PEBL";
+function isNahverkehrPlate(plate) {
+  return String(plate || "")
+    .replace(/\s+/g, "")
+    .toUpperCase()
+    .startsWith(NAHVERKEHR_PLATE_PREFIX);
+}
 
 app.use(express.json({ limit: "2mb" }));
 
@@ -2196,10 +2206,16 @@ app.get("/api/billing/export", async (req, res) => {
     }
 
     const debug = req.query.debug === "1" || req.query.debug === "true";
-    const { gpsIndex, gpsInfo, sixfoldStops } =
+    const { gpsIndex, gpsInfo, sixfoldStops: rawSixfoldStops } =
       await resolveGpsIndexFromHeaders(req, window, debug, {
         preferFleetTimeline: true,
       });
+
+    // Nahverkehr-Flotte (Kennzeichen mit Praefix PEBL) laeuft ueber die
+    // Einzelabrechnung und wird aus der Sixfold-/Batch-Abrechnung entfernt.
+    const sixfoldStops = (rawSixfoldStops || []).filter(
+      (s) => !isNahverkehrPlate(s.license_plate),
+    );
 
     const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
     const gatedResult = enforceUnloadingGpsGate(rawResult);
