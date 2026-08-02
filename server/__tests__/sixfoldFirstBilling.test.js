@@ -3,7 +3,10 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { appendSixfoldOnlyStops } = require("../normalize/sixfoldFirstBilling");
+const {
+  appendSixfoldOnlyStops,
+  billSixfoldFirst,
+} = require("../normalize/sixfoldFirstBilling");
 const { buildWindowIndex } = require("../normalize/zeitfenster");
 const { transportNumberToLadenummer } = require("../normalize/ladenummer");
 
@@ -198,4 +201,66 @@ test("bestehende Excel-Stops bleiben erhalten und Summe stimmt", () => {
   assert.equal(result.stops.length, 2);
   assert.equal(result.summary.sixfold_only_count, 1);
   assert.equal(result.summary.total_fee_eur, 120); // 30 + 90
+});
+
+// ---- billSixfoldFirst: Sixfold ist die BASIS, Excel nur Overlay ----
+
+test("billSixfoldFirst: ALLE Sixfold-Touren sind Basis, auch ohne Excel", () => {
+  const result = billSixfoldFirst([sixfoldStop()], { transports: [] });
+  assert.equal(result.summary.transport_count, 1);
+  assert.equal(result.stops.length, 1);
+  const s = result.stops[0];
+  assert.equal(s.origin, "sixfold");
+  assert.equal(s.arrival_source, "GPS");
+  assert.equal(s.gps_license_plate, "B-AB123");
+  assert.equal(s.fee_eur, 90);
+});
+
+test("billSixfoldFirst: Excel liefert nur das Fenster, GPS-Zeiten bleiben Basis", () => {
+  const result = billSixfoldFirst([sixfoldStop({ type: "UNLOADING" })], {
+    transports: [
+      {
+        transport_number: "0C_20260723_0006654477",
+        vehicle_registration: "B-AB123",
+        unloading: {
+          window_local: "2026-07-23 08:00",
+          arrival_local: null,
+          departure_local: null,
+          location: "DE-29683",
+        },
+      },
+    ],
+  });
+  assert.equal(result.stops.length, 1);
+  const s = result.stops[0];
+  assert.equal(s.origin, "sixfold");
+  // GPS-Zeiten bleiben massgeblich (06:00 -> 09:30).
+  assert.equal(s.gps_arrival_time, "2026-07-23T06:00:00.000Z");
+  assert.equal(s.arrival_source, "GPS");
+  // Fenster kommt aus der Excel ("Gebucht ab").
+  assert.equal(s.window_local, "2026-07-23 08:00");
+});
+
+test("billSixfoldFirst: Tour NUR in der Excel wird als excel_only ergaenzt (Spot)", () => {
+  const result = billSixfoldFirst([sixfoldStop()], {
+    transports: [
+      {
+        transport_number: "9Z_20260723_0009999999",
+        vehicle_registration: null,
+        loading: {
+          window_local: "2026-07-23 06:00",
+          arrival_local: "2026-07-23 06:00",
+          departure_local: "2026-07-23 09:30",
+          location: "DE-14974",
+        },
+      },
+    ],
+  });
+  // 1 Sixfold (Basis) + 1 Excel-only.
+  assert.equal(result.stops.length, 2);
+  assert.equal(result.summary.sixfold_only_count, 1);
+  const spot = result.stops.find((s) => s.origin === "excel_only");
+  assert.ok(spot);
+  assert.equal(spot.arrival_source, "XP");
+  assert.equal(spot.gps_available, false);
 });
