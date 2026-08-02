@@ -47,7 +47,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 13;
+const BILLING_CACHE_VERSION = 14;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2206,10 +2206,13 @@ app.get("/api/billing/export", async (req, res) => {
     }
 
     const debug = req.query.debug === "1" || req.query.debug === "true";
-    const { gpsIndex, gpsInfo, sixfoldStops: rawSixfoldStops } =
-      await resolveGpsIndexFromHeaders(req, window, debug, {
-        preferFleetTimeline: true,
-      });
+    const {
+      gpsIndex,
+      gpsInfo,
+      sixfoldStops: rawSixfoldStops,
+    } = await resolveGpsIndexFromHeaders(req, window, debug, {
+      preferFleetTimeline: true,
+    });
 
     // Nahverkehr-Flotte (Kennzeichen mit Praefix PEBL) laeuft ueber die
     // Einzelabrechnung und wird aus der Sixfold-/Batch-Abrechnung entfernt.
@@ -2219,18 +2222,16 @@ app.get("/api/billing/export", async (req, res) => {
 
     const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
     const gatedResult = enforceUnloadingGpsGate(rawResult);
-    // Sixfold-first (Nutzer-Vorgabe 2026-07-31): Firma 799 = NUR eigene Touren,
-    // Sixfold zeigt keine fremden. Mit gesetztem Datumsfilter grenzen beide
-    // Sixfold-Abrufe serverseitig (isStopInWindow) auf den Zeitraum ein, sonst
-    // kaeme die komplette eigene Historie. Deshalb werden – reiner Sixfold-Modus
-    // ODER Excel + aktiver Datumsfilter – die Sixfold-Touren ergaenzt, die (noch)
-    // nicht in der Excel stehen. Ohne Datumsfilter bleibt die Excel die Basis
-    // (sonst wuerde die ganze Historie mitabgerechnet und die Summe explodiert).
-    const dateScoped = Boolean(sixfoldDateFrom || sixfoldDateTo);
+    // Sixfold ist die BASIS (alle eigenen Touren im Zeitraum); die Transporeon-
+    // Excel laeuft nur als OVERLAY darueber (ersetzt Zeiten/Fenster, wie die
+    // Zeitfenster-Excel). Deshalb IMMER die Sixfold-Touren ergaenzen, die (noch)
+    // nicht in der Excel stehen - sonst wuerden reine Sixfold-Touren (z.B.
+    // Empfaenger Lidl/Edeka) beim Excel-Upload verschwinden. Der Zeitraum wird
+    // ohne expliziten Datumsfilter aus der Excel abgeleitet (computeTransports
+    // Window) und beide Sixfold-Abrufe filtern serverseitig darauf -> keine
+    // Historien-Explosion.
     const appendSixfold =
-      Array.isArray(sixfoldStops) &&
-      sixfoldStops.length > 0 &&
-      (sixfoldOnly || dateScoped);
+      Array.isArray(sixfoldStops) && sixfoldStops.length > 0;
     const result = appendSixfold
       ? appendSixfoldOnlyStops(gatedResult, {
           transports: filteredTransports,
