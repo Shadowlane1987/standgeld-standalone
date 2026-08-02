@@ -119,25 +119,32 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
       : null;
   let unloadWindowFromExcel = 0;
 
-  // Bereits über Excel abgedeckte Transportnummern (normalisiert).
-  const excelTns = new Set();
+  // Bereits über Excel abgedeckte Stopps (normalisiert, PRO Stopp-Typ). Die
+  // Excel deckt einen Stopp nur ab, wenn dafuer eine Stopp-Zeile (loading/
+  // unloading) existiert. Fehlt der Stopp - oder die ganze Tour - in der Excel,
+  // wird er aus den Sixfold-GPS-Zeiten ergaenzt statt rausgeworfen. So bleibt
+  // z.B. die Entladestelle drin, auch wenn die Excel dafuer keine Zeit hat.
+  const excelStopKeys = new Set();
   for (const t of transports) {
     const norm = normalizeTransportNumber(t?.transport_number);
-    if (norm) excelTns.add(norm);
+    if (!norm) continue;
+    if (t?.loading) excelStopKeys.add(`${norm}|LOADING`);
+    if (t?.unloading) excelStopKeys.add(`${norm}|UNLOADING`);
   }
 
   // Sixfold-Stopps nach normTN|TYPE gruppieren (Mehrfachbesuch: früheste
-  // Ankunft / späteste Abfahrt); nur Touren OHNE Excel-Abdeckung.
+  // Ankunft / späteste Abfahrt); nur Stopps OHNE Excel-Abdeckung.
   const groups = new Map();
   for (const s of sixfoldStops) {
     const tn = String(s?.transport_number || "").trim();
     if (!tn) continue;
     const norm = normalizeTransportNumber(tn);
-    if (!norm || excelTns.has(norm)) continue;
+    if (!norm) continue;
     const type = String(s?.type || "").toUpperCase();
     if (type !== "LOADING" && type !== "UNLOADING") continue;
 
     const key = `${norm}|${type}`;
+    if (excelStopKeys.has(key)) continue;
     const g = verifiedGps(s);
     const prev =
       groups.get(key) ||
@@ -242,10 +249,11 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
 
   // Zaehler muessen die ergaenzten Sixfold-Touren mitzaehlen, sonst zeigt die
   // reine Sixfold-Abrechnung faelschlich "0 Transporte" / "0 mit GPS".
-  const addedTransportCount = new Set(
-    addedStops
-      .map((s) => String(s.transport_number || "").trim())
-      .filter(Boolean),
+  // transport_count = eindeutige Transportnummern ueber ALLE Stopps (Excel +
+  // ergaenzte Sixfold-Stopps), damit Touren, die teils in der Excel und teils
+  // aus Sixfold kommen, nicht doppelt gezaehlt werden.
+  const transportCount = new Set(
+    stops.map((s) => String(s.transport_number || "").trim()).filter(Boolean),
   ).size;
   const gpsUsed = stops.filter(
     (s) => s.arrival_source === "GPS" || s.departure_source === "GPS",
@@ -259,8 +267,7 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     stops,
     summary: {
       ...baseSummary,
-      transport_count:
-        (Number(baseSummary.transport_count) || 0) + addedTransportCount,
+      transport_count: transportCount,
       stop_count: stops.length,
       chargeable_count: chargeable.length,
       review_count: review.length,

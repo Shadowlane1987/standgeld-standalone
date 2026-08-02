@@ -56,12 +56,38 @@ test("Sixfold-only Tour wird ergänzt, wenn nicht im Excel", () => {
 
 test("Tour, die schon im Excel ist (normalisierte TN), wird NICHT doppelt ergänzt", () => {
   const result = appendSixfoldOnlyStops(excelResult([]), {
-    // Excel-TN hat anderes Präfix, gleiche 10-stellige Endnummer.
-    transports: [{ transport_number: "0C_20260723_0006654477" }],
+    // Excel-TN hat anderes Präfix, gleiche 10-stellige Endnummer UND deckt den
+    // LADEN-Stopp ab (loading-Zeile vorhanden) -> darf nicht doppelt kommen.
+    transports: [
+      {
+        transport_number: "0C_20260723_0006654477",
+        loading: { window_local: "2026-07-23 08:00" },
+      },
+    ],
     sixfoldStops: [sixfoldStop()],
   });
   assert.equal(result.summary.sixfold_only_count, 0);
   assert.equal(result.stops.length, 0);
+});
+
+test("Excel-Tour ohne Entlade-Zeile: Entladestelle wird aus Sixfold-GPS ergänzt (nicht gelöscht)", () => {
+  const result = appendSixfoldOnlyStops(excelResult([]), {
+    // Excel hat nur den Laden-Stopp; der Entlade-Stopp fehlt in der Excel.
+    transports: [
+      {
+        transport_number: "0C_20260723_0006654477",
+        loading: { window_local: "2026-07-23 08:00" },
+      },
+    ],
+    sixfoldStops: [
+      sixfoldStop({ type: "LOADING" }),
+      sixfoldStop({ type: "UNLOADING" }),
+    ],
+  });
+  // LADEN ist in der Excel -> nicht doppelt; ENTLADEN fehlt -> aus GPS ergänzt.
+  assert.equal(result.summary.sixfold_only_count, 1);
+  assert.equal(result.stops.length, 1);
+  assert.equal(result.stops[0].stop_type, "UNLOADING");
 });
 
 test("Sixfold-Stopp ohne verifizierte GPS-Zeit wird nicht abgerechnet", () => {

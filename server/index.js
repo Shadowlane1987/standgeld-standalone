@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 15;
+const BILLING_CACHE_VERSION = 16;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2284,7 +2284,10 @@ app.get("/api/billing/export", async (req, res) => {
     const cleanResult = stripNahverkehrTransports(result);
     // Optional: Aufteilung nach GPS-Nachweisbarkeit (Seite 1 = verified,
     // Seite 2 = gaps). Ohne Parameter bleibt alles unveraendert ("all").
-    const scopedResult = filterBillingByGpsScope(cleanResult, req.query.gpsScope);
+    const scopedResult = filterBillingByGpsScope(
+      cleanResult,
+      req.query.gpsScope,
+    );
     if (importId) {
       persistBillingResult(importId, cacheKey, {
         file: filePath,
