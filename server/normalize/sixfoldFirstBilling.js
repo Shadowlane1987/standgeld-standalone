@@ -163,9 +163,9 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
   for (const g of groups.values()) {
     // Ohne verifizierte GPS-Zeit gibt es keinen Beleg -> nicht abrechnen.
     if (!g.arrival_iso && !g.departure_iso) continue;
-    // Nur ECHTE Kennzeichen werden hier aus GPS abgerechnet. Fake-Kennzeichen
-    // (Handynummer) gehoeren in die XP-/Excel-Abrechnung, nicht in den GPS-Pfad.
-    if (!looksLikeRealPlate(g.plate)) continue;
+    // Fake-Kennzeichen (Handynummer) werden nur MARKIERT, sonst ganz normal
+    // abgerechnet wie Touren mit echtem Kennzeichen.
+    const plateReal = looksLikeRealPlate(g.plate);
 
     // Entladestellen: Die Excel-Entladezeit ist massgeblich. Gibt es eine
     // passende Excel-Zeile, gewinnt sie - auch gegen ein (oft nur als
@@ -205,6 +205,7 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     addedStops.push(
       Object.freeze({
         ...fee,
+
         window_local: windowLocal,
         unload_window_fallback_applied: windowFromExcel,
         booking_location: g.booking_location || null,
@@ -213,10 +214,10 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
         timezone,
         excel_license_plate: null,
         gps_license_plate: g.plate,
-        gps_plate_match: true,
-        plate_fake: false,
+        gps_plate_match: plateReal,
+        plate_fake: Boolean(g.plate) && !plateReal,
         gps_checked: true,
-        gps_available: true,
+        gps_available: plateReal,
         gps_missing: false,
         arrival_source: g.arrival_iso ? "GPS" : null,
         departure_source: g.departure_iso ? "GPS" : null,
