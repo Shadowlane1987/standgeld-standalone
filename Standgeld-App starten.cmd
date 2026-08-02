@@ -20,6 +20,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM --- 1b) Neueste Version holen (falls als Git-Projekt eingerichtet) ---
+where git >nul 2>nul
+if not errorlevel 1 (
+  if exist ".git" (
+    echo Hole die neueste Version ...
+    call git pull --ff-only
+  )
+)
+
 REM --- 2) Programmteile installieren (nur beim allerersten Start) ---
 if not exist "node_modules" (
   echo [1/3] Installiere Programmteile - einmalig, kann ein paar Minuten dauern ...
