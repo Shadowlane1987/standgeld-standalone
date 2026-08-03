@@ -241,7 +241,7 @@ test("billSixfoldFirst: Excel liefert nur das Fenster, GPS-Zeiten bleiben Basis"
   assert.equal(s.window_local, "2026-07-23 08:00");
 });
 
-test("billSixfoldFirst: Tour NUR in der Excel wird als excel_only ergaenzt (Spot)", () => {
+test("billSixfoldFirst: Tour NUR in der Excel wird NICHT hinzugefuegt (Excel ist nur Overlay)", () => {
   const result = billSixfoldFirst([sixfoldStop()], {
     transports: [
       {
@@ -256,11 +256,13 @@ test("billSixfoldFirst: Tour NUR in der Excel wird als excel_only ergaenzt (Spot
       },
     ],
   });
-  // 1 Sixfold (Basis) + 1 Excel-only.
-  assert.equal(result.stops.length, 2);
+  // Nur die Sixfold-Tour bleibt Basis; die reine Excel-Tour wird ignoriert.
+  assert.equal(result.stops.length, 1);
+  assert.equal(result.summary.transport_count, 1);
   assert.equal(result.summary.sixfold_only_count, 1);
-  const spot = result.stops.find((s) => s.origin === "excel_only");
-  assert.ok(spot);
-  assert.equal(spot.arrival_source, "XP");
-  assert.equal(spot.gps_available, false);
+  assert.equal(
+    result.stops.every((s) => s.origin === "sixfold"),
+    true,
+  );
 });
+
