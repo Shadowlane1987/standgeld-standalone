@@ -13,7 +13,7 @@ const {
   normalizeLicensePlate,
 } = require("./normalize/exportBilling");
 const { billFromLiveData } = require("./normalize/liveBilling");
-const { billSixfoldFirst } = require("./normalize/sixfoldFirstBilling");
+const { appendSixfoldOnlyStops } = require("./normalize/sixfoldFirstBilling");
 const {
   filterBillingByGpsScope,
   summarizeStops,
@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 18;
+const BILLING_CACHE_VERSION = 15;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2259,30 +2259,32 @@ app.get("/api/billing/export", async (req, res) => {
       (s) => !isNahverkehrPlate(s.license_plate),
     );
 
-    // Sixfold ist die BASIS (1. Stelle): ALLE Sixfold-Touren im Zeitraum sind
-    // die Grundlage, die Transporeon-Excel laeuft NUR als Overlay darueber
-    // (Fenster + XP-Zeiten, wie die Zeitfenster-Excel). Nur wenn KEIN Sixfold
-    // vorliegt, wird rein aus der Excel abgerechnet (Spot, ohne GPS).
-    const hasSixfoldStops =
+    const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
+    const gatedResult = enforceUnloadingGpsGate(rawResult);
+    // Sixfold ist die BASIS (alle eigenen Touren im Zeitraum); die Transporeon-
+    // Excel laeuft nur als OVERLAY darueber (ersetzt Zeiten/Fenster, wie die
+    // Zeitfenster-Excel). Deshalb IMMER die Sixfold-Touren ergaenzen, die (noch)
+    // nicht in der Excel stehen - sonst wuerden reine Sixfold-Touren (z.B.
+    // Empfaenger Lidl/Edeka) beim Excel-Upload verschwinden. Der Zeitraum wird
+    // ohne expliziten Datumsfilter aus der Excel abgeleitet (computeTransports
+    // Window) und beide Sixfold-Abrufe filtern serverseitig darauf -> keine
+    // Historien-Explosion.
+    const appendSixfold =
       Array.isArray(sixfoldStops) && sixfoldStops.length > 0;
-    const result = hasSixfoldStops
-      ? billSixfoldFirst(sixfoldStops, {
+    const result = appendSixfold
+      ? appendSixfoldOnlyStops(gatedResult, {
           transports: filteredTransports,
+          sixfoldStops,
           config,
           unloadWindowIndex,
         })
-      : enforceUnloadingGpsGate(
-          billFromExport(filteredTransports, { config, gpsIndex }),
-        );
+      : gatedResult;
     // Nahverkehr (PEBL) endgueltig entfernen - auch wenn das Kennzeichen ueber
     // den Excel-/GPS-Weg wieder reingerutscht ist.
     const cleanResult = stripNahverkehrTransports(result);
     // Optional: Aufteilung nach GPS-Nachweisbarkeit (Seite 1 = verified,
     // Seite 2 = gaps). Ohne Parameter bleibt alles unveraendert ("all").
-    const scopedResult = filterBillingByGpsScope(
-      cleanResult,
-      req.query.gpsScope,
-    );
+    const scopedResult = filterBillingByGpsScope(cleanResult, req.query.gpsScope);
     if (importId) {
       persistBillingResult(importId, cacheKey, {
         file: filePath,

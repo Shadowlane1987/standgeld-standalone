@@ -24,7 +24,6 @@ const {
 } = require("./exportBilling");
 const { transportNumberToLadenummer } = require("./ladenummer");
 const { windowStartForStop } = require("./zeitfenster");
-const { toUtcIso } = require("./datetime");
 
 const DEFAULT_TZ = "Europe/Berlin";
 
@@ -120,32 +119,25 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
       : null;
   let unloadWindowFromExcel = 0;
 
-  // Bereits über Excel abgedeckte Stopps (normalisiert, PRO Stopp-Typ). Die
-  // Excel deckt einen Stopp nur ab, wenn dafuer eine Stopp-Zeile (loading/
-  // unloading) existiert. Fehlt der Stopp - oder die ganze Tour - in der Excel,
-  // wird er aus den Sixfold-GPS-Zeiten ergaenzt statt rausgeworfen. So bleibt
-  // z.B. die Entladestelle drin, auch wenn die Excel dafuer keine Zeit hat.
-  const excelStopKeys = new Set();
+  // Bereits über Excel abgedeckte Transportnummern (normalisiert).
+  const excelTns = new Set();
   for (const t of transports) {
     const norm = normalizeTransportNumber(t?.transport_number);
-    if (!norm) continue;
-    if (t?.loading) excelStopKeys.add(`${norm}|LOADING`);
-    if (t?.unloading) excelStopKeys.add(`${norm}|UNLOADING`);
+    if (norm) excelTns.add(norm);
   }
 
   // Sixfold-Stopps nach normTN|TYPE gruppieren (Mehrfachbesuch: früheste
-  // Ankunft / späteste Abfahrt); nur Stopps OHNE Excel-Abdeckung.
+  // Ankunft / späteste Abfahrt); nur Touren OHNE Excel-Abdeckung.
   const groups = new Map();
   for (const s of sixfoldStops) {
     const tn = String(s?.transport_number || "").trim();
     if (!tn) continue;
     const norm = normalizeTransportNumber(tn);
-    if (!norm) continue;
+    if (!norm || excelTns.has(norm)) continue;
     const type = String(s?.type || "").toUpperCase();
     if (type !== "LOADING" && type !== "UNLOADING") continue;
 
     const key = `${norm}|${type}`;
-    if (excelStopKeys.has(key)) continue;
     const g = verifiedGps(s);
     const prev =
       groups.get(key) ||
@@ -250,11 +242,10 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
 
   // Zaehler muessen die ergaenzten Sixfold-Touren mitzaehlen, sonst zeigt die
   // reine Sixfold-Abrechnung faelschlich "0 Transporte" / "0 mit GPS".
-  // transport_count = eindeutige Transportnummern ueber ALLE Stopps (Excel +
-  // ergaenzte Sixfold-Stopps), damit Touren, die teils in der Excel und teils
-  // aus Sixfold kommen, nicht doppelt gezaehlt werden.
-  const transportCount = new Set(
-    stops.map((s) => String(s.transport_number || "").trim()).filter(Boolean),
+  const addedTransportCount = new Set(
+    addedStops
+      .map((s) => String(s.transport_number || "").trim())
+      .filter(Boolean),
   ).size;
   const gpsUsed = stops.filter(
     (s) => s.arrival_source === "GPS" || s.departure_source === "GPS",
@@ -268,7 +259,8 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     stops,
     summary: {
       ...baseSummary,
-      transport_count: transportCount,
+      transport_count:
+        (Number(baseSummary.transport_count) || 0) + addedTransportCount,
       stop_count: stops.length,
       chargeable_count: chargeable.length,
       review_count: review.length,
@@ -283,239 +275,6 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
   };
 }
 
-/**
- * Sixfold-FIRST-Abrechnung: die BASIS sind ALLE Sixfold-Touren im Zeitraum; die
- * Transporeon-Excel laeuft nur als OVERLAY darueber (liefert Buchungsfenster und
- * XP-Zeiten, wie die Zeitfenster-Excel). Genau wie vom Nutzer gefordert:
- * Sixfold ist 1. Stelle, die Excel wird nur zum Abgleich obendrauf gelegt.
- *
- *   - Echtes Kennzeichen (GPS-Anbindung): Ankunft = GPS; Abfahrt = spaetere aus
- *     {GPS, Excel-XP}.
- *   - Fake-Kennzeichen (Handynummer) / kein GPS: Excel-XP-Zeiten.
- *   - Fenster: Entladen -> Zeitfenster-Excel (massgeblich); sonst Excel-Fenster
- *     ("Gebucht ab"); sonst Sixfold-Buchungsslot.
- *   - Touren, die es NUR in der Excel gibt (kein Sixfold-Stopp), werden am Ende
- *     als excel_only ergaenzt (nichts geht verloren), gelten aber als Spot.
- *
- * @param {Array<object>} sixfoldStops - normalisierte Sixfold-Stopps (simple shape)
- * @param {{
- *   transports?: Array<object>,
- *   config?: object,
- *   timezone?: string,
- *   unloadWindowIndex?: Map<string, object>,
- * }} options
- * @returns {{stops: Array<object>, summary: object}}
- */
-function billSixfoldFirst(sixfoldStops, options = {}) {
-  const stopsIn = Array.isArray(sixfoldStops) ? sixfoldStops : [];
-  const transports = Array.isArray(options.transports)
-    ? options.transports
-    : [];
-  const config = options.config || {};
-  const tz = options.timezone || DEFAULT_TZ;
-  const unloadWindowIndex =
-    options.unloadWindowIndex &&
-    typeof options.unloadWindowIndex.get === "function"
-      ? options.unloadWindowIndex
-      : null;
-
-  // Excel-Overlay-Index nach normTN|TYPE (Fenster + XP-Zeiten + Kennzeichen).
-  const excelByKey = new Map();
-  for (const t of transports) {
-    const norm = normalizeTransportNumber(t?.transport_number);
-    if (!norm) continue;
-    const plate = String(t?.vehicle_registration || "").trim() || null;
-    if (t?.loading) {
-      excelByKey.set(`${norm}|LOADING`, {
-        ...t.loading,
-        plate,
-        transport_number: t.transport_number,
-      });
-    }
-    if (t?.unloading) {
-      excelByKey.set(`${norm}|UNLOADING`, {
-        ...t.unloading,
-        plate,
-        transport_number: t.transport_number,
-      });
-    }
-  }
-
-  // Sixfold-Stopps nach normTN|TYPE gruppieren (Mehrfachbesuch: frueheste
-  // Ankunft / spaeteste Abfahrt).
-  const groups = new Map();
-  for (const s of stopsIn) {
-    const tn = String(s?.transport_number || "").trim();
-    if (!tn) continue;
-    const norm = normalizeTransportNumber(tn);
-    if (!norm) continue;
-    const type = String(s?.type || "").toUpperCase();
-    if (type !== "LOADING" && type !== "UNLOADING") continue;
-    const key = `${norm}|${type}`;
-    const g = verifiedGps(s);
-    const prev =
-      groups.get(key) ||
-      Object.assign(Object.create(null), {
-        key,
-        transport_number: tn,
-        stop_type: type,
-        arrival_iso: null,
-        departure_iso: null,
-        window_iso: null,
-        booking_location: null,
-        plate: null,
-      });
-    prev.arrival_iso = earliest(prev.arrival_iso, g.arrival_iso);
-    prev.departure_iso = latest(prev.departure_iso, g.departure_iso);
-    prev.window_iso = prev.window_iso || s.timeslot_begin || null;
-    prev.booking_location = prev.booking_location || s.booking_location || null;
-    prev.plate = prev.plate || String(s.license_plate || "").trim() || null;
-    groups.set(key, prev);
-  }
-
-  const stops = [];
-  let unloadWindowFromExcel = 0;
-
-  // Fenster aus Zeitfenster-Excel (Entladen) auf ein Referenzdatum legen.
-  const unloadWindowFor = (transportNumber, refIso) => {
-    if (!unloadWindowIndex) return null;
-    const ladenummer = transportNumberToLadenummer(transportNumber);
-    const windowRow = ladenummer ? unloadWindowIndex.get(ladenummer) : null;
-    const unloadStart = windowStartForStop(windowRow, "UNLOADING");
-    return unloadStart ? applyTimeToIsoDate(refIso, unloadStart) : null;
-  };
-
-  // 1) BASIS = ALLE Sixfold-Touren; Excel legt Fenster/Zeiten drueber.
-  for (const g of groups.values()) {
-    const excel = excelByKey.get(g.key) || null;
-
-    const plateReal = looksLikeRealPlate(g.plate);
-    // GPS gilt nur bei echtem Kennzeichen (Fake = Handynummer -> XP-Zeiten).
-    const gpsArrival = plateReal ? g.arrival_iso : null;
-    const gpsDeparture = plateReal ? g.departure_iso : null;
-
-    const xpArrival = excel ? toUtcIso(excel.arrival_local, tz) : null;
-    const xpDeparture = excel ? toUtcIso(excel.departure_local, tz) : null;
-
-    // Ankunft: echte GPS-Zeit gewinnt; sonst XP (Excel).
-    const arrivalIso = gpsArrival || xpArrival || null;
-    const arrivalSource = gpsArrival ? "GPS" : xpArrival ? "XP" : null;
-    // Abfahrt: die SPAETERE aus {GPS, XP}.
-    const departureIso = latest(gpsDeparture, xpDeparture) || null;
-    const departureSource = departureIso
-      ? departureIso === gpsDeparture
-        ? "GPS"
-        : "XP"
-      : null;
-
-    // Ohne jede Zeit (weder GPS noch XP) nicht abrechenbar -> ueberspringen.
-    if (!arrivalIso && !departureIso) continue;
-
-    // Fenster: Entladen -> Zeitfenster-Excel (massgeblich); sonst Excel-Fenster
-    // ("Gebucht ab"); sonst Sixfold-Buchungsslot.
-    let windowIso = null;
-    let windowLocal = null;
-    let windowFromExcel = false;
-    if (g.stop_type === "UNLOADING") {
-      const built = unloadWindowFor(
-        g.transport_number,
-        arrivalIso || departureIso,
-      );
-      if (built) {
-        windowIso = built.iso;
-        windowLocal = built.local;
-        windowFromExcel = true;
-        unloadWindowFromExcel += 1;
-      }
-    }
-    if (!windowIso && excel && excel.window_local) {
-      windowIso = toUtcIso(excel.window_local, tz);
-      windowLocal = excel.window_local;
-    }
-    if (!windowIso) windowIso = g.window_iso;
-
-    const fee = computeStandgeld(
-      {
-        arrival_time: arrivalIso,
-        departure_time: departureIso,
-        window_start: windowIso,
-        transport_number: g.transport_number,
-        stop_type: g.stop_type,
-        arrival_gps_verified: arrivalSource === "GPS",
-      },
-      config,
-    );
-
-    stops.push(
-      Object.freeze({
-        ...fee,
-        window_local: windowLocal,
-        unload_window_fallback_applied: windowFromExcel,
-        booking_location:
-          (excel && excel.location) || g.booking_location || null,
-        arrival_local: null,
-        departure_local: null,
-        timezone: tz,
-        excel_license_plate: (excel && excel.plate) || null,
-        gps_license_plate: g.plate,
-        gps_plate_match: plateReal,
-        plate_fake: Boolean(g.plate) && !plateReal,
-        gps_checked: true,
-        gps_available: plateReal && Boolean(gpsArrival || gpsDeparture),
-        gps_missing: false,
-        arrival_source: arrivalSource,
-        departure_source: departureSource,
-        arrival_time_used: arrivalIso,
-        departure_time_used: departureIso,
-        xp_arrival_time: xpArrival,
-        xp_departure_time: xpDeparture,
-        gps_arrival_time: gpsArrival,
-        gps_departure_time: gpsDeparture,
-        origin: "sixfold",
-      }),
-    );
-  }
-
-  // WICHTIG (Nutzer 2026-08-03): Touren, die es NUR in der Transporeon-Excel
-  // gibt, werden NICHT hinzugefuegt. Die Excel ist reines Overlay/Abgleich -
-  // Basis bleiben allein die Sixfold-Touren. Sonst waeren sie doppelt drin und
-  // die Tourenzahl explodiert (z.B. 2880 -> 5395).
-
-  const chargeable = stops.filter((s) => !s.needs_review && s.fee_eur > 0);
-  const review = stops.filter((s) => s.needs_review);
-  const totalFee = stops.reduce(
-    (sum, s) => sum + (s.needs_review ? 0 : s.fee_eur || 0),
-    0,
-  );
-  const transportCount = new Set(
-    stops.map((s) => String(s.transport_number || "").trim()).filter(Boolean),
-  ).size;
-  const gpsUsed = stops.filter(
-    (s) => s.arrival_source === "GPS" || s.departure_source === "GPS",
-  );
-  const gpsUsedTransportCount = new Set(
-    gpsUsed.map((s) => String(s.transport_number || "").trim()).filter(Boolean),
-  ).size;
-
-  return {
-    stops,
-    summary: {
-      transport_count: transportCount,
-      stop_count: stops.length,
-      chargeable_count: chargeable.length,
-      review_count: review.length,
-      gps_checked: true,
-      gps_used_count: gpsUsed.length,
-      gps_used_transport_count: gpsUsedTransportCount,
-      gps_missing_count: stops.filter((s) => s.gps_missing).length,
-      sixfold_only_count: stops.filter((s) => s.origin === "sixfold").length,
-      sixfold_unload_window_from_excel: unloadWindowFromExcel,
-      total_fee_eur: totalFee,
-    },
-  };
-}
-
 module.exports = {
   appendSixfoldOnlyStops,
-  billSixfoldFirst,
 };

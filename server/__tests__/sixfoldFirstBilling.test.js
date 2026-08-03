@@ -3,10 +3,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
-const {
-  appendSixfoldOnlyStops,
-  billSixfoldFirst,
-} = require("../normalize/sixfoldFirstBilling");
+const { appendSixfoldOnlyStops } = require("../normalize/sixfoldFirstBilling");
 const { buildWindowIndex } = require("../normalize/zeitfenster");
 const { transportNumberToLadenummer } = require("../normalize/ladenummer");
 
@@ -59,38 +56,12 @@ test("Sixfold-only Tour wird ergänzt, wenn nicht im Excel", () => {
 
 test("Tour, die schon im Excel ist (normalisierte TN), wird NICHT doppelt ergänzt", () => {
   const result = appendSixfoldOnlyStops(excelResult([]), {
-    // Excel-TN hat anderes Präfix, gleiche 10-stellige Endnummer UND deckt den
-    // LADEN-Stopp ab (loading-Zeile vorhanden) -> darf nicht doppelt kommen.
-    transports: [
-      {
-        transport_number: "0C_20260723_0006654477",
-        loading: { window_local: "2026-07-23 08:00" },
-      },
-    ],
+    // Excel-TN hat anderes Präfix, gleiche 10-stellige Endnummer.
+    transports: [{ transport_number: "0C_20260723_0006654477" }],
     sixfoldStops: [sixfoldStop()],
   });
   assert.equal(result.summary.sixfold_only_count, 0);
   assert.equal(result.stops.length, 0);
-});
-
-test("Excel-Tour ohne Entlade-Zeile: Entladestelle wird aus Sixfold-GPS ergänzt (nicht gelöscht)", () => {
-  const result = appendSixfoldOnlyStops(excelResult([]), {
-    // Excel hat nur den Laden-Stopp; der Entlade-Stopp fehlt in der Excel.
-    transports: [
-      {
-        transport_number: "0C_20260723_0006654477",
-        loading: { window_local: "2026-07-23 08:00" },
-      },
-    ],
-    sixfoldStops: [
-      sixfoldStop({ type: "LOADING" }),
-      sixfoldStop({ type: "UNLOADING" }),
-    ],
-  });
-  // LADEN ist in der Excel -> nicht doppelt; ENTLADEN fehlt -> aus GPS ergänzt.
-  assert.equal(result.summary.sixfold_only_count, 1);
-  assert.equal(result.stops.length, 1);
-  assert.equal(result.stops[0].stop_type, "UNLOADING");
 });
 
 test("Sixfold-Stopp ohne verifizierte GPS-Zeit wird nicht abgerechnet", () => {
@@ -202,67 +173,3 @@ test("bestehende Excel-Stops bleiben erhalten und Summe stimmt", () => {
   assert.equal(result.summary.sixfold_only_count, 1);
   assert.equal(result.summary.total_fee_eur, 120); // 30 + 90
 });
-
-// ---- billSixfoldFirst: Sixfold ist die BASIS, Excel nur Overlay ----
-
-test("billSixfoldFirst: ALLE Sixfold-Touren sind Basis, auch ohne Excel", () => {
-  const result = billSixfoldFirst([sixfoldStop()], { transports: [] });
-  assert.equal(result.summary.transport_count, 1);
-  assert.equal(result.stops.length, 1);
-  const s = result.stops[0];
-  assert.equal(s.origin, "sixfold");
-  assert.equal(s.arrival_source, "GPS");
-  assert.equal(s.gps_license_plate, "B-AB123");
-  assert.equal(s.fee_eur, 90);
-});
-
-test("billSixfoldFirst: Excel liefert nur das Fenster, GPS-Zeiten bleiben Basis", () => {
-  const result = billSixfoldFirst([sixfoldStop({ type: "UNLOADING" })], {
-    transports: [
-      {
-        transport_number: "0C_20260723_0006654477",
-        vehicle_registration: "B-AB123",
-        unloading: {
-          window_local: "2026-07-23 08:00",
-          arrival_local: null,
-          departure_local: null,
-          location: "DE-29683",
-        },
-      },
-    ],
-  });
-  assert.equal(result.stops.length, 1);
-  const s = result.stops[0];
-  assert.equal(s.origin, "sixfold");
-  // GPS-Zeiten bleiben massgeblich (06:00 -> 09:30).
-  assert.equal(s.gps_arrival_time, "2026-07-23T06:00:00.000Z");
-  assert.equal(s.arrival_source, "GPS");
-  // Fenster kommt aus der Excel ("Gebucht ab").
-  assert.equal(s.window_local, "2026-07-23 08:00");
-});
-
-test("billSixfoldFirst: Tour NUR in der Excel wird NICHT hinzugefuegt (Excel ist nur Overlay)", () => {
-  const result = billSixfoldFirst([sixfoldStop()], {
-    transports: [
-      {
-        transport_number: "9Z_20260723_0009999999",
-        vehicle_registration: null,
-        loading: {
-          window_local: "2026-07-23 06:00",
-          arrival_local: "2026-07-23 06:00",
-          departure_local: "2026-07-23 09:30",
-          location: "DE-14974",
-        },
-      },
-    ],
-  });
-  // Nur die Sixfold-Tour bleibt Basis; die reine Excel-Tour wird ignoriert.
-  assert.equal(result.stops.length, 1);
-  assert.equal(result.summary.transport_count, 1);
-  assert.equal(result.summary.sixfold_only_count, 1);
-  assert.equal(
-    result.stops.every((s) => s.origin === "sixfold"),
-    true,
-  );
-});
-
