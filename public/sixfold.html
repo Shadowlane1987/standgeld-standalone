@@ -3,21 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Standgeld · Batch</title>
+    <title>Standgeld · Sixfold-only</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="layout">
       <section class="panel hero">
-        <span class="hero-eyebrow">Batch · Excel-Abgleich</span>
-        <h1>Standgeld · Excel-Abgleich</h1>
+        <span class="hero-eyebrow">Batch · Sixfold-only</span>
+        <h1>Standgeld · Sixfold-only</h1>
         <p>
-          Rechnet ausschließlich die Touren aus der
-          <strong>Transporeon-Excel</strong>
-          ab; der Sixfold-Link liefert dabei nur den GPS-Beleg. Fake-Kennzeichen
-          (Handynummer) laufen über die XP-Zeiten der Excel und stehen am Ende.
-          Für die reine Sixfold-Abrechnung ohne Excel gibt es eine eigene Seite.
-          <a href="/sixfold.html">Zur Sixfold-only-Abrechnung &rarr;</a> ·
+          Reine Sixfold-Abrechnung: alle eigenen Touren im gewählten Zeitraum
+          über Sixfold-Link + Token. <strong>Keine Transporeon-Excel</strong> –
+          es zählen ausschließlich die GPS-Zeiten. Das
+          <strong>Entladezeitfenster-Excel</strong> ist der einzige erlaubte
+          Import (für die Pünktlichkeit). Das Datum von/bis meint immer das
+          <strong>Entladedatum</strong>.
+          <a href="/batch.html">Zum Excel-Abgleich &rarr;</a> ·
           <a href="/">Zur Einzelberechnung &rarr;</a>
         </p>
       </section>
@@ -69,31 +70,8 @@
               value="45"
               min="0"
           /></label>
-          <label
-            >&nbsp;<button id="loadBtn" type="button" disabled>
-              Aktiven Import laden
-            </button></label
-          >
         </div>
         <div class="grid grid-5">
-          <label class="upload-label"
-            >Excel-Exporte hochladen<input
-              id="fileInput"
-              type="file"
-              multiple
-              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          /></label>
-          <label class="upload-label"
-            >Entladezeitfenster-Excel (Fallback)<input
-              id="unloadWindowFileInput"
-              type="file"
-              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          /></label>
-          <label
-            >Gespeicherter Import<select id="importSelect">
-              <option value="">Keine gespeicherten Importe</option>
-            </select></label
-          >
           <label
             >Sixfold Fleet-Timeline-Link<input
               id="sixfoldUrl"
@@ -107,76 +85,48 @@
               autocomplete="off"
               placeholder="sessionToken-Wert"
           /></label>
+          <label
+            >Entladedatum von<input id="batchDateFrom" type="date"
+          /></label>
+          <label>Entladedatum bis<input id="batchDateTo" type="date" /></label>
+          <label
+            >&nbsp;<button id="sixfoldBatchBtn" type="button">
+              Aus Sixfold laden & abrechnen
+            </button></label
+          >
         </div>
         <div class="grid grid-5">
-          <label>Zeitraum von<input id="batchDateFrom" type="date" /></label>
-          <label>Zeitraum bis<input id="batchDateTo" type="date" /></label>
-        </div>
-        <div class="import-workspace" id="importWorkspace" hidden>
-          <strong>Aktiver Upload:</strong>
-          <span id="activeImportName">-</span>
-          <span id="activeImportMeta"></span>
-        </div>
-        <div class="actions-row bookkeeping-toolbar">
-          <button id="uploadBtn" type="button" disabled>
-            Hochladen, speichern & abrechnen
-          </button>
-          <button id="refreshImportsBtn" type="button" class="btn-secondary">
-            Importe aktualisieren
-          </button>
-          <button
-            id="uploadUnloadWindowsBtn"
-            type="button"
-            class="btn-secondary"
-            disabled
+          <label class="upload-label"
+            >Entladezeitfenster-Excel (optional)<input
+              id="unloadWindowFileInput"
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          /></label>
+          <label
+            >&nbsp;<button
+              id="uploadUnloadWindowsBtn"
+              type="button"
+              class="btn-secondary"
+              disabled
+            >
+              Zeitfenster importieren
+            </button></label
           >
-            Entladezeitfenster importieren
-          </button>
-          <button
-            id="openImportPageBtn"
-            type="button"
-            class="btn-secondary"
-            disabled
+          <label
+            >&nbsp;<button
+              id="deleteUnloadWindowsBtn"
+              type="button"
+              class="btn-secondary"
+              disabled
+            >
+              Zeitfenster löschen
+            </button></label
           >
-            Eigene Seite öffnen
-          </button>
-          <button
-            id="deleteImportBtn"
-            type="button"
-            class="btn-secondary"
-            disabled
+          <span id="unloadWindowStatus" class="status" style="align-self: end"
+            >Kein Zeitfenster geladen.</span
           >
-            Upload löschen
-          </button>
-          <button
-            id="selectiveSearchBtn"
-            type="button"
-            class="btn-secondary"
-            disabled
-          >
-            Suchen & Abgleichen
-          </button>
         </div>
         <p id="status" class="status">Bereit.</p>
-      </section>
-
-      <section class="panel" id="selectivePanel" hidden>
-        <h2>Sixfold-Abgleich</h2>
-        <p id="selectiveStatus" class="status"></p>
-        <div id="selectiveResult" class="table-wrap" hidden>
-          <table id="selectiveTable">
-            <thead>
-              <tr>
-                <th>Transport-Nr</th>
-                <th>Excel Kfz</th>
-                <th>Sixfold Kfz</th>
-                <th>Kennzeichen-Status</th>
-                <th>Abrechenbar?</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
       </section>
 
       <section class="panel" id="resultPanel" hidden>
@@ -274,33 +224,8 @@
             <button id="clearDateFilterBtn" type="button" class="btn-secondary">
               Datum zurücksetzen
             </button>
-            <label class="checkbox-label">
-              <input id="bookkeepingOnlyMarked" type="checkbox" />
-              Nur als „abgerechnet“ markierte exportieren
-            </label>
             <button id="bookkeepingExportBtn" type="button">
               Buchungs-Excel exportieren
-            </button>
-            <button id="openTransporeonBtn" type="button" class="btn-secondary">
-              Transporeon-Fenster öffnen / einloggen
-            </button>
-            <label class="checkbox-label">
-              <input id="transporeonDryRun" type="checkbox" checked />
-              Trockenlauf (nur prüfen)
-            </label>
-            <button
-              id="applyTransporeonBtn"
-              type="button"
-              class="btn-secondary"
-            >
-              Zuschläge in Transporeon beantragen
-            </button>
-            <button
-              id="retryFailedTransporeonBtn"
-              type="button"
-              class="btn-secondary"
-            >
-              Nur fehlgeschlagene erneut beantragen
             </button>
           </div>
 
@@ -386,9 +311,9 @@
 
     <script>
       window.STANDGELD_SCOPE = "fernverkehr";
-      // Eine Abrechnung fuer alle Touren: echtes Kennzeichen -> GPS-Zeiten,
-      // Fake-Kennzeichen (Handynummer) -> XP-Zeiten aus der Transporeon-Excel.
+      // Strikte Sixfold-Seite: keine Transporeon-Excel, nur GPS-Zeiten.
       window.STANDGELD_GPS_SCOPE = "all";
+      window.STANDGELD_MODE = "sixfold_only";
     </script>
     <script src="/batch.js"></script>
   </body>

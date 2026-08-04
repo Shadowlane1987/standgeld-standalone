@@ -7,6 +7,13 @@ const APP_SCOPE = (() => {
   return raw === "nahverkehr" ? "nahverkehr" : "fernverkehr";
 })();
 
+// Seiten-Modus: "sixfold_only" = strikte Sixfold-Seite ohne Transporeon-Excel
+// (nur Zeitfenster-Import erlaubt). Sonst volle Excel-Abgleich-Seite.
+const PAGE_MODE = String(window.STANDGELD_MODE || "full")
+  .trim()
+  .toLowerCase();
+const IS_SIXFOLD_ONLY_PAGE = PAGE_MODE === "sixfold_only";
+
 // Die Transporeon-Automation braucht einen echten Browser auf DEINEM PC.
 // Läuft die App auf Render (nicht localhost), werden die Automations-Aufrufe
 // an den lokalen Abrechnungs-Motor (Standgeld-App starten.cmd) weitergeleitet.
@@ -32,6 +39,8 @@ const el = {
   loadBtn: document.getElementById("loadBtn"),
   fileInput: document.getElementById("fileInput"),
   unloadWindowFileInput: document.getElementById("unloadWindowFileInput"),
+  unloadWindowStatus: document.getElementById("unloadWindowStatus"),
+  deleteUnloadWindowsBtn: document.getElementById("deleteUnloadWindowsBtn"),
   importSelect: document.getElementById("importSelect"),
   importWorkspace: document.getElementById("importWorkspace"),
   activeImportName: document.getElementById("activeImportName"),
@@ -2063,6 +2072,61 @@ async function uploadUnloadWindows() {
         el.unloadWindowFileInput.files.length > 0;
       el.uploadUnloadWindowsBtn.disabled = !hasFile;
     }
+    refreshUnloadWindowStatus();
+  }
+}
+
+// Zeigt an, ob eine Zeitfenster-Excel gespeichert ist (Seite 1).
+async function refreshUnloadWindowStatus() {
+  if (!el.unloadWindowStatus && !el.deleteUnloadWindowsBtn) return;
+  try {
+    const res = await fetch(
+      `/api/windows/status?scope=${encodeURIComponent(APP_SCOPE)}`,
+    );
+    const data = await res.json();
+    const present = Boolean(data && data.present);
+    if (el.deleteUnloadWindowsBtn)
+      el.deleteUnloadWindowsBtn.disabled = !present;
+    if (el.unloadWindowStatus) {
+      if (present) {
+        const when = data.uploaded_at
+          ? formatImportTimestamp(data.uploaded_at)
+          : "";
+        el.unloadWindowStatus.textContent = `Zeitfenster aktiv: ${data.windows_count || 0} Zeilen${when ? ` · ${when}` : ""}`;
+      } else {
+        el.unloadWindowStatus.textContent = "Kein Zeitfenster geladen.";
+      }
+    }
+  } catch (_error) {
+    if (el.unloadWindowStatus) {
+      el.unloadWindowStatus.textContent = "";
+    }
+  }
+}
+
+// Loescht die gespeicherte Zeitfenster-Excel.
+async function deleteUnloadWindows() {
+  const ok = window.confirm("Gespeichertes Zeitfenster wirklich löschen?");
+  if (!ok) return;
+  if (el.deleteUnloadWindowsBtn) el.deleteUnloadWindowsBtn.disabled = true;
+  try {
+    const res = await fetch(
+      `/api/windows?scope=${encodeURIComponent(APP_SCOPE)}`,
+      { method: "DELETE" },
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    setStatus(
+      data.deleted ? "Zeitfenster gelöscht." : "Kein Zeitfenster vorhanden.",
+      "success",
+    );
+  } catch (error) {
+    setStatus(
+      error.message || "Zeitfenster konnte nicht gelöscht werden.",
+      "error",
+    );
+  } finally {
+    refreshUnloadWindowStatus();
   }
 }
 
@@ -2267,7 +2331,7 @@ function renderSelectiveResult(data) {
 }
 
 el.loadBtn.addEventListener("click", load);
-el.uploadBtn.addEventListener("click", upload);
+if (el.uploadBtn) el.uploadBtn.addEventListener("click", upload);
 if (el.importSelect) {
   el.importSelect.addEventListener("change", async () => {
     const selectedOption = el.importSelect.selectedOptions?.[0] || null;
@@ -2309,11 +2373,13 @@ if (el.openImportPageBtn) {
 if (el.deleteImportBtn) {
   el.deleteImportBtn.addEventListener("click", deleteSelectedImport);
 }
-el.fileInput.addEventListener("change", () => {
-  const hasFile = el.fileInput.files && el.fileInput.files.length;
-  el.uploadBtn.disabled = !hasFile;
-  el.selectiveSearchBtn.disabled = !hasFile;
-});
+if (el.fileInput) {
+  el.fileInput.addEventListener("change", () => {
+    const hasFile = el.fileInput.files && el.fileInput.files.length;
+    if (el.uploadBtn) el.uploadBtn.disabled = !hasFile;
+    if (el.selectiveSearchBtn) el.selectiveSearchBtn.disabled = !hasFile;
+  });
+}
 if (el.unloadWindowFileInput) {
   el.unloadWindowFileInput.addEventListener("change", () => {
     const hasFile =
@@ -2347,8 +2413,10 @@ if (el.sixfoldToken) {
   el.sixfoldToken.addEventListener("input", persistSixfoldCredentials);
   el.sixfoldToken.addEventListener("change", persistSixfoldCredentials);
 }
-el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
-el.filterMode.addEventListener("change", render);
+if (el.selectiveSearchBtn) {
+  el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
+}
+if (el.filterMode) el.filterMode.addEventListener("change", render);
 if (el.sortMode) el.sortMode.addEventListener("change", render);
 if (el.sixfoldBatchBtn) {
   el.sixfoldBatchBtn.addEventListener("click", loadFromSixfold);
@@ -2410,14 +2478,24 @@ restoreSixfoldCredentials();
 restoreRuleSettings();
 setCurrentImportBatch(readImportBatchStorage());
 
-refreshImports("", true)
-  .then(async () => {
-    setStatus("Bereit. Excel hochladen oder gespeicherten Import auswählen.");
-    const importFromUrl = importIdFromUrl();
-    if (importFromUrl && currentImportId === importFromUrl) {
-      await load();
-    }
-  })
-  .catch(() => {
-    setStatus("Bereit. Excel hochladen oder gespeicherten Import auswählen.");
-  });
+if (el.deleteUnloadWindowsBtn) {
+  el.deleteUnloadWindowsBtn.addEventListener("click", deleteUnloadWindows);
+}
+
+if (IS_SIXFOLD_ONLY_PAGE) {
+  // Seite 1: keine Transporeon-Importe laden. Nur Zeitfenster-Status zeigen.
+  refreshUnloadWindowStatus();
+  setStatus("Bereit. Sixfold-Link, Token und Zeitraum wählen.");
+} else {
+  refreshImports("", true)
+    .then(async () => {
+      setStatus("Bereit. Excel hochladen oder gespeicherten Import auswählen.");
+      const importFromUrl = importIdFromUrl();
+      if (importFromUrl && currentImportId === importFromUrl) {
+        await load();
+      }
+    })
+    .catch(() => {
+      setStatus("Bereit. Excel hochladen oder gespeicherten Import auswählen.");
+    });
+}

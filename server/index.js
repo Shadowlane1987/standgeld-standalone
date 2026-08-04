@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 20;
+const BILLING_CACHE_VERSION = 21;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -1727,6 +1727,45 @@ app.post(
   },
 );
 
+// Status der gespeicherten Zeitfenster-Excel (welche Datei ist aktiv?).
+app.get("/api/windows/status", (req, res) => {
+  try {
+    const scope = scopeFromReq(req);
+    const file = unloadWindowsFileForScope(scope);
+    if (!fs.existsSync(file)) {
+      return res.json({ present: false, scope });
+    }
+    const stat = fs.statSync(file);
+    const index = loadPersistedUnloadWindowIndex(scope);
+    return res.json({
+      present: true,
+      scope,
+      uploaded_at: new Date(stat.mtimeMs).toISOString(),
+      windows_count: index && typeof index.size === "number" ? index.size : 0,
+    });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ error: error.message || "Status nicht verfuegbar." });
+  }
+});
+
+// Loescht die gespeicherte Zeitfenster-Excel (Nutzer 2026-08-04: nur eine
+// frisch hochgeladene Datei darf verwendet werden - Altdateien loeschbar).
+app.delete("/api/windows", (req, res) => {
+  try {
+    const scope = scopeFromReq(req);
+    const file = unloadWindowsFileForScope(scope);
+    const existed = fs.existsSync(file);
+    if (existed) fs.unlinkSync(file);
+    return res.json({ ok: true, scope, deleted: existed });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Zeitfenster konnte nicht geloescht werden.",
+    });
+  }
+});
+
 app.get("/api/windows/debug", (req, res) => {
   try {
     const scope = scopeFromReq(req);
@@ -2307,12 +2346,11 @@ app.get("/api/billing/export", async (req, res) => {
           transports: filteredTransports,
           sixfoldStops,
           config,
-          // Reine Sixfold-Abrechnung nutzt NUR das Sixfold-Zeitfenster (wie die
-          // Einzelberechnung). Eine frueher gespeicherte Entladezeitfenster-
-          // Excel darf hier NICHT mehr reingerechnet werden (Nutzer 2026-08-04:
-          // "ich hab keine Excel hochgeladen"). Die Zeitfenster-Excel wirkt nur
-          // noch im Excel-Abgleich-Modus.
-          unloadWindowIndex: null,
+          // Zeitfenster-Excel ist auf der Sixfold-only-Seite der EINZIGE
+          // erlaubte Import (Nutzer 2026-08-04). Transporeon-Excel bleibt durch
+          // sixfoldOnly=1 komplett aussen vor (transports ist leer). Nur die
+          // Entladefenster aus der Zeitfenster-Excel duerfen als Overlay wirken.
+          unloadWindowIndex,
           // Datum von/bis = Entladedatum: nur Touren, deren Entlade-Stopp im
           // Zeitraum liegt (Nutzer 2026-08-04).
           unloadDateFrom: sixfoldDateFrom,
