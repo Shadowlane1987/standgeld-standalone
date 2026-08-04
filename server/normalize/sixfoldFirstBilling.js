@@ -111,6 +111,10 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     : [];
   const config = options.config || {};
   const timezone = options.timezone || DEFAULT_TZ;
+  // Datum von/bis = Entladedatum (Nutzer 2026-08-04): Eine Tour zaehlt nur, wenn
+  // ihr Entlade-Stopp im Zeitraum liegt. Ladedatum spielt keine Rolle.
+  const unloadDateFrom = String(options.unloadDateFrom || "").trim() || null;
+  const unloadDateTo = String(options.unloadDateTo || "").trim() || null;
   // Zeitfenster-Excel-Index (per Ladenummer) fuer Entlade-Fenster.
   const unloadWindowIndex =
     options.unloadWindowIndex &&
@@ -159,10 +163,33 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
     groups.set(key, prev);
   }
 
+  // Entladedatum je Transport aus dem UNLOADING-Stopp (Ist- vor Fenster-Zeit).
+  const unloadDateByNorm = new Map();
+  if (unloadDateFrom || unloadDateTo) {
+    for (const g of groups.values()) {
+      if (g.stop_type !== "UNLOADING") continue;
+      const norm = normalizeTransportNumber(g.transport_number);
+      const iso = g.arrival_iso || g.departure_iso || g.window_iso;
+      const m = String(iso || "").match(/^(\d{4}-\d{2}-\d{2})/);
+      if (norm && m) unloadDateByNorm.set(norm, m[1]);
+    }
+  }
+
   const addedStops = [];
   for (const g of groups.values()) {
     // Ohne verifizierte GPS-Zeit gibt es keinen Beleg -> nicht abrechnen.
     if (!g.arrival_iso && !g.departure_iso) continue;
+    // Datumsfilter = Entladedatum: Tour raus, wenn ihr Entlade-Stopp ausserhalb
+    // des Zeitraums liegt (betrifft Lade- UND Entlade-Stopp der Tour). Touren
+    // ohne erkennbares Entladedatum bleiben drin.
+    if (unloadDateFrom || unloadDateTo) {
+      const norm = normalizeTransportNumber(g.transport_number);
+      const unloadDate = norm ? unloadDateByNorm.get(norm) : null;
+      if (unloadDate) {
+        if (unloadDateFrom && unloadDate < unloadDateFrom) continue;
+        if (unloadDateTo && unloadDate > unloadDateTo) continue;
+      }
+    }
     // Fake-Kennzeichen (Handynummer) werden nur MARKIERT, sonst ganz normal
     // abgerechnet wie Touren mit echtem Kennzeichen.
     const plateReal = looksLikeRealPlate(g.plate);

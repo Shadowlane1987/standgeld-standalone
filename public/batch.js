@@ -1863,8 +1863,12 @@ async function loadFromSixfold() {
   if (el.sixfoldBatchBtn) el.sixfoldBatchBtn.disabled = true;
   try {
     const params = ruleParams();
-    // Kein importId -> reine Sixfold-Abrechnung ohne Excel.
-    const url = `/api/billing/export?${params.toString()}` + sixfoldParams();
+    // Kein importId + sixfoldOnly=1 -> strikt reine Sixfold-Abrechnung. Der
+    // Server ignoriert dabei JEDE Excel (auch alte Dateien auf der Platte).
+    const url =
+      `/api/billing/export?${params.toString()}` +
+      sixfoldParams() +
+      "&sixfoldOnly=1";
     const res = await fetch(url, { headers: gps });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);

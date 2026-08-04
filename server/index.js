@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 19;
+const BILLING_CACHE_VERSION = 20;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2184,7 +2184,14 @@ app.get("/api/billing/export", async (req, res) => {
   try {
     const scope = scopeFromReq(req);
     const filePath = resolveExportFilePath(req, EXPORT_XLSX_PATH);
-    const hasExcel = fs.existsSync(filePath);
+    // Strikte Trennung (Nutzer 2026-08-04): Bei sixfoldOnly=1 wird JEDE Excel
+    // ignoriert - auch eine alte Fallback-Datei auf der Platte. So kann sich
+    // niemals ein alter Import in die reine Sixfold-Abrechnung mischen.
+    const importIdParam = String(req.query.importId || "").trim();
+    const forceSixfoldOnly =
+      !importIdParam &&
+      (req.query.sixfoldOnly === "1" || req.query.sixfoldOnly === "true");
+    const hasExcel = !forceSixfoldOnly && fs.existsSync(filePath);
 
     const sixfoldDateFrom = req.query.sixfoldDateFrom
       ? String(req.query.sixfoldDateFrom).trim()
@@ -2306,6 +2313,10 @@ app.get("/api/billing/export", async (req, res) => {
           // "ich hab keine Excel hochgeladen"). Die Zeitfenster-Excel wirkt nur
           // noch im Excel-Abgleich-Modus.
           unloadWindowIndex: null,
+          // Datum von/bis = Entladedatum: nur Touren, deren Entlade-Stopp im
+          // Zeitraum liegt (Nutzer 2026-08-04).
+          unloadDateFrom: sixfoldDateFrom,
+          unloadDateTo: sixfoldDateTo,
         })
       : gatedResult;
     // Nahverkehr (PEBL) endgueltig entfernen - auch wenn das Kennzeichen ueber
