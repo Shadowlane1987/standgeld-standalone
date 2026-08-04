@@ -15,9 +15,10 @@
           Reine Sixfold-Abrechnung: alle eigenen Touren im gewählten Zeitraum
           über Sixfold-Link + Token. <strong>Keine Transporeon-Excel</strong> –
           es zählen ausschließlich die GPS-Zeiten. Ein
-          <strong>Entladezeitfenster-Excel</strong> gilt immer nur für den
-          aktuellen Lauf (frisch gewählt) – nichts Altes wird verwendet. Das
-          Datum von/bis meint immer das <strong>Entladedatum</strong>.
+          <strong>Entladezeitfenster-Excel</strong> kannst du importieren und
+          übernehmen, um die Pünktlichkeit zu prüfen; „Zeitfenster löschen"
+          entfernt es wieder. Das Datum von/bis meint immer das
+          <strong>Entladedatum</strong>.
           <a href="/batch.html">Zum Excel-Abgleich &rarr;</a> ·
           <a href="/">Zur Einzelberechnung &rarr;</a>
         </p>
@@ -97,13 +98,33 @@
         </div>
         <div class="grid grid-5">
           <label class="upload-label"
-            >Entladezeitfenster-Excel für diesen Lauf (optional)<input
+            >Entladezeitfenster-Excel (optional)<input
               id="unloadWindowFileInput"
               type="file"
               accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           /></label>
+          <label
+            >&nbsp;<button
+              id="uploadUnloadWindowsBtn"
+              type="button"
+              class="btn-secondary"
+              disabled
+            >
+              Zeitfenster aus Excel übernehmen
+            </button></label
+          >
+          <label
+            >&nbsp;<button
+              id="deleteUnloadWindowsBtn"
+              type="button"
+              class="btn-secondary"
+              disabled
+            >
+              Zeitfenster löschen
+            </button></label
+          >
           <span id="unloadWindowStatus" class="status" style="align-self: end"
-            >Kein Zeitfenster für diesen Lauf (altes wird ignoriert).</span
+            >Kein Zeitfenster geladen.</span
           >
         </div>
         <p id="status" class="status">Bereit.</p>
