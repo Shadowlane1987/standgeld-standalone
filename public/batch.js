@@ -954,7 +954,13 @@ function dateInRange(stop) {
 }
 
 function filteredStops() {
-  const mode = el.filterMode.value;
+  // Sixfold-Seite hat keinen Filter: dort werden direkt nur abrechenbare
+  // Positionen gezeigt.
+  const mode = el.filterMode
+    ? el.filterMode.value
+    : IS_SIXFOLD_ONLY_PAGE
+      ? "chargeable"
+      : "all";
   let list = currentStops;
   if (mode === "chargeable") list = list.filter((s) => s.fee_eur > 0);
   else if (mode === "review") list = list.filter((s) => s.needs_review);
