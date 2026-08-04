@@ -2330,7 +2330,7 @@ function renderSelectiveResult(data) {
   el.selectiveResult.hidden = false;
 }
 
-el.loadBtn.addEventListener("click", load);
+if (el.loadBtn) el.loadBtn.addEventListener("click", load);
 if (el.uploadBtn) el.uploadBtn.addEventListener("click", upload);
 if (el.importSelect) {
   el.importSelect.addEventListener("change", async () => {

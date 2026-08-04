@@ -52,7 +52,24 @@ function matchesLadenummer(transportNumber, ladenummer) {
   return fromTransport === targetDigits.slice(-7);
 }
 
+/**
+ * Prueft, ob eine Transportnummer eine echte Cola-Nummer ist.
+ *
+ * Cola-Format: <Praefix>_<8-stelliges Datum>_<Cola-Nummer>, z.B.
+ * "4B_20260726_0006622395". Fremdtouren aus der Sixfold-Flotte (reine
+ * Ziffernbloecke ohne diese Struktur, z.B. "261112499238") werden so
+ * ausgeschlossen (Nutzer 2026-08-04: nur Cola-Transportnummern anzeigen).
+ *
+ * @param {string} transportNumber
+ * @returns {boolean}
+ */
+function looksLikeColaTransportNumber(transportNumber) {
+  const raw = String(transportNumber || "").trim();
+  return /^[0-9A-Za-z]{1,4}_\d{8}_\d{4,}$/.test(raw);
+}
+
 module.exports = {
   transportNumberToLadenummer,
   matchesLadenummer,
+  looksLikeColaTransportNumber,
 };

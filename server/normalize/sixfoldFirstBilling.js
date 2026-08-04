@@ -22,7 +22,10 @@ const {
   normalizeTransportNumber,
   looksLikeRealPlate,
 } = require("./exportBilling");
-const { transportNumberToLadenummer } = require("./ladenummer");
+const {
+  transportNumberToLadenummer,
+  looksLikeColaTransportNumber,
+} = require("./ladenummer");
 const { windowStartForStop } = require("./zeitfenster");
 
 const DEFAULT_TZ = "Europe/Berlin";
@@ -136,6 +139,9 @@ function appendSixfoldOnlyStops(excelResult, options = {}) {
   for (const s of sixfoldStops) {
     const tn = String(s?.transport_number || "").trim();
     if (!tn) continue;
+    // Nur echte Cola-Transportnummern (Nutzer 2026-08-04). Fremdtouren aus der
+    // Sixfold-Flotte (reine Ziffernblocks) werden ausgeschlossen.
+    if (!looksLikeColaTransportNumber(tn)) continue;
     const norm = normalizeTransportNumber(tn);
     if (!norm || excelTns.has(norm)) continue;
     const type = String(s?.type || "").toUpperCase();
