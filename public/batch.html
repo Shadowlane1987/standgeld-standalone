@@ -12,11 +12,12 @@
         <span class="hero-eyebrow">Batch-Abrechnung · Sixfold</span>
         <h1>Standgeld · Batch</h1>
         <p>
-          Rechnet alle Touren in einem Durchlauf ab. Touren mit echtem
-          Kennzeichen werden über die Sixfold-/GPS-Zeiten abgerechnet. Touren
-          mit Fake-Kennzeichen (Handynummer) werden über die XP-Zeiten aus der
-          Transporeon-Excel abgerechnet, markiert und ans Ende der Liste
-          gestellt.
+          Zwei getrennte Modi: <strong>„Aus Sixfold laden &amp; abrechnen"</strong>
+          rechnet alle eigenen Touren im gewählten Zeitraum ab (nur Sixfold-Link
+          + Token, ohne Excel). <strong>„Hochladen, speichern &amp; abrechnen"</strong>
+          rechnet ausschließlich die Touren aus der Transporeon-Excel ab; der
+          Sixfold-Link liefert dabei nur den GPS-Beleg. Fake-Kennzeichen
+          (Handynummer) laufen über die XP-Zeiten der Excel und stehen am Ende.
           <a href="/">Zur Einzelberechnung &rarr;</a>
         </p>
       </section>
@@ -261,7 +262,9 @@
             <label>
               Sortierung
               <select id="sortMode">
-                <option value="status">Abrechenbar &amp; pünktlich zuerst</option>
+                <option value="status">
+                  Abrechenbar &amp; pünktlich zuerst
+                </option>
                 <option value="default">Standard</option>
               </select>
             </label>

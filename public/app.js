@@ -495,7 +495,8 @@ function sortStopsByDate(stops, sortMode) {
 // dann nach Betrag und Ankunft.
 function statusRank(stop) {
   let group = 0; // puenktlich
-  if (stop?.late_arrival_grace_applied) group = 2; // 3h-Fall
+  if (stop?.late_arrival_grace_applied)
+    group = 2; // 3h-Fall
   else if (stop?.arrived_late) group = 1; // zu spaet, innerhalb 45 min
   const chargeable = Number(stop?.amount_eur || 0) > 0 ? 0 : 1;
   return group * 10 + chargeable;

@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 17;
+const BILLING_CACHE_VERSION = 18;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2285,16 +2285,16 @@ app.get("/api/billing/export", async (req, res) => {
 
     const rawResult = billFromExport(filteredTransports, { config, gpsIndex });
     const gatedResult = enforceUnloadingGpsGate(rawResult);
-    // Sixfold ist die BASIS (alle eigenen Touren im Zeitraum); die Transporeon-
-    // Excel laeuft nur als OVERLAY darueber (ersetzt Zeiten/Fenster, wie die
-    // Zeitfenster-Excel). Deshalb IMMER die Sixfold-Touren ergaenzen, die (noch)
-    // nicht in der Excel stehen - sonst wuerden reine Sixfold-Touren (z.B.
-    // Empfaenger Lidl/Edeka) beim Excel-Upload verschwinden. Der Zeitraum wird
-    // ohne expliziten Datumsfilter aus der Excel abgeleitet (computeTransports
-    // Window) und beide Sixfold-Abrufe filtern serverseitig darauf -> keine
-    // Historien-Explosion.
+    // Zwei getrennte Modi (Nutzer 2026-08-04):
+    //  1. REINE SIXFOLD-ABRECHNUNG (keine Excel): Basis = ALLE eigenen Touren
+    //     im Zeitraum (wie in der Einzelberechnung). Dann werden die Sixfold-
+    //     Touren an die leere Excel-Basis angehaengt.
+    //  2. EXCEL-ABGLEICH (Excel vorhanden): Basis = NUR die Excel-Touren;
+    //     Sixfold liefert ausschliesslich den GPS-Beleg (ueber gpsIndex in
+    //     billFromExport). Es werden KEINE zusaetzlichen Sixfold-Touren
+    //     angehaengt - sonst wuerden "wild alle Touren" erscheinen.
     const appendSixfold =
-      Array.isArray(sixfoldStops) && sixfoldStops.length > 0;
+      sixfoldOnly && Array.isArray(sixfoldStops) && sixfoldStops.length > 0;
     const result = appendSixfold
       ? appendSixfoldOnlyStops(gatedResult, {
           transports: filteredTransports,
