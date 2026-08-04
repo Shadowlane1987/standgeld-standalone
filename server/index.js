@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 18;
+const BILLING_CACHE_VERSION = 19;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2300,7 +2300,12 @@ app.get("/api/billing/export", async (req, res) => {
           transports: filteredTransports,
           sixfoldStops,
           config,
-          unloadWindowIndex,
+          // Reine Sixfold-Abrechnung nutzt NUR das Sixfold-Zeitfenster (wie die
+          // Einzelberechnung). Eine frueher gespeicherte Entladezeitfenster-
+          // Excel darf hier NICHT mehr reingerechnet werden (Nutzer 2026-08-04:
+          // "ich hab keine Excel hochgeladen"). Die Zeitfenster-Excel wirkt nur
+          // noch im Excel-Abgleich-Modus.
+          unloadWindowIndex: null,
         })
       : gatedResult;
     // Nahverkehr (PEBL) endgueltig entfernen - auch wenn das Kennzeichen ueber
