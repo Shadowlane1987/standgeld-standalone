@@ -1871,13 +1871,17 @@ async function loadFromSixfold() {
   setStatus("Lade alle Touren aus Sixfold im Zeitraum und rechne ab …");
   if (el.sixfoldBatchBtn) el.sixfoldBatchBtn.disabled = true;
   try {
+    // Zeitfenster pro Lauf: eine frisch gewaehlte Datei wird hochgeladen und
+    // genutzt; ohne Auswahl wird ein altes gespeichertes Zeitfenster ignoriert.
+    const hasFreshWindow = await prepareUnloadWindowForRun();
     const params = ruleParams();
     // Kein importId + sixfoldOnly=1 -> strikt reine Sixfold-Abrechnung. Der
     // Server ignoriert dabei JEDE Excel (auch alte Dateien auf der Platte).
-    const url =
+    let url =
       `/api/billing/export?${params.toString()}` +
       sixfoldParams() +
       "&sixfoldOnly=1";
+    if (!hasFreshWindow) url += "&ignoreStoredWindows=1";
     const res = await fetch(url, { headers: gps });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -1886,7 +1890,37 @@ async function loadFromSixfold() {
     setStatus(error.message || "Sixfold-Abrechnung fehlgeschlagen.", "error");
   } finally {
     if (el.sixfoldBatchBtn) el.sixfoldBatchBtn.disabled = false;
+    updateSixfoldWindowHint();
   }
+}
+
+// Laedt eine fuer diesen Lauf gewaehlte Zeitfenster-Excel frisch hoch. Ohne
+// Auswahl passiert nichts (altes wird ueber ignoreStoredWindows ignoriert).
+async function prepareUnloadWindowForRun() {
+  const file =
+    el.unloadWindowFileInput?.files && el.unloadWindowFileInput.files[0];
+  if (!file) return false;
+  const res = await fetch(
+    `/api/windows/upload?scope=${encodeURIComponent(APP_SCOPE)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    },
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return true;
+}
+
+// Sixfold-Seite: Statuszeile spiegelt die fuer DIESEN Lauf gewaehlte Datei.
+function updateSixfoldWindowHint() {
+  if (!el.unloadWindowStatus) return;
+  const file =
+    el.unloadWindowFileInput?.files && el.unloadWindowFileInput.files[0];
+  el.unloadWindowStatus.textContent = file
+    ? `Zeitfenster für diesen Lauf: ${file.name}`
+    : "Kein Zeitfenster für diesen Lauf (altes wird ignoriert).";
 }
 
 async function load(forceRecalc = false) {
@@ -2387,6 +2421,7 @@ if (el.unloadWindowFileInput) {
     if (el.uploadUnloadWindowsBtn) {
       el.uploadUnloadWindowsBtn.disabled = !hasFile;
     }
+    if (IS_SIXFOLD_ONLY_PAGE) updateSixfoldWindowHint();
   });
 }
 if (el.uploadUnloadWindowsBtn) {
@@ -2483,8 +2518,8 @@ if (el.deleteUnloadWindowsBtn) {
 }
 
 if (IS_SIXFOLD_ONLY_PAGE) {
-  // Seite 1: keine Transporeon-Importe laden. Nur Zeitfenster-Status zeigen.
-  refreshUnloadWindowStatus();
+  // Seite 1: keine Transporeon-Importe laden. Zeitfenster gilt nur pro Lauf.
+  updateSixfoldWindowHint();
   setStatus("Bereit. Sixfold-Link, Token und Zeitraum wählen.");
 } else {
   refreshImports("", true)

@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 22;
+const BILLING_CACHE_VERSION = 23;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2291,7 +2291,15 @@ app.get("/api/billing/export", async (req, res) => {
       sixfoldDateFrom,
       sixfoldDateTo,
     );
-    const unloadWindowIndex = loadPersistedUnloadWindowIndex(scope);
+    // Zeitfenster pro Lauf (Nutzer 2026-08-04): Mit ignoreStoredWindows=1 wird
+    // ein alt gespeichertes Zeitfenster NICHT verwendet. Nur eine fuer genau
+    // diesen Lauf frisch hochgeladene Datei zaehlt.
+    const ignoreStoredWindows =
+      req.query.ignoreStoredWindows === "1" ||
+      req.query.ignoreStoredWindows === "true";
+    const unloadWindowIndex = ignoreStoredWindows
+      ? null
+      : loadPersistedUnloadWindowIndex(scope);
     const unloadFallbackMeta = applyMissingUnloadWindowsFallback(
       filteredTransports,
       unloadWindowIndex,
