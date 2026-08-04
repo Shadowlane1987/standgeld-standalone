@@ -144,10 +144,10 @@ function computeStandgeld(input = {}, config = {}) {
   if (countedMinutes < 0) countedMinutes = 0;
 
   // Regel 7b: Ruhezeit automatisch abziehen (gesetzliche 9h Ruhe bei Langfahrten).
-  // Wenn Standzeit > 12h, wird 9h (540 min) als Ruhezeit abgezogen.
+  // Wenn Standzeit > 10h, wird 9h (540 min) als Ruhezeit abgezogen (Nutzer 2026-08-04).
   // Nutzer-Vorgabe 2026-07-20: keine Multi-Visit-Probleme erwartet, daher
   // automatisch abziehen statt zu pruefen.
-  const REST_TIME_THRESHOLD_MIN = 12 * 60; // 12 Stunden
+  const REST_TIME_THRESHOLD_MIN = 10 * 60; // 10 Stunden
   const REST_TIME_DEDUCTION_MIN = 9 * 60; // 9 Stunden
   let effectiveMinutes = countedMinutes;
   let restTimeDeducted = false;

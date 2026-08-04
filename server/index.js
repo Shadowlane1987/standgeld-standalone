@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 16;
+const BILLING_CACHE_VERSION = 17;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -1566,8 +1566,8 @@ function calcStop(stop, rules) {
   // normal, erst ab 46 min zu spaet gilt die 3h-Regel.
   const lateGraceApplies = Boolean(
     rules.lateArrivalGraceEnabled &&
-      slotBegin &&
-      arrival.getTime() > slotBegin.getTime() + graceMinutes * 60000,
+    slotBegin &&
+    arrival.getTime() > slotBegin.getTime() + graceMinutes * 60000,
   );
   const freeMinutesForCharge = lateGraceApplies ? 180 : rules.freeMinutes;
   const effectiveMinutes = Math.max(
@@ -1579,9 +1579,9 @@ function calcStop(stop, rules) {
     Math.round((departure - billableStart) / 60000),
   );
 
-  // 9h-Ruhezeit wie in der Batch-Abrechnung: bei Standzeit > 12h werden
+  // 9h-Ruhezeit wie in der Batch-Abrechnung: bei Standzeit > 10h werden
   // 9h (540 min) als gesetzliche Ruhezeit abgezogen (Nutzer 2026-08-04).
-  const REST_TIME_THRESHOLD_MIN = 12 * 60;
+  const REST_TIME_THRESHOLD_MIN = 10 * 60;
   const REST_TIME_DEDUCTION_MIN = 9 * 60;
   let restedBillableMinutes = rawBillableMinutes;
   let restTimeDeducted = false;
@@ -2308,7 +2308,10 @@ app.get("/api/billing/export", async (req, res) => {
     const cleanResult = stripNahverkehrTransports(result);
     // Optional: Aufteilung nach GPS-Nachweisbarkeit (Seite 1 = verified,
     // Seite 2 = gaps). Ohne Parameter bleibt alles unveraendert ("all").
-    const scopedResult = filterBillingByGpsScope(cleanResult, req.query.gpsScope);
+    const scopedResult = filterBillingByGpsScope(
+      cleanResult,
+      req.query.gpsScope,
+    );
     if (importId) {
       persistBillingResult(importId, cacheKey, {
         file: filePath,
