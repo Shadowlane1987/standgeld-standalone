@@ -122,7 +122,14 @@ function computeStandgeld(input = {}, config = {}) {
   // Regel 2: Zaehlbeginn ab Fenster, bei Spaetankunft ab Ankunft.
   // Wartezeit vor dem Fenster wird nie gezaehlt.
   // Mit aktivierter Verspaetungsregel gilt fuer alle Spaetankuenfte 3h frei.
-  const lateGraceApplies = lateGraceEnabled && arrivedLate;
+  // Die 3h-Regel greift aber ERST, wenn die Ankunft mehr als lateGraceMinutes
+  // (Standard 45 min) NACH dem Zeitfenster liegt (Nutzer 2026-08-04). Kommt man
+  // z.B. bei Fenster 07:00 um 07:30 (30 min zu spaet), greift sie noch nicht;
+  // erst ab 07:46 (46 min zu spaet).
+  const lateGraceApplies =
+    lateGraceEnabled &&
+    hasWindow &&
+    arrival > windowStart + lateGraceMinutes * 60000;
 
   const freeMinutesForCharge = lateGraceApplies ? 180 : cfg.freeMinutes;
   effectiveFreeMinutes = freeMinutesForCharge;

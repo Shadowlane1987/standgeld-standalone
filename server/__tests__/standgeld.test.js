@@ -79,11 +79,11 @@ test("Spaetankunft: Zaehlung ab Ankunft, nicht ab Fenster", () => {
   assert.equal(r.fee_eur, 30);
 });
 
-test("Verspaetungsregel aktiv: 3 Stunden frei ab Ankunft", () => {
+test("Verspaetungsregel aktiv: 3 Stunden frei ab Ankunft (mehr als 45 min zu spaet)", () => {
   const r = computeStandgeld(
     stop({
-      arrival_time: "2026-07-16T06:45:00.000Z",
-      departure_time: "2026-07-16T10:15:00.000Z",
+      arrival_time: "2026-07-16T06:46:00.000Z",
+      departure_time: "2026-07-16T10:16:00.000Z",
     }),
     { lateArrivalGraceEnabled: true, lateArrivalGraceMinutes: 45 },
   );
@@ -91,11 +91,38 @@ test("Verspaetungsregel aktiv: 3 Stunden frei ab Ankunft", () => {
   assert.equal(r.late_arrival_grace_enabled, true);
   assert.equal(r.late_arrival_grace_minutes, 45);
   assert.equal(r.late_arrival_grace_applied, true);
-  assert.equal(r.count_start, "2026-07-16T06:45:00.000Z");
+  assert.equal(r.count_start, "2026-07-16T06:46:00.000Z");
   assert.equal(r.counted_standing_minutes, 210);
   assert.equal(r.minutes_over_free, 30);
   assert.equal(r.billable_blocks, 1);
   assert.equal(r.fee_eur, 30);
+});
+
+test("Verspaetungsregel aktiv: 30 min zu spaet -> 3h-Regel greift NICHT (normal)", () => {
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T06:30:00.000Z",
+      departure_time: "2026-07-16T10:15:00.000Z",
+    }),
+    { lateArrivalGraceEnabled: true, lateArrivalGraceMinutes: 45 },
+  );
+  assert.equal(r.arrived_late, true);
+  assert.equal(r.late_arrival_grace_applied, false);
+  // Normale Regel: ab Ankunft zaehlen, 2h frei.
+  assert.equal(r.count_start, "2026-07-16T06:30:00.000Z");
+  assert.equal(r.counted_standing_minutes, 225);
+  assert.equal(r.minutes_over_free, 105);
+});
+
+test("Verspaetungsregel aktiv: genau 45 min zu spaet -> 3h-Regel greift NICHT", () => {
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T06:45:00.000Z",
+      departure_time: "2026-07-16T10:15:00.000Z",
+    }),
+    { lateArrivalGraceEnabled: true, lateArrivalGraceMinutes: 45 },
+  );
+  assert.equal(r.late_arrival_grace_applied, false);
 });
 
 test("Verspaetungsregel deaktiviert: alte Zaehlregel bleibt", () => {

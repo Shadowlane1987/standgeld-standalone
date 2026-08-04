@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 15;
+const BILLING_CACHE_VERSION = 16;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -1557,8 +1557,17 @@ function calcStop(stop, rules) {
 
   const billableStart = slotBegin && slotBegin > arrival ? slotBegin : arrival;
   const arrivedLate = Boolean(slotBegin && arrival > slotBegin);
+  const graceMinutes = Math.max(
+    0,
+    Number(rules.lateArrivalGraceMinutes ?? 45) || 45,
+  );
+  // 3h-Regel greift erst, wenn die Ankunft mehr als graceMinutes (Standard 45)
+  // NACH dem Zeitfenster liegt (Nutzer 2026-08-04). 30 min zu spaet -> noch
+  // normal, erst ab 46 min zu spaet gilt die 3h-Regel.
   const lateGraceApplies = Boolean(
-    rules.lateArrivalGraceEnabled && arrivedLate,
+    rules.lateArrivalGraceEnabled &&
+      slotBegin &&
+      arrival.getTime() > slotBegin.getTime() + graceMinutes * 60000,
   );
   const freeMinutesForCharge = lateGraceApplies ? 180 : rules.freeMinutes;
   const effectiveMinutes = Math.max(
@@ -1570,9 +1579,23 @@ function calcStop(stop, rules) {
     Math.round((departure - billableStart) / 60000),
   );
 
+  // 9h-Ruhezeit wie in der Batch-Abrechnung: bei Standzeit > 12h werden
+  // 9h (540 min) als gesetzliche Ruhezeit abgezogen (Nutzer 2026-08-04).
+  const REST_TIME_THRESHOLD_MIN = 12 * 60;
+  const REST_TIME_DEDUCTION_MIN = 9 * 60;
+  let restedBillableMinutes = rawBillableMinutes;
+  let restTimeDeducted = false;
+  if (rawBillableMinutes > REST_TIME_THRESHOLD_MIN) {
+    restedBillableMinutes = Math.max(
+      0,
+      rawBillableMinutes - REST_TIME_DEDUCTION_MIN,
+    );
+    restTimeDeducted = true;
+  }
+
   const billableAfterFree = Math.max(
     0,
-    rawBillableMinutes - freeMinutesForCharge,
+    restedBillableMinutes - freeMinutesForCharge,
   );
   const billedUnits = Math.ceil(billableAfterFree / rules.unitMinutes);
   const rawAmount = billedUnits * rules.unitPrice;
@@ -1583,6 +1606,7 @@ function calcStop(stop, rules) {
     effective_minutes: effectiveMinutes,
     counted_standing_minutes: rawBillableMinutes,
     billable_minutes: billableAfterFree,
+    rest_time_deducted: restTimeDeducted,
     billed_units: billedUnits,
     amount_eur: amount,
     free_minutes: freeMinutesForCharge,
