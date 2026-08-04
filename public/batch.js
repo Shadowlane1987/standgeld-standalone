@@ -58,6 +58,7 @@ const el = {
   gpsMissingCount: document.getElementById("gpsMissingCount"),
   totalFee: document.getElementById("totalFee"),
   filterMode: document.getElementById("filterMode"),
+  sortMode: document.getElementById("sortMode"),
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
   dateFrom: document.getElementById("dateFrom"),
   dateTo: document.getElementById("dateTo"),
@@ -954,9 +955,29 @@ function filteredStops() {
       (s) => s.unload_window_fallback_applied === true && s.fee_eur > 0,
     );
   // Fake-Kennzeichen (Handynummer, XP-Zeiten) IMMER ans Ende der Liste.
-  return list
+  const base = list
     .filter(dateInRange)
     .sort((a, b) => (a.plate_fake ? 1 : 0) - (b.plate_fake ? 1 : 0));
+
+  // Statussortierung: 1. puenktlich (+abrechenbar zuerst), 2. zu spaet aber
+  // innerhalb 45 min, 3. 3h-Faelle. Fake-Kennzeichen bleiben ganz am Ende.
+  const sortValue = el.sortMode ? el.sortMode.value : "status";
+  if (sortValue !== "status") return base;
+  return base.sort((a, b) => {
+    const fakeDiff = (a.plate_fake ? 1 : 0) - (b.plate_fake ? 1 : 0);
+    if (fakeDiff !== 0) return fakeDiff;
+    const rankDiff = statusRank(a) - statusRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return Number(b.fee_eur || 0) - Number(a.fee_eur || 0);
+  });
+}
+
+function statusRank(stop) {
+  let group = 0; // puenktlich
+  if (stop?.late_arrival_grace_applied) group = 2; // 3h-Fall
+  else if (stop?.arrived_late) group = 1; // zu spaet, innerhalb 45 min
+  const chargeable = Number(stop?.fee_eur || 0) > 0 ? 0 : 1;
+  return group * 10 + chargeable;
 }
 
 function sourceLabel(stop) {
@@ -2323,6 +2344,7 @@ if (el.sixfoldToken) {
 }
 el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
 el.filterMode.addEventListener("change", render);
+if (el.sortMode) el.sortMode.addEventListener("change", render);
 if (el.sixfoldBatchBtn) {
   el.sixfoldBatchBtn.addEventListener("click", loadFromSixfold);
 }

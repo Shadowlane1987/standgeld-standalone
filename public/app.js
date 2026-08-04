@@ -462,6 +462,7 @@ function toTimestamp(value) {
 function sortStopsByDate(stops, sortMode) {
   const items = Array.isArray(stops) ? [...stops] : [];
   const normalizedSortMode = String(sortMode || "arrival-asc").trim();
+  if (normalizedSortMode === "status") return sortStopsByStatus(items);
   const fieldMap = {
     "arrival-asc": "arrival_time",
     "arrival-desc": "arrival_time",
@@ -489,7 +490,31 @@ function sortStopsByDate(stops, sortMode) {
   return items;
 }
 
-// Datumsfilter (von/bis) fuer die Ergebnisliste; leere Felder = kein Filter.
+// Statussortierung: 1. puenktlich (+abrechenbar zuerst), 2. zu spaet aber
+// innerhalb 45 min, 3. 3h-Faelle. Innerhalb jeder Gruppe abrechenbar zuerst,
+// dann nach Betrag und Ankunft.
+function statusRank(stop) {
+  let group = 0; // puenktlich
+  if (stop?.late_arrival_grace_applied) group = 2; // 3h-Fall
+  else if (stop?.arrived_late) group = 1; // zu spaet, innerhalb 45 min
+  const chargeable = Number(stop?.amount_eur || 0) > 0 ? 0 : 1;
+  return group * 10 + chargeable;
+}
+
+function sortStopsByStatus(stops) {
+  const items = Array.isArray(stops) ? [...stops] : [];
+  items.sort((a, b) => {
+    const rankDiff = statusRank(a) - statusRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    const amountDiff = Number(b?.amount_eur || 0) - Number(a?.amount_eur || 0);
+    if (amountDiff !== 0) return amountDiff;
+    const at = toTimestamp(a?.arrival_time) ?? Infinity;
+    const bt = toTimestamp(b?.arrival_time) ?? Infinity;
+    return at - bt;
+  });
+  return items;
+}
+
 function stopDateForFilter(stop) {
   const raw = String(
     stop?.arrival_time ||
