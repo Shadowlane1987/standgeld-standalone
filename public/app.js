@@ -825,7 +825,7 @@ function renderStops(stops) {
           bk.manual = false;
         }
         persistBookkeepingEntries();
-        renderStops();
+        renderStops(latestStops);
       });
     });
     tr.addEventListener("click", () => selectStop(stop));
