@@ -1,6 +1,16 @@
 @echo off
 title Fernverkehr - Standgeld Motor
-cd /d "%~dp0"
+
+REM --- Selbst-Update-Schutz: Diese Datei zuerst aus dem %temp% starten, damit
+REM     "git pull" die laufende Start-Datei nicht mittendrin veraendert
+REM     (sonst schliesst sich das Fenster sofort wieder). ---
+if /i "%~1"=="__RUN__" goto :main
+copy /y "%~f0" "%temp%\fernverkehr_starter_run.cmd" >nul 2>nul
+"%temp%\fernverkehr_starter_run.cmd" __RUN__ "%~dp0"
+exit /b
+
+:main
+cd /d "%~2"
 
 echo ============================================
 echo   FERNVERKEHR - Standgeld wird gestartet...
@@ -42,7 +52,7 @@ if not exist "node_modules" (
   echo [2/3] Installiere den Browser fuer die Automatik ...
   call npx playwright install chromium
 ) else (
-  echo [1/3] Aktualisiere Programmteile (falls es Neuerungen gibt) ...
+  echo [1/3] Aktualisiere Programmteile - falls es Neuerungen gibt ...
   call npm install
 )
 
