@@ -515,6 +515,7 @@ function loadBookkeepingForImport(importId) {
       submitted: Boolean(value && value.submitted),
       failed: Boolean(value && value.failed),
       existing: Boolean(value && value.existing),
+      manual: Boolean(value && value.manual),
     });
   }
 }
@@ -531,6 +532,7 @@ function persistBookkeepingForCurrentImport() {
       submitted: Boolean(entry && entry.submitted),
       failed: Boolean(entry && entry.failed),
       existing: Boolean(entry && entry.existing),
+      manual: Boolean(entry && entry.manual),
     };
   }
   storage[id] = snapshot;
@@ -1044,6 +1046,7 @@ function getBookkeepingEntry(stop) {
       submitted: false,
       failed: false,
       existing: false,
+      manual: false,
     });
   }
   return bookkeepingByKey.get(key);
@@ -1199,8 +1202,7 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
         [
           ...data.processed.filter(
             (item) =>
-              item.status === "failed" ||
-              item.status === "saved_no_decision",
+              item.status === "failed" || item.status === "saved_no_decision",
           ),
           ...(Array.isArray(data.skipped) ? data.skipped : []),
         ]
@@ -1361,13 +1363,24 @@ function render() {
     if (bk.submitted) tr.classList.add("submitted-row");
     else if (bk.existing) tr.classList.add("existing-row");
     else if (bk.failed) tr.classList.add("failed-row");
-    const submittedCell = bk.submitted
-      ? '<span class="tp-done">✓ Abgerechnet</span>'
+    const statusBadge = bk.submitted
+      ? `<span class="tp-done">✓ Abgerechnet${bk.manual ? " (manuell)" : ""}</span>`
       : bk.existing
         ? '<span class="tp-existing">● Bereits vorhanden</span>'
         : bk.failed
           ? '<span class="tp-failed">✗ Fehlgeschlagen</span>'
           : '<span class="tp-open">—</span>';
+    // Manuelle Steuerung (Nutzer 2026-08-05): selbst abgerechnete Touren als
+    // "abgerechnet" markieren (kommen dann in die Abgerechnet-Liste/Excel) und
+    // jeden Status wieder zuruecksetzen (z.B. faelschliches "Bereits vorhanden").
+    const statusActions =
+      (!bk.submitted
+        ? '<button type="button" class="bk-action" data-action="mark-billed" title="Selbst abgerechnet: in Abgerechnet-Liste aufnehmen">Manuell abgerechnet</button>'
+        : "") +
+      (bk.submitted || bk.existing || bk.failed
+        ? '<button type="button" class="bk-action" data-action="reset" title="Status zurücksetzen">Zurücksetzen</button>'
+        : "");
+    const submittedCell = `<div class="bk-status">${statusBadge}${statusActions}</div>`;
 
     tr.innerHTML = `
       <td>${stop.transport_number || "-"}</td>
@@ -1416,6 +1429,28 @@ function render() {
         persistBookkeepingForCurrentImport();
       });
     }
+
+    tr.querySelectorAll("button.bk-action").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const action = btn.getAttribute("data-action");
+        if (action === "mark-billed") {
+          bk.submitted = true;
+          bk.billed = true;
+          bk.failed = false;
+          bk.existing = false;
+          bk.manual = true;
+        } else if (action === "reset") {
+          bk.submitted = false;
+          bk.billed = false;
+          bk.failed = false;
+          bk.existing = false;
+          bk.manual = false;
+        }
+        persistBookkeepingForCurrentImport();
+        render();
+      });
+    });
 
     tr.addEventListener("click", () => selectStop(stop));
     tr.addEventListener("keydown", (event) => {
@@ -1467,6 +1502,7 @@ function renderSettled() {
   let sum = 0;
   for (const stop of stops) {
     sum += Number(stop.fee_eur || 0);
+    const entryForRow = getBookkeepingEntry(stop);
     const tr = document.createElement("tr");
     tr.className = "result-row submitted-row";
     tr.innerHTML = `
@@ -1478,7 +1514,7 @@ function renderSettled() {
       <td>${minutesToHours(stop.counted_standing_minutes)}</td>
       <td>${euro(stop.fee_eur)}</td>
       <td>
-        <span class="tp-done">✓ Abgerechnet</span>
+        <span class="tp-done">✓ Abgerechnet${entryForRow.manual ? " (manuell)" : ""}</span>
         <button type="button" class="settled-remove" title="Aus Abgerechnet entfernen">Entfernen</button>
       </td>
     `;

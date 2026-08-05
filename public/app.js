@@ -118,6 +118,7 @@ function getBookkeepingEntry(stop) {
       submitted: false,
       failed: false,
       existing: false,
+      manual: false,
     });
   }
   return bookkeepingByKey.get(key);
@@ -137,6 +138,7 @@ function restoreBookkeepingEntries(stops) {
       submitted: Boolean(storage[key]?.submitted),
       failed: Boolean(storage[key]?.failed),
       existing: Boolean(storage[key]?.existing),
+      manual: Boolean(storage[key]?.manual),
     });
   }
 }
@@ -149,6 +151,7 @@ function persistBookkeepingEntries() {
       submitted: Boolean(entry?.submitted),
       failed: Boolean(entry?.failed),
       existing: Boolean(entry?.existing),
+      manual: Boolean(entry?.manual),
     };
   }
   writeSingleBookkeepingStorage(storage);
@@ -289,8 +292,7 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
         [
           ...data.processed.filter(
             (item) =>
-              item.status === "failed" ||
-              item.status === "saved_no_decision",
+              item.status === "failed" || item.status === "saved_no_decision",
           ),
           ...(Array.isArray(data.skipped) ? data.skipped : []),
         ]
@@ -707,13 +709,22 @@ function renderStops(stops) {
     if (bk.submitted) tr.classList.add("submitted-row");
     else if (bk.existing) tr.classList.add("existing-row");
     else if (bk.failed) tr.classList.add("failed-row");
-    const submittedCell = bk.submitted
-      ? '<span class="tp-done">✓ Abgerechnet</span>'
+    const statusBadge = bk.submitted
+      ? `<span class="tp-done">✓ Abgerechnet${bk.manual ? " (manuell)" : ""}</span>`
       : bk.existing
         ? '<span class="tp-existing">● Bereits vorhanden</span>'
         : bk.failed
           ? '<span class="tp-failed">✗ Fehlgeschlagen</span>'
           : '<span class="tp-open">—</span>';
+    // Manuelle Steuerung: selbst abgerechnete Touren aufnehmen bzw. Status zuruecksetzen.
+    const statusActions =
+      (!bk.submitted
+        ? '<button type="button" class="bk-action" data-action="mark-billed" title="Selbst abgerechnet: in Abgerechnet-Liste aufnehmen">Manuell abgerechnet</button>'
+        : "") +
+      (bk.submitted || bk.existing || bk.failed
+        ? '<button type="button" class="bk-action" data-action="reset" title="Status zurücksetzen">Zurücksetzen</button>'
+        : "");
+    const submittedCell = `<div class="bk-status">${statusBadge}${statusActions}</div>`;
 
     tr.innerHTML = `
       <td>${stop.transport_number || stop.tour_id || "-"}</td>
@@ -745,6 +756,27 @@ function renderStops(stops) {
         renderSettled();
       });
     }
+    tr.querySelectorAll("button.bk-action").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const action = btn.getAttribute("data-action");
+        if (action === "mark-billed") {
+          bk.submitted = true;
+          bk.billed = true;
+          bk.failed = false;
+          bk.existing = false;
+          bk.manual = true;
+        } else if (action === "reset") {
+          bk.submitted = false;
+          bk.billed = false;
+          bk.failed = false;
+          bk.existing = false;
+          bk.manual = false;
+        }
+        persistBookkeepingEntries();
+        renderStops();
+      });
+    });
     tr.addEventListener("click", () => selectStop(stop));
     tr.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -800,6 +832,7 @@ function renderSettled() {
   let sum = 0;
   for (const stop of stops) {
     sum += Number(stop.amount_eur || 0);
+    const entryForRow = getBookkeepingEntry(stop);
     const tr = document.createElement("tr");
     tr.className = "result-row";
     tr.innerHTML = `
@@ -810,7 +843,7 @@ function renderSettled() {
       <td>${resolveWindowDisplay(stop)}</td>
       <td>${formatMinutesAsHours(stop.effective_minutes)}</td>
       <td>${Number(stop.amount_eur || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</td>
-      <td><span class="tp-done">✓ Abgerechnet</span></td>
+      <td><span class="tp-done">✓ Abgerechnet${entryForRow.manual ? " (manuell)" : ""}</span></td>
     `;
     tr.addEventListener("click", () => openSurchargeModal(stop));
     el.settledRows.appendChild(tr);

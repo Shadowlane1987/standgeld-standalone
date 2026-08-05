@@ -990,6 +990,29 @@ tbody tr {
   white-space: nowrap;
 }
 
+.bk-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.bk-action {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #cbd5e1);
+  background: #fff;
+  color: var(--ink, #1f2937);
+  font-size: 0.78em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bk-action:hover {
+  background: rgba(29, 78, 216, 0.08);
+  border-color: var(--focus, #1d4ed8);
+}
+
 .review-row td:last-child {
   color: var(--warning);
   font-weight: 600;
