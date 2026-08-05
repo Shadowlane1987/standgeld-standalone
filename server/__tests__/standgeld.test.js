@@ -336,3 +336,53 @@ test("Fruehankunft mit GPS knapp vor Fenster: ab Fenster", () => {
   assert.equal(r.count_start, "2026-07-16T06:00:00.000Z");
   assert.equal(r.counted_standing_minutes, 180);
 });
+
+test("Abendfenster 19:00, Abfahrt naechster Morgen -> Prueffall Nacht", () => {
+  const r = computeStandgeld({
+    stop_type: "LOADING",
+    window_start: "2026-07-31T19:00:00+02:00",
+    arrival_time: "2026-07-31T16:00:00+02:00",
+    departure_time: "2026-08-01T03:58:00+02:00",
+  });
+  assert.equal(r.reason, REASON.REST_PERIOD_INCLUDED);
+  assert.equal(r.needs_review, true);
+  assert.equal(r.rest_review_applied, true);
+  assert.ok(r.rest_review_night_minutes >= 240);
+  assert.ok(r.fee_eur > 0); // Betrag bleibt zur Info sichtbar
+});
+
+test("Standzeit ueber Nacht (18:00 -> naechster Nachmittag) -> Prueffall", () => {
+  const r = computeStandgeld({
+    stop_type: "UNLOADING",
+    window_start: "2026-08-03T18:00:00+02:00",
+    arrival_time: "2026-08-03T07:53:00+02:00",
+    departure_time: "2026-08-04T14:56:00+02:00",
+  });
+  assert.equal(r.reason, REASON.REST_PERIOD_INCLUDED);
+  assert.equal(r.needs_review, true);
+});
+
+test("normaler Tagesfall (08:00 -> 13:30) bleibt abrechenbar", () => {
+  const r = computeStandgeld({
+    stop_type: "LOADING",
+    window_start: "2026-08-05T08:00:00+02:00",
+    arrival_time: "2026-08-05T08:00:00+02:00",
+    departure_time: "2026-08-05T13:30:00+02:00",
+  });
+  assert.equal(r.reason, REASON.CHARGEABLE);
+  assert.equal(r.needs_review, false);
+  assert.equal(r.rest_review_applied, false);
+  assert.equal(r.rest_review_night_minutes, 0);
+});
+
+test("kurze Nacht-Wartezeit (23:30 -> 02:30) bleibt abrechenbar", () => {
+  const r = computeStandgeld({
+    stop_type: "LOADING",
+    window_start: "2026-08-05T23:30:00+02:00",
+    arrival_time: "2026-08-05T23:30:00+02:00",
+    departure_time: "2026-08-06T02:30:00+02:00",
+  });
+  // Nur ~3h Nachtueberlappung -> unter 4h-Schwelle -> kein Prueffall.
+  assert.equal(r.needs_review, false);
+  assert.equal(r.reason, REASON.CHARGEABLE);
+});

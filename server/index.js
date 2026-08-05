@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 26;
+const BILLING_CACHE_VERSION = 27;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -248,8 +248,9 @@ function enforceUnloadingGpsGate(result) {
   const summary = {
     ...(result.summary || {}),
     stop_count: keptStops.length,
-    chargeable_count: keptStops.filter((s) => Number(s?.fee_eur || 0) > 0)
-      .length,
+    chargeable_count: keptStops.filter(
+      (s) => Number(s?.fee_eur || 0) > 0 && !s?.needs_review,
+    ).length,
     review_count: keptStops.filter((s) => Boolean(s?.needs_review)).length,
     gps_used_count: keptStops.filter(
       (s) => s?.arrival_source === "GPS" || s?.departure_source === "GPS",

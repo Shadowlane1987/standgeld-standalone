@@ -118,6 +118,7 @@ const REASON_LABELS = {
   below_trigger: "Unter Auslöser",
   missing_data: "Daten fehlen",
   implausible_duration: "Unplausibel (Prüfen)",
+  rest_period_included: "Nacht/Wochenende (Prüfen)",
 };
 
 const TYPE_LABELS = {
@@ -1337,7 +1338,9 @@ function render() {
     tr.tabIndex = 0;
 
     const statusLabel = stop.needs_review
-      ? "Prüfen"
+      ? stop.rest_review_applied
+        ? "Prüfen · Nacht/Wochenende"
+        : "Prüfen"
       : REASON_LABELS[stop.reason] || stop.reason || "-";
 
     const src = sourceLabel(stop);
@@ -1586,7 +1589,9 @@ function mergeUploadResults(results) {
         0,
       ),
       stop_count: stops.length,
-      chargeable_count: stops.filter((s) => Number(s.fee_eur || 0) > 0).length,
+      chargeable_count: stops.filter(
+        (s) => Number(s.fee_eur || 0) > 0 && !s.needs_review,
+      ).length,
       review_count: stops.filter((s) => Boolean(s.needs_review)).length,
       gps_checked: summaries.some((summary) => Boolean(summary.gps_checked)),
       gps_used_count: stops.filter(
