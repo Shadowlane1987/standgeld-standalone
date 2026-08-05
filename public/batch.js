@@ -151,7 +151,8 @@ function setStatus(text, type = "info") {
 function buildProblemDetails(data) {
   const problems = [];
   for (const item of data?.processed || []) {
-    if (item.status !== "failed") continue;
+    if (item.status !== "failed" && item.status !== "saved_no_decision")
+      continue;
     const station = item.station ? ` (${item.station})` : "";
     problems.push(
       `${item.transport_number || "?"}${station}: ${item.message || "Fehler"}`,
@@ -1196,7 +1197,11 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
       );
       const failedKeys = new Set(
         [
-          ...data.processed.filter((item) => item.status === "failed"),
+          ...data.processed.filter(
+            (item) =>
+              item.status === "failed" ||
+              item.status === "saved_no_decision",
+          ),
           ...(Array.isArray(data.skipped) ? data.skipped : []),
         ]
           .map((item) => String(item.stop_key || "").trim())
@@ -1234,6 +1239,7 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
 
     const success = Number(data.summary?.success_count || 0);
     const alreadyExists = Number(data.summary?.already_exists_count || 0);
+    const savedNoDecision = Number(data.summary?.saved_no_decision_count || 0);
     const failure = Number(data.summary?.failure_count || 0);
     if (dryRun) {
       setStatus(
@@ -1247,9 +1253,12 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
       const existsText = alreadyExists
         ? ` ${alreadyExists} bereits vorhanden (übersprungen).`
         : "";
+      const noDecisionText = savedNoDecision
+        ? ` ${savedNoDecision} gespeichert OHNE Entscheidung (bitte manuell prüfen).`
+        : "";
       const failedDetails = buildProblemDetails(data);
       setStatus(
-        `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.${existsText}${doneText}${failedDetails}`,
+        `Zuschlagslauf fertig: ${success} erfolgreich, ${failure} fehlgeschlagen.${existsText}${noDecisionText}${doneText}${failedDetails}`,
         failure + alreadyExists > 0 ? "info" : "success",
       );
     }

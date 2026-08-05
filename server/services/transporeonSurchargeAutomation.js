@@ -901,6 +901,9 @@ async function applySurchargeForItem(frame, page, item, prelocatedRow) {
   await clickSave(dialogContext);
   const decisionRequested = await requestDecision(contexts);
 
+  // GELD-KRITISCH (Nutzer 2026-08-05): "applied" NUR, wenn die Entscheidung
+  // wirklich eingeholt wurde. Sonst existiert zwar eine gespeicherte Zeile, es
+  // wurde aber NICHTS beantragt -> darf nicht als abgerechnet gelten.
   return {
     transport_number: transportNumber,
     matched_transport_number: String(row?.text || ""),
@@ -908,7 +911,7 @@ async function applySurchargeForItem(frame, page, item, prelocatedRow) {
     station: stationLabel,
     amount_eur: amount,
     decision_requested: decisionRequested,
-    status: "applied",
+    status: decisionRequested ? "applied" : "saved_no_decision",
   };
 }
 
@@ -1032,7 +1035,9 @@ async function applyTransporeonSurcharges(items, options = {}) {
           message:
             result.status === "already_exists"
               ? "Es existiert bereits eine Standzeit-Kostenzeile. Kein weiterer Zuschlag gebucht."
-              : "Zuschlag gespeichert und Entscheidung angefragt.",
+              : result.status === "saved_no_decision"
+                ? "Zuschlag gespeichert, aber 'Entscheidung einholen' war nicht aktiv – NICHT beantragt. Bitte in Transporeon manuell prüfen."
+                : "Zuschlag gespeichert und Entscheidung angefragt.",
         });
       } catch (error) {
         processed.push({
@@ -1060,6 +1065,10 @@ async function applyTransporeonSurcharges(items, options = {}) {
       (item) => item.status === "already_exists",
     ).length;
 
+    const savedNoDecisionCount = processed.filter(
+      (item) => item.status === "saved_no_decision",
+    ).length;
+
     const failureCount = processed.length - successCount - alreadyExistsCount;
 
     return {
@@ -1069,6 +1078,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
         requested: list.length,
         success_count: successCount,
         already_exists_count: alreadyExistsCount,
+        saved_no_decision_count: savedNoDecisionCount,
         failure_count: failureCount,
       },
     };
