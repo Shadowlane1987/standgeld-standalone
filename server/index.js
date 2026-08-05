@@ -50,7 +50,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 27;
+const BILLING_CACHE_VERSION = 28;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2641,7 +2641,13 @@ app.post(
         gpsIndex,
       });
       const result = enforceUnloadingGpsGate(rawResult);
-      const scopedResult = filterBillingByGpsScope(result, req.query.gpsScope);
+      // Nahverkehr (PEBL) endgueltig entfernen - laeuft ueber die
+      // Einzelabrechnung und darf in der Excel-Abrechnung nicht auftauchen.
+      const cleanResult = stripNahverkehrTransports(result);
+      const scopedResult = filterBillingByGpsScope(
+        cleanResult,
+        req.query.gpsScope,
+      );
       persistBillingResult(savedImport.id, cacheKey, {
         file: req.query.name ? String(req.query.name) : "upload.xlsx",
         import: savedImport,

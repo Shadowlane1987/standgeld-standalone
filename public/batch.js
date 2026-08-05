@@ -118,7 +118,7 @@ const REASON_LABELS = {
   below_trigger: "Unter Auslöser",
   missing_data: "Daten fehlen",
   implausible_duration: "Unplausibel (Prüfen)",
-  rest_period_included: "Nacht/Wochenende (Prüfen)",
+  spans_next_day: "Folgetag (Prüfen)",
 };
 
 const TYPE_LABELS = {
@@ -1338,8 +1338,8 @@ function render() {
     tr.tabIndex = 0;
 
     const statusLabel = stop.needs_review
-      ? stop.rest_review_applied
-        ? "Prüfen · Nacht/Wochenende"
+      ? stop.spans_next_day
+        ? "Prüfen · Folgetag"
         : "Prüfen"
       : REASON_LABELS[stop.reason] || stop.reason || "-";
 

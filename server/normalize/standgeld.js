@@ -35,15 +35,12 @@ const DEFAULT_CONFIG = Object.freeze({
   maxPlausibleMinutes: 1440, // > 24 h Standzeit = unplausibel -> Prueffall
   lateArrivalGraceEnabled: false,
   lateArrivalGraceMinutes: 45,
-  // Regel 8 (Nutzer 2026-08-05): Standzeit, die eine Nachtruhe oder ein
-  // Wochenende einschliesst, ist meist keine reale Wartezeit (LKW macht Pause /
-  // Yard geschlossen). Solche Faelle werden als Prueffall markiert und NICHT in
-  // die Gesamtsumme genommen.
-  restReviewEnabled: true,
-  nightRestBandStartHour: 21, // Nacht-Band Beginn (Berliner Zeit)
-  nightRestBandEndHour: 6, // Nacht-Band Ende (naechster Morgen)
-  nightRestReviewMinutes: 240, // ab 4 h Nachtueberlappung -> Prueffall
-  weekendReviewMinutes: 240, // ab 4 h Ueberlappung mit Sa/So -> Prueffall
+  // Regel 8 (Nutzer 2026-08-05): Eine Standzeit, die in den naechsten
+  // Kalendertag hineinreicht, ist meist keine reale Wartezeit (LKW macht Pause
+  // ueber Nacht). Solche Faelle sind Prueffaelle und gehen NICHT in die
+  // Gesamtsumme. Taggleiche Standzeiten sind auch bei langer Dauer KEIN
+  // Prueffall.
+  nextDayReviewEnabled: true,
 });
 
 const REASON = Object.freeze({
@@ -52,7 +49,7 @@ const REASON = Object.freeze({
   BELOW_TRIGGER: "below_trigger",
   CHARGEABLE: "chargeable",
   IMPLAUSIBLE_DURATION: "implausible_duration",
-  REST_PERIOD_INCLUDED: "rest_period_included",
+  SPANS_NEXT_DAY: "spans_next_day",
 });
 
 function toEpoch(isoString) {
@@ -61,77 +58,23 @@ function toEpoch(isoString) {
   return Number.isNaN(ms) ? null : ms;
 }
 
-// Wandelt einen Zeitpunkt (Epoch) in eine "Wanduhr-Epoch" um, bei der die
-// UTC-Methoden die Berliner Ortszeit liefern. So lassen sich Nacht-/Wochenend-
-// Fenster ueber Tagesgrenzen hinweg robust und ohne DST-Sonderfaelle rechnen.
+// Liefert das Kalenderdatum (YYYY-MM-DD) eines Zeitpunkts in Berliner Ortszeit.
+// So laesst sich robust und ohne DST-Sonderfaelle pruefen, ob Zaehlbeginn und
+// Abfahrt auf denselben Tag fallen.
 const BERLIN_TZ = "Europe/Berlin";
 let berlinFormatter = null;
-function berlinWallEpoch(epochMs) {
+function berlinDateKey(epochMs) {
   if (epochMs == null || Number.isNaN(epochMs)) return null;
   if (!berlinFormatter) {
-    berlinFormatter = new Intl.DateTimeFormat("en-US", {
+    berlinFormatter = new Intl.DateTimeFormat("en-CA", {
       timeZone: BERLIN_TZ,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
     });
   }
-  const p = {};
-  for (const part of berlinFormatter.formatToParts(new Date(epochMs))) {
-    if (part.type !== "literal") p[part.type] = part.value;
-  }
-  let hour = Number(p.hour);
-  if (hour === 24) hour = 0;
-  return Date.UTC(
-    Number(p.year),
-    Number(p.month) - 1,
-    Number(p.day),
-    hour,
-    Number(p.minute),
-    Number(p.second),
-  );
-}
-
-function overlapMinutes(aStart, aEnd, bStart, bEnd) {
-  const s = Math.max(aStart, bStart);
-  const e = Math.min(aEnd, bEnd);
-  return e > s ? (e - s) / 60000 : 0;
-}
-
-// Ermittelt, wie viele Minuten des gezaehlten Zeitraums in eine Nachtruhe bzw.
-// auf ein Wochenende (Sa/So) fallen.
-function restReviewOverlap(countStartMs, departureMs, cfg) {
-  const wallStart = berlinWallEpoch(countStartMs);
-  const wallEnd = berlinWallEpoch(departureMs);
-  if (wallStart == null || wallEnd == null || !(wallEnd > wallStart)) {
-    return { nightMinutes: 0, weekendMinutes: 0 };
-  }
-  const dayMs = 86400000;
-  const first = new Date(wallStart);
-  let cursor =
-    Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), first.getUTCDate()) -
-    dayMs;
-  let nightMinutes = 0;
-  let weekendMinutes = 0;
-  for (; cursor <= wallEnd; cursor += dayMs) {
-    const nightStart = cursor + cfg.nightRestBandStartHour * 3600000;
-    const nightEnd = cursor + (24 + cfg.nightRestBandEndHour) * 3600000;
-    nightMinutes += overlapMinutes(wallStart, wallEnd, nightStart, nightEnd);
-    const dow = new Date(cursor).getUTCDay();
-    if (dow === 0 || dow === 6) {
-      weekendMinutes += overlapMinutes(
-        wallStart,
-        wallEnd,
-        cursor,
-        cursor + dayMs,
-      );
-    }
-  }
-  return { nightMinutes, weekendMinutes };
+  // en-CA liefert das Format YYYY-MM-DD.
+  return berlinFormatter.format(new Date(epochMs));
 }
 
 /**
@@ -289,25 +232,21 @@ function computeStandgeld(input = {}, config = {}) {
     feeCapped = true;
   }
 
-  // Regel 8: Nacht-/Wochenendruhe im gezaehlten Zeitraum -> Prueffall statt
-  // automatischer Abrechnung. Der (potenzielle) Betrag bleibt zur
-  // Nachvollziehbarkeit sichtbar, wird aber ueber needs_review aus der
-  // Gesamtsumme herausgehalten.
+  // Regel 8: Standzeit, die in den naechsten Kalendertag reicht (Zaehlbeginn und
+  // Abfahrt an verschiedenen Berliner Tagen) -> Prueffall statt automatischer
+  // Abrechnung. Der (potenzielle) Betrag bleibt zur Nachvollziehbarkeit
+  // sichtbar, wird aber ueber needs_review aus der Gesamtsumme herausgehalten.
+  // Taggleiche Standzeiten sind auch bei langer Dauer KEIN Prueffall.
   let needsReview = Boolean(input.needs_review);
   let finalReason = reason;
-  let restReviewApplied = false;
-  let restNightMinutes = 0;
-  let restWeekendMinutes = 0;
-  if (chargeable && cfg.restReviewEnabled) {
-    const ov = restReviewOverlap(countStartMs, departure, cfg);
-    restNightMinutes = Math.round(ov.nightMinutes);
-    restWeekendMinutes = Math.round(ov.weekendMinutes);
-    const nightHit = ov.nightMinutes >= cfg.nightRestReviewMinutes;
-    const weekendHit = ov.weekendMinutes >= cfg.weekendReviewMinutes;
-    if (nightHit || weekendHit) {
+  let spansNextDay = false;
+  if (chargeable && cfg.nextDayReviewEnabled) {
+    const startKey = berlinDateKey(countStartMs);
+    const endKey = berlinDateKey(departure);
+    if (startKey && endKey && startKey !== endKey) {
       needsReview = true;
-      restReviewApplied = true;
-      finalReason = REASON.REST_PERIOD_INCLUDED;
+      spansNextDay = true;
+      finalReason = REASON.SPANS_NEXT_DAY;
     }
   }
 
@@ -325,12 +264,10 @@ function computeStandgeld(input = {}, config = {}) {
     fee_capped: feeCapped,
     chargeable,
     reason: finalReason,
-    // Prueffall, wenn Zeitbasis unbelegbar (aus Stopp) ODER eine Nacht-/
-    // Wochenendruhe im Zeitraum liegt (Regel 8).
+    // Prueffall, wenn Zeitbasis unbelegbar (aus Stopp) ODER die Standzeit in den
+    // naechsten Kalendertag reicht (Regel 8).
     needs_review: needsReview,
-    rest_review_applied: restReviewApplied,
-    rest_review_night_minutes: restNightMinutes,
-    rest_review_weekend_minutes: restWeekendMinutes,
+    spans_next_day: spansNextDay,
     rebooking_suspected: false,
     late_arrival_grace_enabled: lateGraceEnabled,
     late_arrival_grace_minutes: lateGraceMinutes,

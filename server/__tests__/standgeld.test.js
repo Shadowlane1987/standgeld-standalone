@@ -337,17 +337,16 @@ test("Fruehankunft mit GPS knapp vor Fenster: ab Fenster", () => {
   assert.equal(r.counted_standing_minutes, 180);
 });
 
-test("Abendfenster 19:00, Abfahrt naechster Morgen -> Prueffall Nacht", () => {
+test("Abendfenster 19:00, Abfahrt naechster Morgen -> Prueffall Folgetag", () => {
   const r = computeStandgeld({
     stop_type: "LOADING",
     window_start: "2026-07-31T19:00:00+02:00",
     arrival_time: "2026-07-31T16:00:00+02:00",
     departure_time: "2026-08-01T03:58:00+02:00",
   });
-  assert.equal(r.reason, REASON.REST_PERIOD_INCLUDED);
+  assert.equal(r.reason, REASON.SPANS_NEXT_DAY);
   assert.equal(r.needs_review, true);
-  assert.equal(r.rest_review_applied, true);
-  assert.ok(r.rest_review_night_minutes >= 240);
+  assert.equal(r.spans_next_day, true);
   assert.ok(r.fee_eur > 0); // Betrag bleibt zur Info sichtbar
 });
 
@@ -358,7 +357,7 @@ test("Standzeit ueber Nacht (18:00 -> naechster Nachmittag) -> Prueffall", () =>
     arrival_time: "2026-08-03T07:53:00+02:00",
     departure_time: "2026-08-04T14:56:00+02:00",
   });
-  assert.equal(r.reason, REASON.REST_PERIOD_INCLUDED);
+  assert.equal(r.reason, REASON.SPANS_NEXT_DAY);
   assert.equal(r.needs_review, true);
 });
 
@@ -371,18 +370,31 @@ test("normaler Tagesfall (08:00 -> 13:30) bleibt abrechenbar", () => {
   });
   assert.equal(r.reason, REASON.CHARGEABLE);
   assert.equal(r.needs_review, false);
-  assert.equal(r.rest_review_applied, false);
-  assert.equal(r.rest_review_night_minutes, 0);
+  assert.equal(r.spans_next_day, false);
 });
 
-test("kurze Nacht-Wartezeit (23:30 -> 02:30) bleibt abrechenbar", () => {
+test("lange taggleiche Standzeit (07:00 -> 20:00) ist KEIN Prueffall", () => {
+  const r = computeStandgeld({
+    stop_type: "LOADING",
+    window_start: "2026-08-05T07:00:00+02:00",
+    arrival_time: "2026-08-05T07:00:00+02:00",
+    departure_time: "2026-08-05T20:00:00+02:00",
+  });
+  assert.equal(r.needs_review, false);
+  assert.equal(r.spans_next_day, false);
+  assert.equal(r.reason, REASON.CHARGEABLE);
+  assert.ok(r.fee_eur > 0);
+});
+
+test("kurze Wartezeit ueber Mitternacht (23:30 -> 02:30) -> Prueffall Folgetag", () => {
   const r = computeStandgeld({
     stop_type: "LOADING",
     window_start: "2026-08-05T23:30:00+02:00",
     arrival_time: "2026-08-05T23:30:00+02:00",
     departure_time: "2026-08-06T02:30:00+02:00",
   });
-  // Nur ~3h Nachtueberlappung -> unter 4h-Schwelle -> kein Prueffall.
-  assert.equal(r.needs_review, false);
-  assert.equal(r.reason, REASON.CHARGEABLE);
+  // Reicht in den naechsten Tag -> Prueffall (Nutzer 2026-08-05).
+  assert.equal(r.needs_review, true);
+  assert.equal(r.spans_next_day, true);
+  assert.equal(r.reason, REASON.SPANS_NEXT_DAY);
 });
