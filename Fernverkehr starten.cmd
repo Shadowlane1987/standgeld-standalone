@@ -29,7 +29,7 @@ if not errorlevel 1 (
   )
 )
 
-REM --- 2) Programmteile installieren (nur beim allerersten Start) ---
+REM --- 2) Programmteile installieren / aktualisieren ---
 if not exist "node_modules" (
   echo [1/3] Installiere Programmteile - einmalig, kann ein paar Minuten dauern ...
   call npm install
@@ -41,6 +41,9 @@ if not exist "node_modules" (
   )
   echo [2/3] Installiere den Browser fuer die Automatik ...
   call npx playwright install chromium
+) else (
+  echo [1/3] Aktualisiere Programmteile (falls es Neuerungen gibt) ...
+  call npm install
 )
 
 REM --- 3) Server im minimierten Fenster starten ---

@@ -14,3 +14,4 @@ data/
 # Playwright-Browserprofil (enthaelt Login-Session/Cookies!)
 .pw-profile/
 .pw-profile-surcharge/
+.pw-profile-surcharge-*/
