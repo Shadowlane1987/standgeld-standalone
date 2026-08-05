@@ -36,6 +36,7 @@ const el = {
   retryFailedTransporeonBtn: document.getElementById(
     "retryFailedTransporeonBtn",
   ),
+  resetTransporeonBtn: document.getElementById("resetTransporeonBtn"),
   tabAll: document.getElementById("tabAll"),
   tabSettled: document.getElementById("tabSettled"),
   allView: document.getElementById("allView"),
@@ -70,6 +71,15 @@ const SINGLE_BOOKKEEPING_STORAGE_KEY = "standgeld.single.bookkeeping.v1";
 const IS_LOCAL_HOST =
   location.hostname === "localhost" || location.hostname === "127.0.0.1";
 const AUTOMATION_BASE = IS_LOCAL_HOST ? "" : "http://localhost:3100";
+
+// Motor-Login pro Bereich getrennt (fernverkehr/nahverkehr), damit sich zwei
+// verschiedene Transporeon-Logins nie vermischen.
+const MOTOR_PROFILE = (() => {
+  const raw = String(window.STANDGELD_SCOPE || "fernverkehr")
+    .trim()
+    .toLowerCase();
+  return raw === "nahverkehr" ? "nahverkehr" : "fernverkehr";
+})();
 
 function automationUnreachableHint() {
   return (
@@ -205,7 +215,7 @@ async function openTransporeonSession() {
     const res = await fetch(`${AUTOMATION_BASE}/api/transporeon/session/open`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ profile: MOTOR_PROFILE }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -228,6 +238,42 @@ async function openTransporeonSession() {
     setStatus(msg, "error");
   } finally {
     if (el.openTransporeonBtn) el.openTransporeonBtn.disabled = false;
+  }
+}
+
+async function resetTransporeonSession() {
+  if (
+    !window.confirm(
+      "Motor abmelden? Das gespeicherte Transporeon-Login dieses Bereichs wird gelöscht – beim nächsten Öffnen musst du dich neu einloggen.",
+    )
+  ) {
+    return;
+  }
+  if (el.resetTransporeonBtn) el.resetTransporeonBtn.disabled = true;
+  setStatus("Melde Motor ab …");
+  try {
+    const res = await fetch(
+      `${AUTOMATION_BASE}/api/transporeon/session/reset`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: MOTOR_PROFILE }),
+      },
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    setStatus(
+      "Motor abgemeldet. Beim nächsten Öffnen bitte neu bei Transporeon einloggen.",
+      "success",
+    );
+  } catch (error) {
+    const msg =
+      error instanceof TypeError && !IS_LOCAL_HOST
+        ? automationUnreachableHint()
+        : error.message || "Motor konnte nicht abgemeldet werden.";
+    setStatus(msg, "error");
+  } finally {
+    if (el.resetTransporeonBtn) el.resetTransporeonBtn.disabled = false;
   }
 }
 
@@ -266,7 +312,12 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dryRun, keepBrowserOpen: true, items: rows }),
+        body: JSON.stringify({
+          profile: MOTOR_PROFILE,
+          dryRun,
+          keepBrowserOpen: true,
+          items: rows,
+        }),
       },
     );
     const data = await res.json();
@@ -1912,6 +1963,9 @@ if (el.retryFailedTransporeonBtn) {
   el.retryFailedTransporeonBtn.addEventListener("click", () =>
     applyTransporeonSurcharges(true),
   );
+}
+if (el.resetTransporeonBtn) {
+  el.resetTransporeonBtn.addEventListener("click", resetTransporeonSession);
 }
 
 if (el.tabAll) {

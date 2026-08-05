@@ -1,6 +1,7 @@
 "use strict";
 
 const path = require("node:path");
+const fs = require("node:fs");
 const { chromium } = require("playwright");
 
 const { normalizeTransportNumber } = require("../normalize/exportBilling");
@@ -19,9 +20,24 @@ const NUMBER_CELL_SELECTORS = [
 
 let activeContext = null;
 let activeContextLaunch = null;
+let activeProfileKey = null;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Motor-Login pro Bereich getrennt: "fernverkehr" (Kollege) nutzt das bestehende
+// Profil (bestehender Login bleibt gueltig), "nahverkehr" ein eigenes. So koennen
+// sich zwei verschiedene Transporeon-Logins nie vermischen.
+function resolveProfile(value) {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  return raw === "nahverkehr" ? "nahverkehr" : "fernverkehr";
+}
+
+function profileDirFor(profile) {
+  return profile === "nahverkehr" ? `${PROFILE_DIR}-nahverkehr` : PROFILE_DIR;
 }
 
 async function isContextUsable(context) {
@@ -51,16 +67,28 @@ async function isContextUsable(context) {
 }
 
 async function closeActiveContext() {
-  if (!activeContext) return;
+  if (!activeContext) {
+    activeProfileKey = null;
+    return;
+  }
   try {
     await activeContext.close();
   } catch {
     // ignore close errors
   }
   activeContext = null;
+  activeProfileKey = null;
 }
 
 async function getOrCreateContext(options = {}) {
+  const profile = resolveProfile(options.profile);
+
+  // Wechsel des Motor-Logins: laufenden Kontext eines ANDEREN Profils schliessen,
+  // damit sich die Transporeon-Sessions nie vermischen.
+  if (activeProfileKey && activeProfileKey !== profile) {
+    await closeActiveContext();
+  }
+
   if (await isContextUsable(activeContext)) return activeContext;
 
   // Toter/geschlossener Kontext -> verwerfen, damit ein frischer gestartet wird.
@@ -68,8 +96,9 @@ async function getOrCreateContext(options = {}) {
 
   if (activeContextLaunch) return activeContextLaunch;
 
+  const profileDir = options.profileDir || profileDirFor(profile);
   activeContextLaunch = chromium
-    .launchPersistentContext(options.profileDir || PROFILE_DIR, {
+    .launchPersistentContext(profileDir, {
       headless: Boolean(options.headless),
       viewport: { width: 1680, height: 980 },
       locale: "de-DE",
@@ -83,6 +112,7 @@ async function getOrCreateContext(options = {}) {
         // ignore
       }
       activeContext = context;
+      activeProfileKey = profile;
       return context;
     })
     .finally(() => {
@@ -90,6 +120,27 @@ async function getOrCreateContext(options = {}) {
     });
 
   return activeContextLaunch;
+}
+
+// Meldet den Motor eines Bereichs ab: schliesst das Fenster (falls es zu diesem
+// Bereich gehoert) und loescht das gespeicherte Login-Profil. Danach ist ein
+// frischer Login noetig. Behebt vermischte/falsche Logins.
+async function resetTransporeonSession(options = {}) {
+  const profile = resolveProfile(options.profile);
+  if (activeProfileKey === profile) {
+    await closeActiveContext();
+  }
+  const dir = profileDirFor(profile);
+  try {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
+  return {
+    profile,
+    message:
+      "Motor abgemeldet. Beim n\u00e4chsten \u00d6ffnen ist ein frischer Login n\u00f6tig.",
+  };
 }
 
 function normalizeTransportLoose(value) {
@@ -937,6 +988,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
     : 250;
 
   const context = await getOrCreateContext({
+    profile: options.profile,
     profileDir: options.profileDir,
     headless,
   });
@@ -1086,6 +1138,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
     const message = String(error?.message || "");
     if (message.includes("Target page, context or browser has been closed")) {
       activeContext = null;
+      activeProfileKey = null;
     }
     throw error;
   } finally {
@@ -1101,6 +1154,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
 // eingeloggte Fenster - deshalb sind die Touren sichtbar und die Suche findet sie.
 async function openTransporeonSession(options = {}) {
   const context = await getOrCreateContext({
+    profile: options.profile,
     profileDir: options.profileDir,
     headless: false,
   });
@@ -1664,6 +1718,7 @@ async function debugSurchargeDialogFields(transportNumber) {
 module.exports = {
   applyTransporeonSurcharges,
   openTransporeonSession,
+  resetTransporeonSession,
   inspectSurchargeControls,
   debugOpenSurchargeDialog,
   debugDetailTabs,

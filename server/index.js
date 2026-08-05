@@ -32,6 +32,7 @@ const { fetchLiveVisibilityEvents } = require("./services/transporeonLive");
 const {
   applyTransporeonSurcharges,
   openTransporeonSession,
+  resetTransporeonSession,
   inspectSurchargeControls,
   debugOpenSurchargeDialog,
   debugDetailTabs,
@@ -50,7 +51,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 30;
+const BILLING_CACHE_VERSION = 31;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -2930,12 +2931,27 @@ app.post("/api/billing/settled-export", (req, res) => {
 
 app.post("/api/transporeon/session/open", async (req, res) => {
   try {
-    const result = await openTransporeonSession({});
+    const profile = String(req.body?.profile || req.body?.scope || "").trim();
+    const result = await openTransporeonSession({ profile });
     return res.json({ ok: true, ...result });
   } catch (error) {
     return res.status(500).json({
       error:
         error.message || "Automations-Fenster konnte nicht geöffnet werden.",
+    });
+  }
+});
+
+// Meldet den Motor eines Bereichs ab (loescht das gespeicherte Login-Profil),
+// damit ein frischer/anderer Transporeon-Login sauber moeglich ist.
+app.post("/api/transporeon/session/reset", async (req, res) => {
+  try {
+    const profile = String(req.body?.profile || req.body?.scope || "").trim();
+    const result = await resetTransporeonSession({ profile });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || "Motor konnte nicht abgemeldet werden.",
     });
   }
 });
@@ -3091,6 +3107,7 @@ app.post("/api/transporeon/surcharges/apply", async (req, res) => {
         : true;
 
     const result = await applyTransporeonSurcharges(prepared, {
+      profile: String(req.body?.profile || req.body?.scope || "").trim(),
       dryRun:
         req.body?.dryRun === true ||
         String(req.body?.dryRun || "") === "1" ||
