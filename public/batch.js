@@ -1175,6 +1175,8 @@ async function resetTransporeonSession() {
     if (el.resetTransporeonBtn) el.resetTransporeonBtn.disabled = false;
   }
 }
+
+async function applyTransporeonSurcharges(onlyFailed = false) {
   const rows = buildTransporeonSurchargeRows(onlyFailed);
   if (!rows.length) {
     setStatus(
