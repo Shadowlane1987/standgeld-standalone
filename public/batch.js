@@ -1665,7 +1665,7 @@ function ruleParams() {
   const lateArrivalGraceMinutes = Number(
     el.lateArrivalGraceMinutes?.value || 45,
   );
-  return new URLSearchParams({
+  const params = new URLSearchParams({
     scope: APP_SCOPE,
     freeMinutes: el.freeMinutes.value,
     blockMinutes: el.blockMinutes.value,
@@ -1676,6 +1676,13 @@ function ruleParams() {
       Number.isFinite(lateArrivalGraceMinutes) ? lateArrivalGraceMinutes : 45,
     ),
   });
+  // Excel-Abgleich nimmt die Zeitfenster ausschliesslich aus der Transporeon-
+  // Excel. Ein alt gespeichertes Zeitfenster darf hier NIE einfliessen. Nur die
+  // Sixfold-only-Seite nutzt weiter die separate Zeitfenster-Excel.
+  if (!IS_SIXFOLD_ONLY_PAGE) {
+    params.set("ignoreStoredWindows", "1");
+  }
+  return params;
 }
 
 function mergeUploadResults(results) {

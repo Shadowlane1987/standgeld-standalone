@@ -191,10 +191,13 @@ function resolveExportFilePath(req, fallbackPath) {
 
 function billingCacheKey(req) {
   const scope = scopeFromReq(req);
+  const ignoreStoredWindows =
+    req.query.ignoreStoredWindows === "1" ||
+    req.query.ignoreStoredWindows === "true";
   let unloadWindowsMtime = "";
   try {
     const wf = unloadWindowsFileForScope(scope);
-    if (fs.existsSync(wf)) {
+    if (!ignoreStoredWindows && fs.existsSync(wf)) {
       unloadWindowsMtime = String(fs.statSync(wf).mtimeMs);
     }
   } catch (_error) {
@@ -215,6 +218,7 @@ function billingCacheKey(req) {
     sixfoldDateTo: String(req.query.sixfoldDateTo || ""),
     gpsScope: String(req.query.gpsScope || ""),
     hasSixfoldHeaders: hasSixfoldHeaders(req) ? "1" : "0",
+    ignoreStoredWindows: ignoreStoredWindows ? "1" : "0",
     unloadWindowsMtime,
   };
   return Buffer.from(JSON.stringify(keyData)).toString("base64url");
