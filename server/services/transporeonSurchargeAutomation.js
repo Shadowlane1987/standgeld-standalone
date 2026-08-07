@@ -443,22 +443,53 @@ async function clickTextIfVisible(contexts, matcher) {
 }
 
 async function clickPriceTab(contexts) {
-  const candidates = [];
+  // Preis-Reiter ist ein Icon-Tab ohne Text: ueber die STABILE Klasse ansteuern
+  // (sprachunabhaengig). qtip/title koennen je Sprache "Preis" ODER "Price" sein.
+  // Erst ins Bild scrollen, dann den inneren <a>-Link (GWT-Klickziel) UND die
+  // Kachel selbst klicken - manche Setups reagieren nur auf eines von beiden.
+  const selectors = [
+    "li.transportPriceItemsTab",
+    '[class*="transportPriceItemsTab"]',
+    'li[qtip="Preis"]',
+    'li[qtip="Price"]',
+    '[qtip="Preis" i]',
+    '[qtip="Price" i]',
+    '[title="Preis" i]',
+    '[title="Price" i]',
+  ];
   for (const ctx of contexts) {
-    // Preis-Reiter ist ein Icon-Tab ohne Text: stabile Klasse + qtip-Tooltip.
-    candidates.push(ctx.locator("li.transportPriceItemsTab"));
-    candidates.push(ctx.locator('[class*="transportPriceItemsTab"]'));
-    candidates.push(ctx.locator('li[qtip="Preis"]'));
-    candidates.push(ctx.locator('[qtip="Preis" i]'));
-    candidates.push(ctx.locator('[title="Preis" i]'));
-    candidates.push(ctx.getByText(/^Preis$/i));
+    for (const selector of selectors) {
+      try {
+        const tab = ctx.locator(selector).first();
+        if ((await tab.count()) < 1) continue;
+        if (!(await tab.isVisible().catch(() => false))) continue;
+        await tab.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+        const anchor = tab.locator("a").first();
+        if (
+          (await anchor.count()) >= 1 &&
+          (await anchor.isVisible().catch(() => false))
+        ) {
+          await anchor.click({ timeout: 3000, force: true }).catch(() => {});
+        }
+        await tab.click({ timeout: 3000, force: true }).catch(() => {});
+        return true;
+      } catch {
+        // naechster Selektor
+      }
+    }
   }
-  return clickFirstVisibleLocator(candidates);
+  // Fallback: sichtbarer Reiter-Text "Preis"/"Price".
+  return clickFirstVisibleLocator([
+    ...contexts.map((c) => c.getByText(/^Preis$/i)),
+    ...contexts.map((c) => c.getByText(/^Price$/i)),
+  ]);
 }
 
 async function waitForPriceTabActive(contexts, { timeoutMs = 12000 } = {}) {
   const deadline = Date.now() + timeoutMs;
+  let attempts = 0;
   while (Date.now() < deadline) {
+    attempts += 1;
     // Reiter "Preis" aktivieren (Icon-Tab li.transportPriceItemsTab).
     await clickPriceTab(contexts).catch(() => {});
     for (const ctx of contexts) {
@@ -466,13 +497,21 @@ async function waitForPriceTabActive(contexts, { timeoutMs = 12000 } = {}) {
         const active = ctx.locator(
           "li.transportPriceItemsTab.tabStripActive, li.transportPriceItemsTab[class*='Active']",
         );
-        if ((await active.count()) >= 1) return true;
+        if ((await active.count()) >= 1) {
+          console.log(
+            `[Standgeld] Preis-Reiter aktiv nach ${attempts} Versuch(en).`,
+          );
+          return true;
+        }
       } catch {
         // continue
       }
     }
     await sleep(400);
   }
+  console.warn(
+    `[Standgeld] Preis-Reiter wurde nach ${attempts} Versuch(en) / ${timeoutMs}ms NICHT aktiv.`,
+  );
   return false;
 }
 
@@ -922,6 +961,9 @@ async function applySurchargeForItem(
   if (!clicked) {
     throw new Error("Transportzeile konnte nicht angeklickt werden.");
   }
+  console.log(
+    `[Standgeld] ${transportNumber}: Tour geoeffnet, aktiviere Preis-Reiter ...`,
+  );
   await sleep(400);
 
   // Duplikat-Schutz (GELD-KRITISCH): Preis-Reiter aktivieren und pruefen, ob
@@ -929,7 +971,12 @@ async function applySurchargeForItem(
   // weiteren Zuschlag anlegen, ueberspringen und die Tour kennzeichnen. Falls die
   // Preisliste nicht sicher gelesen werden kann, wird ABGEBROCHEN (kein Zuschlag),
   // statt einen moeglichen Doppel-Eintrag zu riskieren.
-  await waitForPriceTabActive(contexts).catch(() => {});
+  const priceActive = await waitForPriceTabActive(contexts).catch(() => false);
+  if (!priceActive) {
+    console.warn(
+      `[Standgeld] ${transportNumber}: Preis-Reiter nicht aktiv geworden - pruefe Sicherheits-Gate ...`,
+    );
+  }
   await sleep(300);
   const existing = await detectExistingStandgeld(contexts);
   if (!existing.loaded) {
@@ -1053,6 +1100,11 @@ async function applyTransporeonSurcharges(items, options = {}) {
     await scrollListToLoadAllRows(frame);
     await sleep(500);
     const processed = [];
+    console.log(
+      `[Standgeld] Transportliste erkannt. ${list.length} Tour(en)${
+        submitDecision ? "" : " (Zwischenmodus: nur eintragen)"
+      }.`,
+    );
 
     for (const item of list) {
       const transportNumber = String(item?.transport_number || "").trim();
@@ -1060,6 +1112,9 @@ async function applyTransporeonSurcharges(items, options = {}) {
       const station =
         stopType === "UNLOADING" ? "Entladestelle" : "Beladestelle";
 
+      console.log(
+        `[Standgeld] Bearbeite Tour ${transportNumber} (${station}) ...`,
+      );
       const search = await searchAndLocateRow(frame, listPage, transportNumber);
 
       if (dryRun) {
