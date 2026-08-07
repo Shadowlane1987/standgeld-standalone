@@ -26,6 +26,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Harte Obergrenze pro Tour: bleibt eine Tour (z. B. eine "Fehlgeschlagen"-Tour)
+// trotz aller internen Timeouts haengen, bricht der Watchdog sie ab, damit die
+// restlichen Touren weiterlaufen ("kam er nicht weiter" wird verhindert).
+function withHardTimeout(promise, ms, timeoutMessage) {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
 // Motor-Login pro Bereich getrennt: "fernverkehr" (Kollege) nutzt das bestehende
 // Profil (bestehender Login bleibt gueltig), "nahverkehr" ein eigenes. So koennen
 // sich zwei verschiedene Transporeon-Logins nie vermischen.
@@ -1050,6 +1061,11 @@ async function applyTransporeonSurcharges(items, options = {}) {
   const perItemDelayMs = Number.isFinite(options.perItemDelayMs)
     ? Number(options.perItemDelayMs)
     : 250;
+  // Watchdog pro Tour: gesunde Touren brauchen ~15-25s. Nach diesem Limit wird
+  // eine haengende Tour abgebrochen und uebersprungen.
+  const perItemTimeoutMs = Number.isFinite(options.perItemTimeoutMs)
+    ? Number(options.perItemTimeoutMs)
+    : 60000;
 
   const context = await getOrCreateContext({
     profile: options.profile,
@@ -1146,12 +1162,12 @@ async function applyTransporeonSurcharges(items, options = {}) {
       }
 
       try {
-        const result = await applySurchargeForItem(
-          frame,
-          listPage,
-          item,
-          search.row,
-          { submitDecision },
+        const result = await withHardTimeout(
+          applySurchargeForItem(frame, listPage, item, search.row, {
+            submitDecision,
+          }),
+          perItemTimeoutMs,
+          "Zeitlimit für diese Tour überschritten – übersprungen, damit die restlichen Touren weiterlaufen.",
         );
         processed.push({
           ...result,
@@ -1167,6 +1183,15 @@ async function applyTransporeonSurcharges(items, options = {}) {
                   : "Zuschlag gespeichert und Entscheidung angefragt.",
         });
       } catch (error) {
+        const message = String(
+          error?.message || "Automatisierung fehlgeschlagen.",
+        );
+        console.warn(
+          `[Standgeld] Tour ${transportNumber} übersprungen: ${message}`,
+        );
+        // Haengengebliebenen Zuschlag-Dialog schliessen, damit die NAECHSTE Tour
+        // sauber startet und nicht ebenfalls blockiert.
+        await closeOpenSurchargeDialog([frame, listPage]).catch(() => {});
         processed.push({
           transport_number: transportNumber,
           stop_type: stopType,
@@ -1175,7 +1200,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
           description: String(item?.description || ""),
           stop_key: String(item?.stop_key || "").trim() || null,
           status: "failed",
-          message: String(error?.message || "Automatisierung fehlgeschlagen."),
+          message,
         });
       }
 
