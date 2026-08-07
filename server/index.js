@@ -51,7 +51,7 @@ const importStore = new ImportStore();
 // alte persistierte Ergebnisse ungueltig macht (7 = Excel-Entladezeit ist bei
 // Entladestellen massgeblich, gewinnt auch gegen echte Sixfold-Fenster; Cache
 // gebustet, damit keine alten Ergebnisse mehr ausgeliefert werden).
-const BILLING_CACHE_VERSION = 31;
+const BILLING_CACHE_VERSION = 32;
 const APP_DATA_DIR = process.env.APP_DATA_DIR
   ? path.resolve(process.env.APP_DATA_DIR)
   : path.join(process.cwd(), "data");
@@ -1565,11 +1565,11 @@ function calcStop(stop, rules) {
   const arrivedLate = Boolean(slotBegin && arrival > slotBegin);
   const graceMinutes = Math.max(
     0,
-    Number(rules.lateArrivalGraceMinutes ?? 45) || 45,
+    Number(rules.lateArrivalGraceMinutes ?? 30) || 30,
   );
-  // 3h-Regel greift erst, wenn die Ankunft mehr als graceMinutes (Standard 45)
-  // NACH dem Zeitfenster liegt (Nutzer 2026-08-04). 30 min zu spaet -> noch
-  // normal, erst ab 46 min zu spaet gilt die 3h-Regel.
+  // 3h-Regel greift erst, wenn die Ankunft mehr als graceMinutes (Standard 30)
+  // NACH dem Zeitfenster liegt (Nutzer 2026-08-07). 30 min zu spaet -> noch
+  // normal, erst ab 31 min zu spaet gilt die 3h-Regel.
   const lateGraceApplies = Boolean(
     rules.lateArrivalGraceEnabled &&
     slotBegin &&
@@ -3160,7 +3160,7 @@ app.post("/api/sixfold/standgeld", async (req, res) => {
       lateArrivalGraceEnabled,
       lateArrivalGraceMinutes: Math.max(
         0,
-        Number(rulesRaw.lateArrivalGraceMinutes ?? 45) || 45,
+        Number(rulesRaw.lateArrivalGraceMinutes ?? 30) || 30,
       ),
     };
 

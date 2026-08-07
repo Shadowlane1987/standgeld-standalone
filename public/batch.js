@@ -428,7 +428,7 @@ function writeRuleStorage(value) {
 function persistRuleSettings() {
   writeRuleStorage({
     lateArrivalGraceEnabled: lateArrivalGraceEnabledState,
-    lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes?.value || 45),
+    lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes?.value || 30),
   });
 }
 
@@ -985,7 +985,7 @@ function filteredStops() {
     .sort((a, b) => (a.plate_fake ? 1 : 0) - (b.plate_fake ? 1 : 0));
 
   // Statussortierung: 1. puenktlich (+abrechenbar zuerst), 2. zu spaet aber
-  // innerhalb 45 min, 3. 3h-Faelle. Fake-Kennzeichen bleiben ganz am Ende.
+  // innerhalb 30 min, 3. 3h-Faelle. Fake-Kennzeichen bleiben ganz am Ende.
   const sortValue = el.sortMode ? el.sortMode.value : "status";
   if (sortValue !== "status") return base;
   return base.sort((a, b) => {
@@ -1001,7 +1001,7 @@ function statusRank(stop) {
   let group = 0; // puenktlich
   if (stop?.late_arrival_grace_applied)
     group = 2; // 3h-Fall
-  else if (stop?.arrived_late) group = 1; // zu spaet, innerhalb 45 min
+  else if (stop?.arrived_late) group = 1; // zu spaet, innerhalb 30 min
   const chargeable = Number(stop?.fee_eur || 0) > 0 ? 0 : 1;
   return group * 10 + chargeable;
 }
@@ -1663,7 +1663,7 @@ async function exportSettled() {
 function ruleParams() {
   const lateArrivalGraceEnabled = lateArrivalGraceEnabledState;
   const lateArrivalGraceMinutes = Number(
-    el.lateArrivalGraceMinutes?.value || 45,
+    el.lateArrivalGraceMinutes?.value || 30,
   );
   const params = new URLSearchParams({
     scope: APP_SCOPE,
@@ -1673,7 +1673,7 @@ function ruleParams() {
     triggerMinutes: el.triggerMinutes.value,
     lateArrivalGraceEnabled: lateArrivalGraceEnabled ? "1" : "0",
     lateArrivalGraceMinutes: String(
-      Number.isFinite(lateArrivalGraceMinutes) ? lateArrivalGraceMinutes : 45,
+      Number.isFinite(lateArrivalGraceMinutes) ? lateArrivalGraceMinutes : 30,
     ),
   });
   // Excel-Abgleich nimmt die Zeitfenster ausschliesslich aus der Transporeon-

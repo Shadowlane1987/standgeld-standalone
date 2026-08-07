@@ -502,7 +502,7 @@ function syncLateArrivalGraceToggle() {
 function persistSingleRuleSettings() {
   writeSingleRuleStorage({
     lateArrivalGraceEnabled: lateArrivalGraceEnabledState,
-    lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes?.value || 45),
+    lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes?.value || 30),
   });
 }
 
@@ -552,13 +552,13 @@ function sortStopsByDate(stops, sortMode) {
 }
 
 // Statussortierung: 1. puenktlich (+abrechenbar zuerst), 2. zu spaet aber
-// innerhalb 45 min, 3. 3h-Faelle. Innerhalb jeder Gruppe abrechenbar zuerst,
+// innerhalb 30 min, 3. 3h-Faelle. Innerhalb jeder Gruppe abrechenbar zuerst,
 // dann nach Betrag und Ankunft.
 function statusRank(stop) {
   let group = 0; // puenktlich
   if (stop?.late_arrival_grace_applied)
     group = 2; // 3h-Fall
-  else if (stop?.arrived_late) group = 1; // zu spaet, innerhalb 45 min
+  else if (stop?.arrived_late) group = 1; // zu spaet, innerhalb 30 min
   const chargeable = Number(stop?.amount_eur || 0) > 0 ? 0 : 1;
   return group * 10 + chargeable;
 }
@@ -1831,7 +1831,7 @@ async function run() {
       thresholdEur: Number(el.thresholdEur.value || 30),
       capEur: Number(el.capEur.value || 650),
       lateArrivalGraceEnabled: lateArrivalGraceEnabledState,
-      lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes.value || 45),
+      lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes.value || 30),
     },
     timeWindows: importedTimeWindows,
   };

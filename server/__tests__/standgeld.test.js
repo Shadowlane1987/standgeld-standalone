@@ -125,6 +125,31 @@ test("Verspaetungsregel aktiv: genau 45 min zu spaet -> 3h-Regel greift NICHT", 
   assert.equal(r.late_arrival_grace_applied, false);
 });
 
+test("Verspaetungsregel Standard (30 min): 31 min zu spaet -> 3h-Regel greift", () => {
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T06:31:00.000Z",
+      departure_time: "2026-07-16T10:01:00.000Z",
+    }),
+    { lateArrivalGraceEnabled: true },
+  );
+  assert.equal(r.late_arrival_grace_minutes, 30);
+  assert.equal(r.late_arrival_grace_applied, true);
+  assert.equal(r.count_start, "2026-07-16T06:31:00.000Z");
+});
+
+test("Verspaetungsregel Standard (30 min): genau 30 min zu spaet -> greift NICHT", () => {
+  const r = computeStandgeld(
+    stop({
+      arrival_time: "2026-07-16T06:30:00.000Z",
+      departure_time: "2026-07-16T10:00:00.000Z",
+    }),
+    { lateArrivalGraceEnabled: true },
+  );
+  assert.equal(r.late_arrival_grace_minutes, 30);
+  assert.equal(r.late_arrival_grace_applied, false);
+});
+
 test("Verspaetungsregel deaktiviert: alte Zaehlregel bleibt", () => {
   const r = computeStandgeld(
     stop({

@@ -34,7 +34,7 @@ const DEFAULT_CONFIG = Object.freeze({
   maxFeeEur: 650, // Obergrenze: mehr als 650 EUR wird nie abgerechnet
   maxPlausibleMinutes: 1440, // > 24 h Standzeit = unplausibel -> Prueffall
   lateArrivalGraceEnabled: false,
-  lateArrivalGraceMinutes: 45,
+  lateArrivalGraceMinutes: 30,
   // Regel 8 (Nutzer 2026-08-05): Eine Standzeit, die in den naechsten
   // Kalendertag hineinreicht, ist meist keine reale Wartezeit (LKW macht Pause
   // ueber Nacht). Solche Faelle sind Prueffaelle und gehen NICHT in die
@@ -149,9 +149,9 @@ function computeStandgeld(input = {}, config = {}) {
   // Wartezeit vor dem Fenster wird nie gezaehlt.
   // Mit aktivierter Verspaetungsregel gilt fuer alle Spaetankuenfte 3h frei.
   // Die 3h-Regel greift aber ERST, wenn die Ankunft mehr als lateGraceMinutes
-  // (Standard 45 min) NACH dem Zeitfenster liegt (Nutzer 2026-08-04). Kommt man
-  // z.B. bei Fenster 07:00 um 07:30 (30 min zu spaet), greift sie noch nicht;
-  // erst ab 07:46 (46 min zu spaet).
+  // (Standard 30 min) NACH dem Zeitfenster liegt (Nutzer 2026-08-07). Kommt man
+  // z.B. bei Fenster 07:00 um 07:20 (20 min zu spaet), greift sie noch nicht;
+  // erst ab 07:31 (31 min zu spaet).
   const lateGraceApplies =
     lateGraceEnabled &&
     hasWindow &&
