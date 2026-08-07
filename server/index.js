@@ -3112,6 +3112,11 @@ app.post("/api/transporeon/surcharges/apply", async (req, res) => {
         req.body?.dryRun === true ||
         String(req.body?.dryRun || "") === "1" ||
         String(req.body?.dryRun || "").toLowerCase() === "true",
+      // Standard: absenden (true). Nur wenn ausdruecklich false -> Zwischenmodus
+      // (eintragen + speichern, aber NICHT beantragen/absenden).
+      submitDecision:
+        req.body?.submitDecision !== false &&
+        String(req.body?.submitDecision || "").toLowerCase() !== "false",
       keepBrowserOpen,
       headless:
         req.body?.headless === true ||

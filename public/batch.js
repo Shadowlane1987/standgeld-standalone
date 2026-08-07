@@ -81,6 +81,7 @@ const el = {
   sixfoldBatchBtn: document.getElementById("sixfoldBatchBtn"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
   transporeonDryRun: document.getElementById("transporeonDryRun"),
+  transporeonStageOnly: document.getElementById("transporeonStageOnly"),
   openTransporeonBtn: document.getElementById("openTransporeonBtn"),
   applyTransporeonBtn: document.getElementById("applyTransporeonBtn"),
   retryFailedTransporeonBtn: document.getElementById(
@@ -1189,11 +1190,14 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
   }
 
   const dryRun = Boolean(el.transporeonDryRun?.checked);
+  const stageOnly = !dryRun && Boolean(el.transporeonStageOnly?.checked);
   const confirmText = dryRun
     ? `Trockenlauf für ${rows.length} Positionen starten?`
-    : onlyFailed
-      ? `${rows.length} fehlgeschlagene Zuschläge erneut in Transporeon beantragen?`
-      : `Automatisch ${rows.length} Zuschläge in Transporeon anlegen und Entscheidung einholen?`;
+    : stageOnly
+      ? `${rows.length} Zuschläge in Transporeon EINTRAGEN und speichern, aber NICHT absenden (zum Prüfen)?`
+      : onlyFailed
+        ? `${rows.length} fehlgeschlagene Zuschläge erneut in Transporeon beantragen?`
+        : `Automatisch ${rows.length} Zuschläge in Transporeon anlegen und Entscheidung einholen?`;
   if (!window.confirm(confirmText)) return;
 
   if (el.applyTransporeonBtn) el.applyTransporeonBtn.disabled = true;
@@ -1202,7 +1206,9 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
   setStatus(
     dryRun
       ? `Prüfe ${rows.length} markierte Positionen per Transporeon-Suche …`
-      : `Beantrage ${rows.length} markierte Zuschläge in Transporeon …`,
+      : stageOnly
+        ? `Trage ${rows.length} markierte Zuschläge ein (ohne Absenden) …`
+        : `Beantrage ${rows.length} markierte Zuschläge in Transporeon …`,
   );
 
   try {
@@ -1214,6 +1220,7 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
         body: JSON.stringify({
           profile: MOTOR_PROFILE,
           dryRun,
+          submitDecision: !stageOnly,
           keepBrowserOpen: true,
           items: rows,
         }),
@@ -1286,10 +1293,23 @@ async function applyTransporeonSurcharges(onlyFailed = false) {
     const success = Number(data.summary?.success_count || 0);
     const alreadyExists = Number(data.summary?.already_exists_count || 0);
     const savedNoDecision = Number(data.summary?.saved_no_decision_count || 0);
+    const staged = Number(data.summary?.staged_count || 0);
     const failure = Number(data.summary?.failure_count || 0);
     if (dryRun) {
       setStatus(
         `Trockenlauf fertig: ${success} bereit, ${failure + alreadyExists} nicht gefunden/fehlerhaft.`,
+        failure + alreadyExists > 0 ? "info" : "success",
+      );
+    } else if (stageOnly) {
+      const stagedText = staged
+        ? ` ${staged} eingetragen (noch NICHT abgesendet – bitte in Transporeon prüfen und selbst absenden).`
+        : "";
+      const existsText = alreadyExists
+        ? ` ${alreadyExists} bereits vorhanden (übersprungen).`
+        : "";
+      const failedDetails = buildProblemDetails(data);
+      setStatus(
+        `Eintragen ohne Absenden fertig: ${staged} eingetragen, ${failure} fehlgeschlagen.${existsText}${stagedText}${failedDetails}`,
         failure + alreadyExists > 0 ? "info" : "success",
       );
     } else {

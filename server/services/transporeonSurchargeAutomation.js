@@ -888,7 +888,13 @@ async function detectExistingStandgeld(contexts, { timeoutMs = 12000 } = {}) {
   return { loaded: false, exists: false };
 }
 
-async function applySurchargeForItem(frame, page, item, prelocatedRow) {
+async function applySurchargeForItem(
+  frame,
+  page,
+  item,
+  prelocatedRow,
+  options = {},
+) {
   const transportNumber = String(item?.transport_number || "").trim();
   if (!transportNumber) {
     throw new Error("Transportnummer fehlt.");
@@ -950,6 +956,21 @@ async function applySurchargeForItem(frame, page, item, prelocatedRow) {
   await fillDescription(dialogContext, String(item?.description || ""));
   await fillPriceFields(dialogContext, amount);
   await clickSave(dialogContext);
+
+  // Zwischenmodus (Nutzer 2026-08-07): Zuschlag nur eintragen + speichern, die
+  // Entscheidung aber NICHT beantragen/absenden. Zum manuellen Pruefen.
+  if (options.submitDecision === false) {
+    return {
+      transport_number: transportNumber,
+      matched_transport_number: String(row?.text || ""),
+      stop_type: stopType,
+      station: stationLabel,
+      amount_eur: amount,
+      decision_requested: false,
+      status: "staged",
+    };
+  }
+
   const decisionRequested = await requestDecision(contexts);
 
   // GELD-KRITISCH (Nutzer 2026-08-05): "applied" NUR, wenn die Entscheidung
@@ -981,6 +1002,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
   }
 
   const dryRun = Boolean(options.dryRun);
+  const submitDecision = options.submitDecision !== false;
   const headless = Boolean(options.headless);
   const keepBrowserOpen = options.keepBrowserOpen !== false;
   const perItemDelayMs = Number.isFinite(options.perItemDelayMs)
@@ -1079,6 +1101,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
           listPage,
           item,
           search.row,
+          { submitDecision },
         );
         processed.push({
           ...result,
@@ -1089,7 +1112,9 @@ async function applyTransporeonSurcharges(items, options = {}) {
               ? "Es existiert bereits eine Standzeit-Kostenzeile. Kein weiterer Zuschlag gebucht."
               : result.status === "saved_no_decision"
                 ? "Zuschlag gespeichert, aber 'Entscheidung einholen' war nicht aktiv – NICHT beantragt. Bitte in Transporeon manuell prüfen."
-                : "Zuschlag gespeichert und Entscheidung angefragt.",
+                : result.status === "staged"
+                  ? "Zuschlag eingetragen und gespeichert – NICHT abgesendet. Bitte in Transporeon prüfen und selbst absenden."
+                  : "Zuschlag gespeichert und Entscheidung angefragt.",
         });
       } catch (error) {
         processed.push({
@@ -1121,7 +1146,12 @@ async function applyTransporeonSurcharges(items, options = {}) {
       (item) => item.status === "saved_no_decision",
     ).length;
 
-    const failureCount = processed.length - successCount - alreadyExistsCount;
+    const stagedCount = processed.filter(
+      (item) => item.status === "staged",
+    ).length;
+
+    const failureCount =
+      processed.length - successCount - alreadyExistsCount - stagedCount;
 
     return {
       dryRun,
@@ -1131,6 +1161,7 @@ async function applyTransporeonSurcharges(items, options = {}) {
         success_count: successCount,
         already_exists_count: alreadyExistsCount,
         saved_no_decision_count: savedNoDecisionCount,
+        staged_count: stagedCount,
         failure_count: failureCount,
       },
     };
