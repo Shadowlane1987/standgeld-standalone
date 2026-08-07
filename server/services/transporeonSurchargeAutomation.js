@@ -443,43 +443,38 @@ async function clickTextIfVisible(contexts, matcher) {
 }
 
 async function clickPriceTab(contexts) {
-  // Preis-Reiter ist ein Icon-Tab ohne Text: ueber die STABILE Klasse ansteuern
-  // (sprachunabhaengig). qtip/title koennen je Sprache "Preis" ODER "Price" sein.
-  // Erst ins Bild scrollen, dann den inneren <a>-Link (GWT-Klickziel) UND die
-  // Kachel selbst klicken - manche Setups reagieren nur auf eines von beiden.
-  const selectors = [
-    "li.transportPriceItemsTab",
-    '[class*="transportPriceItemsTab"]',
-    'li[qtip="Preis"]',
-    'li[qtip="Price"]',
-    '[qtip="Preis" i]',
-    '[qtip="Price" i]',
-    '[title="Preis" i]',
-    '[title="Price" i]',
-  ];
+  // Preis-Reiter ist ein GWT-Icon-Tab (stabile Klasse li.transportPriceItemsTab).
+  // WICHTIG: Der Playwright-Koordinatenklick triggert den GWT-Handler dieses
+  // Tabs NICHT zuverlaessig (bestaetigt per Sonde). Ein NATIVER DOM-Klick
+  // (el.click()) aktiviert ihn dagegen sofort - daher klicken wir alle sichtbaren
+  // Preis-Reiter in Seite + allen Frames per evaluateAll nativ an.
+  let clickedAny = false;
   for (const ctx of contexts) {
-    for (const selector of selectors) {
-      try {
-        const tab = ctx.locator(selector).first();
-        if ((await tab.count()) < 1) continue;
-        if (!(await tab.isVisible().catch(() => false))) continue;
-        await tab.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
-        const anchor = tab.locator("a").first();
-        if (
-          (await anchor.count()) >= 1 &&
-          (await anchor.isVisible().catch(() => false))
-        ) {
-          await anchor.click({ timeout: 3000, force: true }).catch(() => {});
-        }
-        await tab.click({ timeout: 3000, force: true }).catch(() => {});
-        return true;
-      } catch {
-        // naechster Selektor
-      }
+    try {
+      const hit = await ctx
+        .locator("li.transportPriceItemsTab")
+        .evaluateAll((els) => {
+          let count = 0;
+          for (const el of els) {
+            const r = el.getBoundingClientRect();
+            if (r.width > 2 && r.height > 2) {
+              el.click();
+              count += 1;
+            }
+          }
+          return count;
+        })
+        .catch(() => 0);
+      if (hit > 0) clickedAny = true;
+    } catch {
+      // naechster Kontext
     }
   }
-  // Fallback: sichtbarer Reiter-Text "Preis"/"Price".
+  if (clickedAny) return true;
+  // Fallback: sichtbarer Reiter-Text / qtip (DE/EN) per Playwright-Klick.
   return clickFirstVisibleLocator([
+    ...contexts.map((c) => c.locator('li[qtip="Preis"]')),
+    ...contexts.map((c) => c.locator('li[qtip="Price"]')),
     ...contexts.map((c) => c.getByText(/^Preis$/i)),
     ...contexts.map((c) => c.getByText(/^Price$/i)),
   ]);
@@ -1604,7 +1599,75 @@ async function debugPriceTabContent(transportNumber) {
     return { priceTabActive, hasZuschlaege, toolbarButtons, addCandidates };
   });
 
-  return { opened, tabClicked, ...content };
+  // Sonde: In WELCHEM Frame liegt der Preis-Reiter, und welche Klick-Art
+  // aktiviert ihn? Durchsucht Seite + alle Frames.
+  const probeFn = async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const li = document.querySelector("li.transportPriceItemsTab");
+    if (!li) return { found: false };
+    const isActive = () => /tabStripActive|Active/.test(li.className);
+    const out = {
+      found: true,
+      classBefore: String(li.className || ""),
+      steps: [],
+    };
+    li.click();
+    await sleep(300);
+    out.steps.push({ how: "li.click", active: isActive(), cls: li.className });
+    const img = li.querySelector("img");
+    if (img) {
+      img.click();
+      await sleep(300);
+      out.steps.push({
+        how: "img.click",
+        active: isActive(),
+        cls: li.className,
+      });
+    }
+    const target = img || li;
+    const r = target.getBoundingClientRect();
+    const cx = r.x + r.width / 2;
+    const cy = r.y + r.height / 2;
+    for (const type of ["mouseover", "mousedown", "mouseup", "click"]) {
+      target.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: cx,
+          clientY: cy,
+        }),
+      );
+    }
+    await sleep(400);
+    out.steps.push({
+      how: "mouseevents",
+      active: isActive(),
+      cls: li.className,
+    });
+    return out;
+  };
+
+  let probe = { found: false, where: null };
+  const probeTargets = [
+    { name: "page", ctx: page },
+    ...page
+      .frames()
+      .map((f, i) => ({ name: `frame#${i}:${f.url().slice(0, 40)}`, ctx: f })),
+  ];
+  for (const t of probeTargets) {
+    try {
+      const r = await t.ctx.evaluate(probeFn);
+      if (r && r.found) {
+        probe = { where: t.name, ...r };
+        break;
+      }
+    } catch {
+      // Frame evtl. detached
+    }
+  }
+
+  return { opened, tabClicked, ...content, probe };
 }
 
 // TROCKENLAUF-PRUEFUNG (Geld-sicher): Oeffnet einen Transport, aktiviert den
