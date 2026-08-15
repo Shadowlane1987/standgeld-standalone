@@ -85,6 +85,30 @@
         </div>
         <p id="timeWindowMeta" class="status">Keine Zeitfenster importiert.</p>
 
+        <label>Zeitfenster manuell (falls Excel nicht greift)</label>
+        <div class="grid grid-3">
+          <label
+            >Fenster-Start
+            <input id="manualWindowStart" type="time" />
+          </label>
+          <label
+            >Fenster-Ende (optional)
+            <input id="manualWindowEnd" type="time" />
+          </label>
+          <label
+            >Gilt für
+            <select id="manualWindowStopType">
+              <option value="UNLOAD">Entladen</option>
+              <option value="LOAD">Laden</option>
+              <option value="ANY">Beide</option>
+            </select>
+          </label>
+        </div>
+        <p class="status">
+          Ein manuell gesetztes Fenster hat Vorrang und wird direkt für die
+          Berechnung verwendet.
+        </p>
+
         <div class="rule-toggle-corner">
           <button
             id="lateArrivalGraceToggle"

@@ -1439,6 +1439,12 @@ function matchTimeWindow(windowRow, stop) {
     .map((value) => last7Digits(value))
     .filter(Boolean);
 
+  // Manuell eingetipptes Fenster ohne Schluessel: gilt fuer den gewaehlten
+  // Stopp-Typ (Einzelberechnung). Hoher Score, damit es Excel/Sixfold schlaegt.
+  if (windowRow?.manual && !rowKeys.length) {
+    return 120;
+  }
+
   if (!stopKeys.length || !rowKeys.length) return -1;
   if (!rowKeys.some((key) => stopKeys.includes(key))) return -1;
 
@@ -1496,6 +1502,18 @@ function applyTimeWindowOverride(stop, windows) {
 }
 
 function calculateWithSafeOverride(stop, rules, windows) {
+  const rows = Array.isArray(windows) ? windows : [];
+
+  // Manuell eingetipptes Fenster hat immer Vorrang (Lade- UND Entlade-Stellen),
+  // damit der Nutzer ein fehlendes/falsches Excel-Fenster direkt setzen kann.
+  const manualWindows = rows.filter((w) => w && w.manual);
+  if (manualWindows.length) {
+    const manualStop = applyTimeWindowOverride(stop, manualWindows);
+    if (manualStop !== stop) {
+      return calcStop(manualStop, rules);
+    }
+  }
+
   const base = calcStop(stop, rules);
   const stopType = canonicalStopType(stop?.type);
   const isUnloadStop = stopType === "unload";

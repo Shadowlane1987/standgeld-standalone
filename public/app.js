@@ -11,6 +11,9 @@ const el = {
   importTimeWindowBtn: document.getElementById("importTimeWindowBtn"),
   clearTimeWindowBtn: document.getElementById("clearTimeWindowBtn"),
   timeWindowMeta: document.getElementById("timeWindowMeta"),
+  manualWindowStart: document.getElementById("manualWindowStart"),
+  manualWindowEnd: document.getElementById("manualWindowEnd"),
+  manualWindowStopType: document.getElementById("manualWindowStopType"),
   freeMinutes: document.getElementById("freeMinutes"),
   unitMinutes: document.getElementById("unitMinutes"),
   unitPrice: document.getElementById("unitPrice"),
@@ -1809,11 +1812,40 @@ function closeSurchargeModal() {
   el.surchargeModal.hidden = true;
 }
 
+// Baut ein manuell eingetipptes Zeitfenster (Vorrang vor Excel/Sixfold), wenn
+// der Nutzer eine Startzeit gesetzt hat. Ohne Startzeit: nichts zusaetzlich.
+function buildManualTimeWindow(transportNumber, tourId) {
+  const start = String(el.manualWindowStart?.value || "").trim();
+  const end = String(el.manualWindowEnd?.value || "").trim();
+  if (!start && !end) return null;
+
+  const stopType = String(el.manualWindowStopType?.value || "UNLOAD").trim();
+  return {
+    route_key: transportNumber || tourId || null,
+    transport_number: transportNumber || null,
+    tour_id: tourId || null,
+    stop_type: stopType || "UNLOAD",
+    window_start: start || null,
+    window_end: end || null,
+    manual: true,
+  };
+}
+
+function buildRequestTimeWindows(transportNumber, tourId) {
+  const manual = buildManualTimeWindow(transportNumber, tourId);
+  const base = Array.isArray(importedTimeWindows) ? importedTimeWindows : [];
+  return manual ? [...base, manual] : base;
+}
+
 async function run() {
   const resolvedUrl = String(el.url.value || "").trim();
   const resolvedSessionToken = String(el.sessionToken.value || "").trim();
   persistUrl(resolvedUrl);
   persistSessionToken(resolvedSessionToken);
+
+  const transportNumber = String(el.transportNumber.value || "").trim();
+  const tourId = String(el.tourId.value || "").trim();
+  const timeWindows = buildRequestTimeWindows(transportNumber, tourId);
 
   const body = {
     url: resolvedUrl,
@@ -1821,8 +1853,8 @@ async function run() {
     referenceDate: String(el.referenceDate.value || "").trim(),
     fromDate: String(el.rangeFrom.value || "").trim(),
     toDate: String(el.rangeTo.value || "").trim(),
-    transportNumber: String(el.transportNumber.value || "").trim(),
-    tourId: String(el.tourId.value || "").trim(),
+    transportNumber: transportNumber,
+    tourId: tourId,
     sessionToken: resolvedSessionToken,
     rules: {
       freeMinutes: Number(el.freeMinutes.value || 120),
@@ -1833,7 +1865,7 @@ async function run() {
       lateArrivalGraceEnabled: lateArrivalGraceEnabledState,
       lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes.value || 30),
     },
-    timeWindows: importedTimeWindows,
+    timeWindows: timeWindows,
   };
 
   el.runBtn.disabled = true;
