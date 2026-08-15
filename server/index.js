@@ -1477,8 +1477,13 @@ function applyTimeWindowOverride(stop, windows) {
 
   if (!best || bestScore < 0) return stop;
 
+  // Manuelle Aenderung eines bestehenden Fensters: Datum des Fensters behalten,
+  // nur die Uhrzeit anpassen. Sonst Ankunfts-/Abfahrtsdatum als Anker.
   const anchor =
-    toDate(stop.arrival_time) || toDate(stop.departure_time) || new Date();
+    (best.manual && toDate(stop.timeslot_begin)) ||
+    toDate(stop.arrival_time) ||
+    toDate(stop.departure_time) ||
+    new Date();
   const start = resolveWindowDateTime(best.window_start, anchor);
   const end = resolveWindowDateTime(best.window_end, anchor);
   if (!start && !end) return stop;
@@ -1488,6 +1493,7 @@ function applyTimeWindowOverride(stop, windows) {
     timeslot_begin: start ? start.toISOString() : stop.timeslot_begin || null,
     timeslot_end: end ? end.toISOString() : stop.timeslot_end || null,
     window_override_applied: true,
+    manual_window_applied: Boolean(best?.manual),
     excel_window_start_raw: best.window_start || null,
     excel_window_end_raw: best.window_end || null,
     excel_window_display: best.window_start || best.window_end || null,

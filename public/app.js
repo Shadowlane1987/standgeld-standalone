@@ -11,9 +11,6 @@ const el = {
   importTimeWindowBtn: document.getElementById("importTimeWindowBtn"),
   clearTimeWindowBtn: document.getElementById("clearTimeWindowBtn"),
   timeWindowMeta: document.getElementById("timeWindowMeta"),
-  manualWindowStart: document.getElementById("manualWindowStart"),
-  manualWindowEnd: document.getElementById("manualWindowEnd"),
-  manualWindowStopType: document.getElementById("manualWindowStopType"),
   freeMinutes: document.getElementById("freeMinutes"),
   unitMinutes: document.getElementById("unitMinutes"),
   unitPrice: document.getElementById("unitPrice"),
@@ -60,6 +57,8 @@ const el = {
 };
 
 let importedTimeWindows = [];
+// Pro Transport+Stopp manuell in der Liste gesetzte Zeitfenster (Vorrang).
+const manualWindowOverrides = new Map();
 let latestStops = [];
 let activeStop = null;
 let lateArrivalGraceEnabledState = false;
@@ -727,11 +726,13 @@ function renderStops(stops) {
     );
 
     const windowValue = resolveWindowDisplay(stop);
-    const windowTone = stop.window_override_applied
-      ? { cls: "time-chip-excel", hint: "Excel" }
-      : windowValue !== "-"
-        ? { cls: "time-chip-neutral", hint: "Fenster" }
-        : { cls: "time-chip-muted", hint: "-" };
+    const windowTone = stop.manual_window_applied
+      ? { cls: "time-chip-excel", hint: "manuell" }
+      : stop.window_override_applied
+        ? { cls: "time-chip-excel", hint: "Excel" }
+        : windowValue !== "-"
+          ? { cls: "time-chip-neutral", hint: "Fenster" }
+          : { cls: "time-chip-muted", hint: "-" };
     const windowCell = timeCellHtml(
       windowValue,
       windowTone.cls,
@@ -789,7 +790,7 @@ function renderStops(stops) {
       <td>${arrivalCell}</td>
       <td>${departureCell}</td>
       <td>${startCell}</td>
-      <td>${windowCell}</td>
+      <td class="window-cell" title="Klicken, um das Zeitfenster für diesen Transport zu ändern">${windowCell}</td>
       <td>${minutesToHoursChip(stop.counted_standing_minutes)}</td>
       <td>${minutesToHoursChip(stop.billable_minutes)}</td>
       <td>${euro(stop.amount_eur)}</td>
@@ -838,6 +839,14 @@ function renderStops(stops) {
         selectStop(stop);
       }
     });
+    const windowTd = tr.querySelector("td.window-cell");
+    if (windowTd) {
+      windowTd.style.cursor = "pointer";
+      windowTd.addEventListener("click", (event) => {
+        event.stopPropagation();
+        beginWindowEdit(windowTd, stop);
+      });
+    }
     el.rows.appendChild(tr);
   }
   renderSettled();
@@ -1812,29 +1821,140 @@ function closeSurchargeModal() {
   el.surchargeModal.hidden = true;
 }
 
-// Baut ein manuell eingetipptes Zeitfenster (Vorrang vor Excel/Sixfold), wenn
-// der Nutzer eine Startzeit gesetzt hat. Ohne Startzeit: nichts zusaetzlich.
-function buildManualTimeWindow(transportNumber, tourId) {
-  const start = String(el.manualWindowStart?.value || "").trim();
-  const end = String(el.manualWindowEnd?.value || "").trim();
-  if (!start && !end) return null;
+function manualWindowKey(stop) {
+  return [
+    String(stop.transport_number || stop.tour_id || "").trim(),
+    String(stop.type || "").trim(),
+  ].join("|");
+}
 
-  const stopType = String(el.manualWindowStopType?.value || "UNLOAD").trim();
+// Liest die aktuelle Fenster-Startzeit eines Stopps als "HH:MM" (fuer die Vorbelegung).
+function extractWindowTimeValue(stop) {
+  const iso = String(stop?.timeslot_begin || "").trim();
+  if (iso) {
+    const d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleTimeString("de-DE", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+  }
+  const match = String(resolveWindowDisplay(stop)).match(/(\d{2}:\d{2})/);
+  return match ? match[1] : "";
+}
+
+// Klick auf die Zeitfenster-Zelle: Zeit direkt in der Liste aendern.
+function beginWindowEdit(td, stop) {
+  if (td.querySelector("input")) return;
+  const input = document.createElement("input");
+  input.type = "time";
+  input.className = "window-edit-input";
+  input.value = extractWindowTimeValue(stop);
+  td.innerHTML = "";
+  td.appendChild(input);
+  input.focus();
+
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const value = String(input.value || "").trim();
+    if (save && value) {
+      setManualWindow(stop, value);
+      return; // recalc rendert neu
+    }
+    renderStops(latestStops);
+  };
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+function setManualWindow(stop, timeValue) {
+  manualWindowOverrides.set(manualWindowKey(stop), {
+    transport_number: String(stop.transport_number || "").trim() || null,
+    tour_id: String(stop.tour_id || "").trim() || null,
+    stop_type: String(stop.type || "").trim() || "ANY",
+    window_start: timeValue,
+  });
+  recalcWithCurrentWindows();
+}
+
+// Manuelle Fenster als timeWindows-Zeilen (mit Transport-Schluessel = nur diese Tour).
+function buildManualWindowRows() {
+  const rows = [];
+  for (const entry of manualWindowOverrides.values()) {
+    rows.push({
+      route_key: entry.transport_number || entry.tour_id || null,
+      transport_number: entry.transport_number || null,
+      tour_id: entry.tour_id || null,
+      stop_type: entry.stop_type || "ANY",
+      window_start: entry.window_start || null,
+      window_end: null,
+      manual: true,
+    });
+  }
+  return rows;
+}
+
+function currentTimeWindows() {
+  const base = Array.isArray(importedTimeWindows) ? importedTimeWindows : [];
+  const manual = buildManualWindowRows();
+  return manual.length ? [...base, ...manual] : base;
+}
+
+function currentRules() {
   return {
-    route_key: transportNumber || tourId || null,
-    transport_number: transportNumber || null,
-    tour_id: tourId || null,
-    stop_type: stopType || "UNLOAD",
-    window_start: start || null,
-    window_end: end || null,
-    manual: true,
+    freeMinutes: Number(el.freeMinutes.value || 120),
+    intervalMinutes: Number(el.unitMinutes.value || 30),
+    unitPrice: Number(el.unitPrice.value || 30),
+    thresholdEur: Number(el.thresholdEur.value || 30),
+    capEur: Number(el.capEur.value || 650),
+    lateArrivalGraceEnabled: lateArrivalGraceEnabledState,
+    lateArrivalGraceMinutes: Number(el.lateArrivalGraceMinutes.value || 30),
   };
 }
 
-function buildRequestTimeWindows(transportNumber, tourId) {
-  const manual = buildManualTimeWindow(transportNumber, tourId);
-  const base = Array.isArray(importedTimeWindows) ? importedTimeWindows : [];
-  return manual ? [...base, manual] : base;
+// Rechnet die bereits geladenen Stopps neu (ohne erneuten Sixfold-Abruf),
+// damit ein geaendertes Zeitfenster sofort greift.
+async function recalcWithCurrentWindows() {
+  if (!Array.isArray(latestStops) || !latestStops.length) return;
+  setStatus("Zeitfenster wird übernommen...");
+  try {
+    const res = await fetch("/api/sixfold/standgeld", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stops: latestStops,
+        rules: currentRules(),
+        timeWindows: currentTimeWindows(),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Fehler bei der Berechnung.");
+
+    el.amount.textContent = data.summary?.amount_display || "-";
+    el.positions.textContent = String(data.summary?.billed_positions || 0);
+    el.units.textContent = String(data.summary?.units || 0);
+    latestStops = Array.isArray(data.stops) ? data.stops : [];
+    restoreBookkeepingEntries(latestStops);
+    ensureBookkeepingEntries(latestStops);
+    renderStops(latestStops);
+    setStatus("Zeitfenster geändert.", "success");
+  } catch (error) {
+    setStatus(error.message || "Fehler beim Neuberechnen.", "error");
+    renderStops(latestStops);
+  }
 }
 
 async function run() {
@@ -1845,7 +1965,7 @@ async function run() {
 
   const transportNumber = String(el.transportNumber.value || "").trim();
   const tourId = String(el.tourId.value || "").trim();
-  const timeWindows = buildRequestTimeWindows(transportNumber, tourId);
+  const timeWindows = currentTimeWindows();
 
   const body = {
     url: resolvedUrl,
