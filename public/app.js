@@ -54,6 +54,7 @@ const el = {
   copySurchargeBtn: document.getElementById("copySurchargeBtn"),
   closeSurchargeModalBtn: document.getElementById("closeSurchargeModalBtn"),
   closeSurchargeModalBtn2: document.getElementById("closeSurchargeModalBtn2"),
+  takeSurchargeBtn: document.getElementById("takeSurchargeBtn"),
 };
 
 let importedTimeWindows = [];
@@ -62,6 +63,7 @@ const manualWindowOverrides = new Map();
 let latestStops = [];
 let activeStop = null;
 let lateArrivalGraceEnabledState = false;
+let currentSurchargeStop = null;
 const bookkeepingByKey = new Map();
 const URL_STORAGE_KEY = "standgeld.sixfoldUrl";
 const SESSION_TOKEN_STORAGE_KEY = "standgeld.sessionToken";
@@ -1814,6 +1816,11 @@ function openSurchargeModal(stop) {
       detailTotalRowHtml(amount);
   }
   el.surchargeText.value = buildSurchargeDescription(stop);
+  currentSurchargeStop = stop;
+  if (el.takeSurchargeBtn) {
+    el.takeSurchargeBtn.disabled = false;
+    el.takeSurchargeBtn.textContent = "Als Zuschlag übernehmen";
+  }
   el.surchargeModal.hidden = false;
 }
 
@@ -2061,6 +2068,65 @@ el.copySurchargeBtn.addEventListener("click", async () => {
 
 el.closeSurchargeModalBtn.addEventListener("click", closeSurchargeModal);
 el.closeSurchargeModalBtn2.addEventListener("click", closeSurchargeModal);
+
+if (el.takeSurchargeBtn) {
+  el.takeSurchargeBtn.addEventListener("click", async () => {
+    const stop = currentSurchargeStop;
+    if (!stop) return;
+    const cola = String(stop.transport_number || stop.tour_id || "").trim();
+    const amount = Number(stop.amount_eur || 0);
+    if (!cola) {
+      setStatus("Keine Cola-/Transportnummer am Stopp gefunden.", "error");
+      return;
+    }
+    if (!(amount > 0)) {
+      setStatus("Kein abrechenbares Standgeld an diesem Stopp.", "error");
+      return;
+    }
+    const datum = String(stop.arrival_time || "").slice(0, 10) || undefined;
+    const payload = {
+      cola_nummer: cola,
+      zuschlagsart: "STANDGELD",
+      beantragte_summe: amount,
+      antragsdatum: datum,
+      lade_oder_entladestelle: stop.booking_location || stop.address || "",
+      grund: "Standgeld aus Einzelberechnung übernommen",
+      bemerkung: String(el.surchargeText.value || "").slice(0, 2000),
+      quelle: "standgeld_app",
+      standgeld_details: {
+        ankunft: stop.arrival_time || stop.arrival_display || null,
+        abfahrt: stop.departure_time || stop.departure_display || null,
+        standzeit_minuten: Number(stop.counted_standing_minutes || 0),
+        abrechenbare_minuten: Number(stop.billable_minutes || 0),
+        typ: stop.type || null,
+      },
+    };
+    el.takeSurchargeBtn.disabled = true;
+    try {
+      const res = await fetch("/api/subsidies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        const msg =
+          (data.errors && data.errors.join(" ")) ||
+          data.error ||
+          res.statusText;
+        throw new Error(msg);
+      }
+      el.takeSurchargeBtn.textContent = "Übernommen ✔";
+      setStatus(
+        `Zuschlag für ${cola} angelegt. Zum Zuschlags-Cockpit: /subsidies.html`,
+        "success",
+      );
+    } catch (error) {
+      el.takeSurchargeBtn.disabled = false;
+      setStatus("Übernahme fehlgeschlagen: " + error.message, "error");
+    }
+  });
+}
 
 el.surchargeModal.addEventListener("click", (event) => {
   if (event.target === el.surchargeModal) {

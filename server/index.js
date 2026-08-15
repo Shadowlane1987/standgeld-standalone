@@ -1662,6 +1662,10 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+// Zuschlags-Cockpit (eigenes, isoliertes Modul - beruehrt die Standgeld-Logik
+// bewusst nicht).
+app.use("/api/subsidies", require("./subsidies/routes"));
+
 app.get("/api/imports", (req, res) => {
   try {
     const scope = scopeFromReq(req);

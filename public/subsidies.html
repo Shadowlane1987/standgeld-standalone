@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zuschläge · Standgeld Standalone</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel hero">
+        <span class="hero-eyebrow">Standgeld-Rechner</span>
+        <h1>Zuschläge</h1>
+        <p>
+          Beantragte Zuschläge erfassen, Status pflegen und den Überblick pro
+          Monat behalten.
+          <a href="/index.html">Zur Einzelberechnung &rarr;</a> ·
+          <a href="/batch.html">Zum Excel-Abgleich &rarr;</a>
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>Übersicht</h2>
+        <div class="summary" id="kpi">
+          <div><strong>Anzahl:</strong> <span id="kpiCount">-</span></div>
+          <div>
+            <strong>Beantragt:</strong> <span id="kpiBeantragt">-</span>
+          </div>
+          <div>
+            <strong>Akzeptiert (offen in TL):</strong>
+            <span id="kpiTlOffen">-</span>
+          </div>
+          <div>
+            <strong>Abgelehnt:</strong> <span id="kpiAbgelehnt">-</span>
+          </div>
+        </div>
+
+        <div class="grid grid-4">
+          <label
+            >Monat
+            <select id="filterMonth">
+              <option value="alle">Alle Monate</option>
+            </select>
+          </label>
+          <label
+            >Zuschlagsart
+            <select id="filterArt">
+              <option value="alle">Alle Arten</option>
+              <option value="STANDGELD">Standgeld</option>
+              <option value="RETOURE">Retoure</option>
+              <option value="AUSFALLFRACHT">Ausfallfracht</option>
+              <option value="ZWEITE_ANLIEFERUNG">Zweite Anlieferung</option>
+              <option value="AFF">AFF</option>
+              <option value="SONSTIGES">Sonstiges</option>
+            </select>
+          </label>
+          <label
+            >Suche (Cola-Nr. / Zuschlags-ID)
+            <input id="filterSearch" type="text" placeholder="z.B. 6676210" />
+          </label>
+          <label class="checkbox-label" style="align-self: end">
+            <input id="filterArchived" type="checkbox" />
+            Archiv einbeziehen
+          </label>
+        </div>
+        <p class="status" id="status"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Neuen Zuschlag erfassen</h2>
+        <div class="grid grid-3">
+          <label
+            >Cola-Nr. *
+            <input id="newCola" type="text" placeholder="z.B. 6676210" />
+          </label>
+          <label
+            >Zuschlagsart *
+            <select id="newArt">
+              <option value="STANDGELD">Standgeld</option>
+              <option value="RETOURE">Retoure</option>
+              <option value="AUSFALLFRACHT">Ausfallfracht</option>
+              <option value="ZWEITE_ANLIEFERUNG">Zweite Anlieferung</option>
+              <option value="AFF">AFF</option>
+              <option value="SONSTIGES">Sonstiges</option>
+            </select>
+          </label>
+          <label
+            >Beantragte Summe (€) *
+            <input id="newSumme" type="text" placeholder="z.B. 150,00" />
+          </label>
+          <label
+            >Datum *
+            <input id="newDatum" type="date" />
+          </label>
+          <label
+            >Lade-/Entladestelle
+            <input id="newStelle" type="text" placeholder="optional" />
+          </label>
+          <label
+            >Zuschlags-ID (falls bekannt)
+            <input id="newZuschlagsId" type="text" placeholder="optional" />
+          </label>
+        </div>
+        <div class="grid grid-2">
+          <label
+            >Grund
+            <input id="newGrund" type="text" placeholder="optional" />
+          </label>
+          <label
+            >Bemerkung
+            <input id="newBemerkung" type="text" placeholder="optional" />
+          </label>
+        </div>
+        <button id="createBtn" type="button">+ Zuschlag hinzufügen</button>
+        <p class="status" id="createStatus"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Zuschläge</h2>
+        <div class="tab-nav" id="tabs">
+          <button type="button" class="tab-btn active" data-view="alle">
+            Alle
+          </button>
+          <button type="button" class="tab-btn" data-view="offen">Offen</button>
+          <button type="button" class="tab-btn" data-view="akzeptiert_tl_offen">
+            Akzeptiert – TL offen
+          </button>
+          <button type="button" class="tab-btn" data-view="abgeschlossen">
+            Abgeschlossen
+          </button>
+          <button type="button" class="tab-btn" data-view="abgelehnt">
+            Abgelehnt
+          </button>
+          <button type="button" class="tab-btn" data-view="pruefen">
+            Prüfen
+          </button>
+          <button type="button" class="tab-btn" data-view="archiv">
+            Archiv
+          </button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Cola-Nr.</th>
+                <th>Art</th>
+                <th>Beantragt</th>
+                <th>Genehmigt</th>
+                <th>Datum</th>
+                <th>Stelle</th>
+                <th>Quelle</th>
+                <th>Status</th>
+                <th>TL</th>
+                <th>Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr>
+                <td colspan="10">Lade …</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="detailPanel" hidden>
+        <h2>Details &amp; Historie</h2>
+        <div id="detailBody"></div>
+      </section>
+    </main>
+
+    <script src="/subsidies.js"></script>
+  </body>
+</html>

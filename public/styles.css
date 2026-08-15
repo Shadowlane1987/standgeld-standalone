@@ -1323,3 +1323,56 @@ td input[type="checkbox"][data-bk] {
     min-width: 920px;
   }
 }
+
+/* Zuschlags-Cockpit */
+.subsidy-status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.8em;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.subsidy-status-unbekannt {
+  background: rgba(100, 116, 139, 0.16);
+  color: #475569;
+}
+
+.subsidy-status-offen {
+  background: rgba(29, 78, 216, 0.14);
+  color: #1d4ed8;
+}
+
+.subsidy-status-akzeptiert {
+  background: rgba(16, 122, 87, 0.16);
+  color: #107a57;
+}
+
+.subsidy-status-abgeschlossen {
+  background: rgba(6, 78, 59, 0.16);
+  color: #064e3b;
+}
+
+.subsidy-status-abgelehnt {
+  background: rgba(185, 28, 28, 0.14);
+  color: #b91c1c;
+}
+
+.subsidy-status-pruefen {
+  background: rgba(176, 105, 28, 0.18);
+  color: #b0691c;
+}
+
+.subsidy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.subsidy-actions button {
+  padding: 5px 10px;
+  font-size: 0.78em;
+  border-radius: 8px;
+  margin: 0;
+}
