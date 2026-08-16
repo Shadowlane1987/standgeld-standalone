@@ -27,6 +27,7 @@ const el = {
   dateSort: document.getElementById("dateSort"),
   dateFrom: document.getElementById("dateFrom"),
   dateTo: document.getElementById("dateTo"),
+  locationFilter: document.getElementById("locationFilter"),
   dateClearBtn: document.getElementById("dateClearBtn"),
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
   bookkeepingExportBtn: document.getElementById("bookkeepingExportBtn"),
@@ -607,6 +608,18 @@ function dateInRange(stop) {
   return true;
 }
 
+// Ort-Freitextfilter (z.B. "Lidl") - vergleicht gegen Ortsname/Adresse.
+function locationMatches(stop) {
+  const needle = el.locationFilter
+    ? el.locationFilter.value.trim().toLowerCase()
+    : "";
+  if (!needle) return true;
+  const haystack = String(
+    stop?.booking_location || stop?.address || "",
+  ).toLowerCase();
+  return haystack.includes(needle);
+}
+
 // Gleiche Transportnummern immer zusammen halten; die Gruppen-Reihenfolge
 // folgt dem ersten Vorkommen der jeweiligen Nummer nach der Datumssortierung.
 function groupByTransportNumber(stops) {
@@ -688,7 +701,9 @@ function singleReasonLabel(stop) {
 }
 
 function renderStops(stops) {
-  const inRange = (Array.isArray(stops) ? stops : []).filter(dateInRange);
+  const inRange = (Array.isArray(stops) ? stops : [])
+    .filter(dateInRange)
+    .filter(locationMatches);
   const sortedStops = groupByTransportNumber(
     sortStopsByDate(inRange, el.dateSort.value),
   );
@@ -2049,10 +2064,14 @@ if (el.dateFrom) {
 if (el.dateTo) {
   el.dateTo.addEventListener("change", () => renderStops(latestStops));
 }
+if (el.locationFilter) {
+  el.locationFilter.addEventListener("input", () => renderStops(latestStops));
+}
 if (el.dateClearBtn) {
   el.dateClearBtn.addEventListener("click", () => {
     if (el.dateFrom) el.dateFrom.value = "";
     if (el.dateTo) el.dateTo.value = "";
+    if (el.locationFilter) el.locationFilter.value = "";
     renderStops(latestStops);
   });
 }

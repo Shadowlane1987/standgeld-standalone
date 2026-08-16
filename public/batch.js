@@ -75,6 +75,7 @@ const el = {
   bookkeepingOnlyMarked: document.getElementById("bookkeepingOnlyMarked"),
   dateFrom: document.getElementById("dateFrom"),
   dateTo: document.getElementById("dateTo"),
+  locationFilter: document.getElementById("locationFilter"),
   clearDateFilterBtn: document.getElementById("clearDateFilterBtn"),
   batchDateFrom: document.getElementById("batchDateFrom"),
   batchDateTo: document.getElementById("batchDateTo"),
@@ -963,6 +964,17 @@ function dateInRange(stop) {
   return true;
 }
 
+// Ort-Freitextfilter (z.B. "Lidl") - vergleicht gegen den Ortsnamen.
+function locationMatches(stop) {
+  const needle = el.locationFilter
+    ? el.locationFilter.value.trim().toLowerCase()
+    : "";
+  if (!needle) return true;
+  return String(stop?.booking_location || "")
+    .toLowerCase()
+    .includes(needle);
+}
+
 function filteredStops() {
   // Sixfold-Seite hat keinen Filter: dort werden direkt nur abrechenbare
   // Positionen gezeigt.
@@ -982,6 +994,7 @@ function filteredStops() {
   // Fake-Kennzeichen (Handynummer, XP-Zeiten) IMMER ans Ende der Liste.
   const base = list
     .filter(dateInRange)
+    .filter(locationMatches)
     .sort((a, b) => (a.plate_fake ? 1 : 0) - (b.plate_fake ? 1 : 0));
 
   // Statussortierung: 1. puenktlich (+abrechenbar zuerst), 2. zu spaet aber
@@ -2574,10 +2587,12 @@ if (el.sixfoldBatchBtn) {
 }
 if (el.dateFrom) el.dateFrom.addEventListener("change", render);
 if (el.dateTo) el.dateTo.addEventListener("change", render);
+if (el.locationFilter) el.locationFilter.addEventListener("input", render);
 if (el.clearDateFilterBtn) {
   el.clearDateFilterBtn.addEventListener("click", () => {
     if (el.dateFrom) el.dateFrom.value = "";
     if (el.dateTo) el.dateTo.value = "";
+    if (el.locationFilter) el.locationFilter.value = "";
     render();
   });
 }
