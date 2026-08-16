@@ -193,6 +193,9 @@ class SubsidyStore {
       if (filter.art && filter.art !== "alle") {
         if (r.zuschlagsart !== model.normalizeArt(filter.art)) return false;
       }
+      if (filter.verkehr && filter.verkehr !== "alle") {
+        if (r.verkehr !== model.normalizeVerkehr(filter.verkehr)) return false;
+      }
       if (filter.status && filter.status !== "alle") {
         if (r.status !== model.normalizeStatus(filter.status)) return false;
       }

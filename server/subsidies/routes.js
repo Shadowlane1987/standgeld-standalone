@@ -32,6 +32,7 @@ router.get("/", (req, res) => {
       month: req.query.month,
       status: req.query.status,
       art: req.query.art,
+      verkehr: req.query.verkehr,
       view: req.query.view,
       search: req.query.search,
       includeArchived: req.query.includeArchived === "1",
@@ -49,7 +50,13 @@ router.get("/", (req, res) => {
 // Kennzahlen fuer das Dashboard (§30).
 router.get("/stats", (req, res) => {
   try {
-    res.json({ ok: true, stats: store.stats({ month: req.query.month }) });
+    res.json({
+      ok: true,
+      stats: store.stats({
+        month: req.query.month,
+        verkehr: req.query.verkehr,
+      }),
+    });
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }

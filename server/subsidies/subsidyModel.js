@@ -57,6 +57,23 @@ const QUELLE = Object.freeze({
   TRANSPOREON_EMAIL: "transporeon_email",
 });
 
+// Verkehrsart - MUSS getrennt gefuehrt werden (Nah- vs. Fernverkehr).
+const VERKEHR = Object.freeze({
+  NAHVERKEHR: "NAHVERKEHR",
+  FERNVERKEHR: "FERNVERKEHR",
+});
+
+const ALLOWED_VERKEHR = new Set(Object.values(VERKEHR));
+
+const VERKEHR_SYNONYMS = new Map([
+  ["nahverkehr", VERKEHR.NAHVERKEHR],
+  ["nah", VERKEHR.NAHVERKEHR],
+  ["nv", VERKEHR.NAHVERKEHR],
+  ["fernverkehr", VERKEHR.FERNVERKEHR],
+  ["fern", VERKEHR.FERNVERKEHR],
+  ["fv", VERKEHR.FERNVERKEHR],
+]);
+
 const SCHEMA_VERSION = 1;
 
 /**
@@ -113,6 +130,19 @@ function normalizeStatus(value) {
     .trim()
     .toUpperCase();
   return ALLOWED_STATUS.has(upper) ? upper : null;
+}
+
+/**
+ * Verkehrsart normalisieren. Unbekannt/leer -> null.
+ * @param {unknown} value
+ * @returns {"NAHVERKEHR"|"FERNVERKEHR"|null}
+ */
+function normalizeVerkehr(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const upper = raw.toUpperCase();
+  if (ALLOWED_VERKEHR.has(upper)) return upper;
+  return VERKEHR_SYNONYMS.get(raw.toLowerCase()) || null;
 }
 
 /**
@@ -194,6 +224,9 @@ function validateInput(input = {}) {
   if (!normalizeDate(input.antragsdatum ?? input.datum)) {
     errors.push("Datum fehlt oder ist ungueltig.");
   }
+  if (!normalizeVerkehr(input.verkehr)) {
+    errors.push("Verkehrsart fehlt (Nahverkehr oder Fernverkehr waehlen).");
+  }
   return { ok: errors.length === 0, errors };
 }
 
@@ -217,6 +250,7 @@ function createRecord(input = {}, ctx = {}) {
     cola_nummer_original: original || null,
     zuschlags_id: input.zuschlags_id ? String(input.zuschlags_id).trim() : null,
     zuschlagsart: normalizeArt(input.zuschlagsart) || ZUSCHLAGSART.SONSTIGES,
+    verkehr: normalizeVerkehr(input.verkehr),
     grund: String(input.grund ?? "").trim(),
     bemerkung: String(input.bemerkung ?? "").trim(),
     beantragte_summe: parseAmount(input.beantragte_summe),
@@ -259,6 +293,7 @@ const AUDIT_FIELDS = [
   "pruefung_erforderlich",
   "pruefgrund",
   "entscheidungsdatum",
+  "verkehr",
 ];
 
 /**
@@ -280,6 +315,8 @@ function applyChanges(record, changes = {}, ctx = {}) {
     if (key === "status") value = normalizeStatus(rawValue) || record.status;
     else if (key === "zuschlagsart") {
       value = normalizeArt(rawValue) || record.zuschlagsart;
+    } else if (key === "verkehr") {
+      value = normalizeVerkehr(rawValue);
     } else if (key === "beantragte_summe" || key === "genehmigte_summe") {
       value = parseAmount(rawValue);
     } else if (key === "entscheidungsdatum" || key === "antragsdatum") {
@@ -400,11 +437,14 @@ module.exports = {
   ZUSCHLAGSART,
   ALLOWED_ART,
   QUELLE,
+  VERKEHR,
+  ALLOWED_VERKEHR,
   SCHEMA_VERSION,
   normalizeCola,
   parseAmount,
   normalizeArt,
   normalizeStatus,
+  normalizeVerkehr,
   normalizeDate,
   deriveMonthKey,
   deriveView,

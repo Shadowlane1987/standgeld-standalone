@@ -60,6 +60,18 @@ test("Suche per Cola-Nr liefert ALLE Treffer (§37)", () => {
   assert.equal(hits.length, 2);
 });
 
+test("list filtert nach Verkehr (Nah/Fern getrennt)", () => {
+  const store = tmpStore();
+  store.create({ ...baseInput, verkehr: "NAHVERKEHR" });
+  store.create({ ...baseInput, beantragte_summe: 40, verkehr: "FERNVERKEHR" });
+  store.create({ ...baseInput, beantragte_summe: 20, verkehr: "NAHVERKEHR" });
+
+  assert.equal(store.list({ verkehr: "NAHVERKEHR" }).length, 2);
+  assert.equal(store.list({ verkehr: "FERNVERKEHR" }).length, 1);
+  assert.equal(store.list({ verkehr: "alle" }).length, 3);
+  assert.equal(store.list({}).length, 3);
+});
+
 test("update aendert Status und archiviert nie loeschend (§3/§31)", () => {
   const store = tmpStore();
   const rec = store.create(baseInput);

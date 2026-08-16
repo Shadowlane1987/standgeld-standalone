@@ -56,6 +56,7 @@ const el = {
   closeSurchargeModalBtn: document.getElementById("closeSurchargeModalBtn"),
   closeSurchargeModalBtn2: document.getElementById("closeSurchargeModalBtn2"),
   takeSurchargeBtn: document.getElementById("takeSurchargeBtn"),
+  surchargeVerkehr: document.getElementById("surchargeVerkehr"),
 };
 
 let importedTimeWindows = [];
@@ -1836,6 +1837,15 @@ function openSurchargeModal(stop) {
     el.takeSurchargeBtn.disabled = false;
     el.takeSurchargeBtn.textContent = "Als Zuschlag übernehmen";
   }
+  if (el.surchargeVerkehr) {
+    let last = "NAHVERKEHR";
+    try {
+      last = window.localStorage.getItem("SUBSIDY_VERKEHR") || "NAHVERKEHR";
+    } catch (e) {
+      last = "NAHVERKEHR";
+    }
+    el.surchargeVerkehr.value = last;
+  }
   el.surchargeModal.hidden = false;
 }
 
@@ -2103,10 +2113,18 @@ if (el.takeSurchargeBtn) {
       return;
     }
     const datum = String(stop.arrival_time || "").slice(0, 10) || undefined;
+    const verkehr =
+      (el.surchargeVerkehr && el.surchargeVerkehr.value) || "NAHVERKEHR";
+    try {
+      window.localStorage.setItem("SUBSIDY_VERKEHR", verkehr);
+    } catch (e) {
+      // localStorage optional - Auswahl merken ist nice-to-have.
+    }
     const payload = {
       cola_nummer: cola,
       zuschlagsart: "STANDGELD",
       beantragte_summe: amount,
+      verkehr,
       antragsdatum: datum,
       lade_oder_entladestelle: stop.booking_location || stop.address || "",
       grund: "Standgeld aus Einzelberechnung übernommen",

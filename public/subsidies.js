@@ -9,6 +9,7 @@
     view: "alle",
     month: "alle",
     art: "alle",
+    verkehr: "alle",
     search: "",
     includeArchived: false,
     records: [],
@@ -29,6 +30,11 @@
     AKZEPTIERT: "Akzeptiert",
     ABGELEHNT: "Abgelehnt",
     PRUEFEN: "Prüfen",
+  };
+
+  const VERKEHR_LABEL = {
+    NAHVERKEHR: "Nahverkehr",
+    FERNVERKEHR: "Fernverkehr",
   };
 
   const QUELLE_LABEL = {
@@ -108,6 +114,8 @@
     if (state.view && state.view !== "alle") params.set("view", state.view);
     if (state.month && state.month !== "alle") params.set("month", state.month);
     if (state.art && state.art !== "alle") params.set("art", state.art);
+    if (state.verkehr && state.verkehr !== "alle")
+      params.set("verkehr", state.verkehr);
     if (state.search) params.set("search", state.search);
     if (state.includeArchived) params.set("includeArchived", "1");
     const q = params.toString();
@@ -137,8 +145,12 @@
 
   async function refreshStats() {
     try {
-      const q =
-        state.month && state.month !== "alle" ? "?month=" + state.month : "";
+      const params = new URLSearchParams();
+      if (state.month && state.month !== "alle")
+        params.set("month", state.month);
+      if (state.verkehr && state.verkehr !== "alle")
+        params.set("verkehr", state.verkehr);
+      const q = params.toString() ? "?" + params.toString() : "";
       const data = await api("GET", "/stats" + q);
       const s = data.stats || {};
       $("kpiCount").textContent = s.anzahl != null ? s.anzahl : "-";
@@ -199,7 +211,7 @@
     const tbody = $("rows");
     if (!state.records.length) {
       tbody.innerHTML =
-        '<tr><td colspan="10">Keine Zuschläge gefunden.</td></tr>';
+        '<tr><td colspan="11">Keine Zuschläge gefunden.</td></tr>';
       return;
     }
     tbody.innerHTML = state.records
@@ -211,6 +223,9 @@
           "</td>" +
           "<td>" +
           esc(ART_LABEL[r.zuschlagsart] || r.zuschlagsart) +
+          "</td>" +
+          "<td>" +
+          esc(VERKEHR_LABEL[r.verkehr] || "–") +
           "</td>" +
           "<td>" +
           euro(r.beantragte_summe) +
@@ -298,6 +313,9 @@
         ")</small></div>" +
         "<div><strong>Art:</strong> " +
         esc(ART_LABEL[r.zuschlagsart] || r.zuschlagsart) +
+        "</div>" +
+        "<div><strong>Verkehr:</strong> " +
+        esc(VERKEHR_LABEL[r.verkehr] || "–") +
         "</div>" +
         "<div><strong>Status:</strong> " +
         statusBadge(r) +
@@ -387,10 +405,18 @@
     btn.disabled = true;
     $("createStatus").textContent = "";
     try {
+      const verkehr = $("newVerkehr").value;
+      if (!verkehr) {
+        $("createStatus").textContent =
+          "Bitte Verkehr wählen (Nahverkehr oder Fernverkehr).";
+        btn.disabled = false;
+        return;
+      }
       const payload = {
         cola_nummer: $("newCola").value,
         zuschlagsart: $("newArt").value,
         beantragte_summe: $("newSumme").value,
+        verkehr,
         antragsdatum: $("newDatum").value,
         lade_oder_entladestelle: $("newStelle").value,
         zuschlags_id: $("newZuschlagsId").value,
@@ -418,6 +444,15 @@
     }
   }
 
+  // Verkehr-Auswahl im Formular an den aktuellen Umschalter angleichen.
+  function syncVerkehrDefault() {
+    const sel = $("newVerkehr");
+    if (!sel) return;
+    if (state.verkehr === "NAHVERKEHR" || state.verkehr === "FERNVERKEHR") {
+      sel.value = state.verkehr;
+    }
+  }
+
   // Zuletzt geladene Datei merken, damit Vorschau und Übernehmen dieselbe
   // Datei nutzen.
   let importBuffer = null;
@@ -438,14 +473,11 @@
       : "Abgleich wird übernommen …";
     try {
       if (file) importBuffer = await file.arrayBuffer();
-      const res = await fetch(
-        API + "/import" + (dryRun ? "?dryRun=1" : ""),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: importBuffer,
-        },
-      );
+      const res = await fetch(API + "/import" + (dryRun ? "?dryRun=1" : ""), {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: importBuffer,
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
         throw new Error(data.error || res.statusText);
@@ -493,9 +525,7 @@
       const body = items
         .slice(0, 50)
         .map((it) => {
-          const tds = cols
-            .map((c) => `<td>${esc(c.get(it))}</td>`)
-            .join("");
+          const tds = cols.map((c) => `<td>${esc(c.get(it))}</td>`).join("");
           return `<tr>${tds}</tr>`;
         })
         .join("");
@@ -519,7 +549,10 @@
       detailTable("Kein Treffer im Cockpit", data.noMatch, [
         { label: "Zuschlags-ID", get: (x) => x.zuschlags_id },
         { label: "Cola-Nr.", get: (x) => x.cola_nummer },
-        { label: "Art", get: (x) => ART_LABEL[x.zuschlagsart] || x.zuschlagsart || "-" },
+        {
+          label: "Art",
+          get: (x) => ART_LABEL[x.zuschlagsart] || x.zuschlagsart || "-",
+        },
         { label: "Betrag", get: (x) => euro(x.betrag) },
         { label: "Status", get: (x) => STATUS_LABEL[x.status] || x.status },
       ]),
@@ -549,6 +582,18 @@
       );
       btn.classList.add("active");
       state.view = btn.getAttribute("data-view");
+      load();
+    });
+
+    $("verkehrSwitch").addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".tab-btn");
+      if (!btn) return;
+      Array.from($("verkehrSwitch").children).forEach((b) =>
+        b.classList.remove("active"),
+      );
+      btn.classList.add("active");
+      state.verkehr = btn.getAttribute("data-verkehr");
+      syncVerkehrDefault();
       load();
     });
 

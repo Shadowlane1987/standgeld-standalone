@@ -126,12 +126,45 @@ test("validateInput meldet fehlende Pflichtfelder (§12)", () => {
       zuschlagsart: "Standgeld",
       beantragte_summe: 10,
       datum: "2026-08-01",
+      verkehr: "NAHVERKEHR",
     }).ok,
     true,
   );
   const bad = model.validateInput({});
   assert.equal(bad.ok, false);
-  assert.equal(bad.errors.length, 4);
+  assert.equal(bad.errors.length, 5);
+});
+
+test("normalizeVerkehr erkennt Nah-/Fernverkehr, sonst null", () => {
+  assert.equal(model.normalizeVerkehr("Nahverkehr"), "NAHVERKEHR");
+  assert.equal(model.normalizeVerkehr("fern"), "FERNVERKEHR");
+  assert.equal(model.normalizeVerkehr("NV"), "NAHVERKEHR");
+  assert.equal(model.normalizeVerkehr(""), null);
+  assert.equal(model.normalizeVerkehr("egal"), null);
+});
+
+test("createRecord uebernimmt Verkehr (Nah/Fern getrennt)", () => {
+  const r = model.createRecord(
+    {
+      cola_nummer: "6676210",
+      zuschlagsart: "Standgeld",
+      beantragte_summe: 10,
+      verkehr: "fernverkehr",
+    },
+    { id: "x1" },
+  );
+  assert.equal(r.verkehr, "FERNVERKEHR");
+});
+
+test("validateInput verlangt Verkehr", () => {
+  const res = model.validateInput({
+    cola_nummer: "6676210",
+    zuschlagsart: "Standgeld",
+    beantragte_summe: 10,
+    datum: "2026-08-01",
+  });
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("Verkehrsart")));
 });
 
 test("summarize summiert je Ansicht (§30)", () => {

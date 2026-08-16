@@ -21,6 +21,17 @@
 
       <section class="panel">
         <h2>Übersicht</h2>
+        <div class="tab-nav" id="verkehrSwitch">
+          <button type="button" class="tab-btn active" data-verkehr="alle">
+            Alle
+          </button>
+          <button type="button" class="tab-btn" data-verkehr="NAHVERKEHR">
+            Nahverkehr
+          </button>
+          <button type="button" class="tab-btn" data-verkehr="FERNVERKEHR">
+            Fernverkehr
+          </button>
+        </div>
         <div class="summary" id="kpi">
           <div><strong>Anzahl:</strong> <span id="kpiCount">-</span></div>
           <div>
@@ -112,6 +123,14 @@
             <input id="newSumme" type="text" placeholder="z.B. 150,00" />
           </label>
           <label
+            >Verkehr *
+            <select id="newVerkehr">
+              <option value="">– bitte wählen –</option>
+              <option value="NAHVERKEHR">Nahverkehr</option>
+              <option value="FERNVERKEHR">Fernverkehr</option>
+            </select>
+          </label>
+          <label
             >Datum *
             <input id="newDatum" type="date" />
           </label>
@@ -168,6 +187,7 @@
               <tr>
                 <th>Cola-Nr.</th>
                 <th>Art</th>
+                <th>Verkehr</th>
                 <th>Beantragt</th>
                 <th>Genehmigt</th>
                 <th>Datum</th>
@@ -180,7 +200,7 @@
             </thead>
             <tbody id="rows">
               <tr>
-                <td colspan="10">Lade …</td>
+                <td colspan="11">Lade …</td>
               </tr>
             </tbody>
           </table>
