@@ -56,6 +56,7 @@ const el = {
   uploadBtn: document.getElementById("uploadBtn"),
   sixfoldUrl: document.getElementById("sixfoldUrl"),
   sixfoldToken: document.getElementById("sixfoldToken"),
+  clearSixfoldCredsBtn: document.getElementById("clearSixfoldCredsBtn"),
   selectiveSearchBtn: document.getElementById("selectiveSearchBtn"),
   selectivePanel: document.getElementById("selectivePanel"),
   selectiveResult: document.getElementById("selectiveResult"),
@@ -505,6 +506,18 @@ function restoreSixfoldCredentials() {
   if (el.sixfoldToken && stored.token) {
     el.sixfoldToken.value = String(stored.token);
   }
+}
+
+// Entfernt die lokal gespeicherten Sixfold-Zugangsdaten (z.B. vor PC-Weitergabe).
+function clearSixfoldCredentials() {
+  try {
+    window.localStorage.removeItem(SIXFOLD_STORAGE_KEY);
+  } catch (_error) {
+    // Speicher-Fehler ignorieren
+  }
+  if (el.sixfoldUrl) el.sixfoldUrl.value = "";
+  if (el.sixfoldToken) el.sixfoldToken.value = "";
+  setStatus("Sixfold-Zugangsdaten gelöscht.", "success");
 }
 
 function loadBookkeepingForImport(importId) {
@@ -2576,6 +2589,9 @@ if (el.sixfoldUrl) {
 if (el.sixfoldToken) {
   el.sixfoldToken.addEventListener("input", persistSixfoldCredentials);
   el.sixfoldToken.addEventListener("change", persistSixfoldCredentials);
+}
+if (el.clearSixfoldCredsBtn) {
+  el.clearSixfoldCredsBtn.addEventListener("click", clearSixfoldCredentials);
 }
 if (el.selectiveSearchBtn) {
   el.selectiveSearchBtn.addEventListener("click", selectiveSearch);
