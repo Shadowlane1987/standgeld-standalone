@@ -100,10 +100,8 @@ function stripNahverkehrTransports(result) {
 
 app.use(express.json({ limit: "2mb" }));
 
-// Erlaubt der gehosteten Render-App, den lokalen Abrechnungs-Motor
-// (Transporeon-Automation) auf diesem PC anzusprechen.
+// Erlaubt dem lokal geoeffneten Browser, den Abrechnungs-Motor anzusprechen.
 const AUTOMATION_ALLOWED_ORIGINS = new Set([
-  "https://standgeld-standalone.onrender.com",
   "http://localhost:3100",
   "http://127.0.0.1:3100",
 ]);

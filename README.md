@@ -20,20 +20,18 @@ Danach ist die App unter http://localhost:3100 erreichbar.
 - Ergebnis-Tabelle mit Standzeitberechnung
 - Platzhalterfelder für Sixfold-URL und Session-Daten
 
-## Deploy auf Render
+## Lokaler Betrieb (Portable)
 
-1. Dieses Repository nach GitHub pushen.
-2. In Render auf `New +` -> `Blueprint` klicken.
-3. Das Repository `standgeld-standalone` auswaehlen.
-4. Render liest automatisch `render.yaml` und erstellt den Web Service.
-5. Nach dem Deploy die URL oeffnen und `/api/health` pruefen.
+Die App laeuft vollstaendig lokal auf dem eigenen PC - kein Cloud-Hosting noetig.
 
-Falls du statt Blueprint den Web-Service manuell anlegen willst:
+1. `Standgeld-App starten.cmd` (bzw. `Fernverkehr starten.cmd`) per Doppelklick
+   starten. Beim ersten Start werden die Node-Komponenten installiert.
+2. Der Motor startet auf http://localhost:3100 und der Browser oeffnet sich
+   automatisch.
+3. Beim Start wird der Datenordner automatisch nach `backups/` gesichert
+   (max. 30 Tagesbackups).
 
-- Runtime: `Node`
-- Build Command: `npm install`
-- Start Command: `npm start`
-- Health Check Path: `/api/health`
+Zum Beenden das minimierte Server-Fenster schliessen.
 
 ### Wichtiger Hinweis zu gespeicherten Uploads
 
@@ -43,8 +41,6 @@ werden.
 
 - Die App nutzt den Datenpfad aus `APP_DATA_DIR`.
 - Ohne `APP_DATA_DIR` wird lokal standardmaessig `./data` verwendet.
-- Auf Render sollte `APP_DATA_DIR=/var/data` gesetzt sein und ein Persistent
-  Disk auf `/var/data` gemountet werden.
 
 Verwendete Persistenzpfade:
 

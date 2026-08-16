@@ -37,7 +37,10 @@ test("mehrfacher Start am selben Tag aktualisiert dasselbe Tagesbackup", () => {
   const { dataDir } = makeTempRoot();
   const now = new Date(2026, 0, 1, 6, 45);
   const first = runStartupBackup({ dataDir, now });
-  const second = runStartupBackup({ dataDir, now: new Date(2026, 0, 1, 20, 0) });
+  const second = runStartupBackup({
+    dataDir,
+    now: new Date(2026, 0, 1, 20, 0),
+  });
   assert.equal(first.path, second.path);
   const backupsDir = path.dirname(second.path);
   const entries = fs
@@ -69,7 +72,9 @@ test("behaelt nur die neuesten maxBackups Tagesbackups", () => {
 });
 
 test("ueberspringt Backup bei leerem Datenordner", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "standgeld-backup-empty-"));
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "standgeld-backup-empty-"),
+  );
   const dataDir = path.join(root, "data");
   fs.mkdirSync(dataDir, { recursive: true });
   const result = runStartupBackup({ dataDir });

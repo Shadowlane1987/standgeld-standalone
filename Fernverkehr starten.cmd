@@ -72,7 +72,7 @@ goto wait
 
 :ready
 echo Motor laeuft! Oeffne die Fernverkehr-Seite im Browser...
-start "" "https://standgeld-standalone.onrender.com/batch.html"
+start "" "http://localhost:3100/batch.html"
 echo.
 echo Fertig - die Fernverkehr-Seite ist offen.
 echo Der Motor laeuft im minimierten Fenster "Fernverkehr Server".
