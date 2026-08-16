@@ -13,6 +13,8 @@ const express = require("express");
 
 const { SubsidyStore } = require("./subsidyStore");
 const model = require("./subsidyModel");
+const subsidyImport = require("./subsidyImport");
+const XLSX = require("xlsx");
 
 const store = new SubsidyStore();
 const router = express.Router();
@@ -71,6 +73,87 @@ router.post("/", (req, res) => {
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
+
+// Transporeon-Export (.xlsx) hochladen und abgleichen (Bauplan §14-§20).
+// Rohbytes der Datei im Body. Mit ?dryRun=1 wird NUR geplant, nichts geschrieben
+// - so kann der Nutzer den Abgleich gefahrlos ansehen, bevor er ihn ausfuehrt.
+router.post(
+  "/import",
+  express.raw({ type: () => true, limit: "25mb" }),
+  (req, res) => {
+    try {
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "Keine Datei empfangen (leerer Body)." });
+      }
+
+      let workbook;
+      try {
+        workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
+      } catch {
+        return res.status(400).json({
+          ok: false,
+          error: "Datei ist keine lesbare Excel-Datei (.xlsx).",
+        });
+      }
+
+      // Bevorzugt das Blatt "Zuschläge", sonst das erste Blatt.
+      const sheetName =
+        workbook.SheetNames.find((n) => /zuschl/i.test(n)) ||
+        workbook.SheetNames[0];
+      const sheet = sheetName ? workbook.Sheets[sheetName] : null;
+      if (!sheet) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "Kein Tabellenblatt gefunden." });
+      }
+
+      const rows = XLSX.utils.sheet_to_json(sheet, { raw: false, defval: "" });
+      const { candidates, errors } = subsidyImport.parseRows(rows);
+
+      const dryRun = req.query.dryRun === "1" || req.query.dryRun === "true";
+      const result = store.reconcile(candidates, {
+        actor: actorFrom(req),
+        dryRun,
+      });
+
+      // Details fuer die Anzeige: was muss der Nutzer selbst pruefen?
+      const pruefen = result.plans
+        .filter((p) => p.action === "pruefen")
+        .map((p) => ({
+          zuschlags_id: p.candidate.zuschlags_id,
+          cola_nummer: p.candidate.cola_nummer,
+          betrag: p.candidate.betrag,
+          reason: p.reason,
+        }));
+      const noMatch = result.plans
+        .filter((p) => p.action === "no_match")
+        .map((p) => ({
+          zuschlags_id: p.candidate.zuschlags_id,
+          cola_nummer: p.candidate.cola_nummer,
+          zuschlagsart: p.candidate.zuschlagsart,
+          betrag: p.candidate.betrag,
+          status: p.candidate.status,
+        }));
+
+      res.json({
+        ok: true,
+        dryRun: result.dryRun,
+        sheet: sheetName,
+        rows: rows.length,
+        parseErrors: errors,
+        summary: { ...result.summary, parseFehler: errors.length },
+        applied: result.applied,
+        pruefen,
+        noMatch,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err.message || err) });
+    }
+  },
+);
 
 // Einzelnen Zuschlag inkl. Historie lesen.
 router.get("/:id", (req, res) => {

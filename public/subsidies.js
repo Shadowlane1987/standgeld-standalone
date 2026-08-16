@@ -418,6 +418,128 @@
     }
   }
 
+  // Zuletzt geladene Datei merken, damit Vorschau und Übernehmen dieselbe
+  // Datei nutzen.
+  let importBuffer = null;
+
+  async function runImport(dryRun) {
+    const fileInput = $("importFile");
+    const file = fileInput.files && fileInput.files[0];
+    if (!file && !importBuffer) {
+      $("importStatus").textContent = "Bitte zuerst eine .xlsx-Datei wählen.";
+      return;
+    }
+    const previewBtn = $("importPreviewBtn");
+    const applyBtn = $("importApplyBtn");
+    previewBtn.disabled = true;
+    applyBtn.disabled = true;
+    $("importStatus").textContent = dryRun
+      ? "Vorschau wird erstellt …"
+      : "Abgleich wird übernommen …";
+    try {
+      if (file) importBuffer = await file.arrayBuffer();
+      const res = await fetch(
+        API + "/import" + (dryRun ? "?dryRun=1" : ""),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: importBuffer,
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || res.statusText);
+      }
+      renderImportResult(data);
+      $("importStatus").textContent = dryRun
+        ? "Vorschau erstellt. Bei Bedarf „Abgleich übernehmen“ klicken."
+        : "Abgleich übernommen.";
+      // Nach echter Übernahme Liste/Kennzahlen neu laden.
+      if (!dryRun) {
+        importBuffer = null;
+        fileInput.value = "";
+        applyBtn.disabled = true;
+        await load();
+      }
+    } catch (err) {
+      $("importStatus").textContent = "Fehler: " + err.message;
+    } finally {
+      previewBtn.disabled = false;
+      // „Übernehmen“ nur freigeben, wenn eine Datei bereitsteht.
+      if (importBuffer) applyBtn.disabled = false;
+    }
+  }
+
+  function renderImportResult(data) {
+    const box = $("importResult");
+    const s = data.summary || {};
+    const rows = [];
+    rows.push(
+      `<p><strong>${data.dryRun ? "Vorschau" : "Ergebnis"}</strong> · Blatt „${esc(data.sheet)}“ · ${Number(data.rows) || 0} Zeilen</p>`,
+    );
+    rows.push(
+      `<div class="summary">
+        <div><strong>Aktualisiert:</strong> ${s.update || 0}</div>
+        <div><strong>Unverändert:</strong> ${s.noop || 0}</div>
+        <div><strong>Prüfen:</strong> ${s.pruefen || 0}</div>
+        <div><strong>Kein Treffer:</strong> ${s.no_match || 0}</div>
+        <div><strong>Parse-Fehler:</strong> ${s.parseFehler || 0}</div>
+      </div>`,
+    );
+
+    function detailTable(title, items, cols) {
+      if (!items || !items.length) return "";
+      const head = cols.map((c) => `<th>${esc(c.label)}</th>`).join("");
+      const body = items
+        .slice(0, 50)
+        .map((it) => {
+          const tds = cols
+            .map((c) => `<td>${esc(c.get(it))}</td>`)
+            .join("");
+          return `<tr>${tds}</tr>`;
+        })
+        .join("");
+      const more =
+        items.length > 50
+          ? `<p class="status">… und ${items.length - 50} weitere.</p>`
+          : "";
+      return `<h3>${esc(title)} (${items.length})</h3>
+        <table class="subsidy-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${more}`;
+    }
+
+    rows.push(
+      detailTable("Zu prüfen", data.pruefen, [
+        { label: "Zuschlags-ID", get: (x) => x.zuschlags_id },
+        { label: "Cola-Nr.", get: (x) => x.cola_nummer },
+        { label: "Betrag", get: (x) => euro(x.betrag) },
+        { label: "Grund", get: (x) => x.reason },
+      ]),
+    );
+    rows.push(
+      detailTable("Kein Treffer im Cockpit", data.noMatch, [
+        { label: "Zuschlags-ID", get: (x) => x.zuschlags_id },
+        { label: "Cola-Nr.", get: (x) => x.cola_nummer },
+        { label: "Art", get: (x) => ART_LABEL[x.zuschlagsart] || x.zuschlagsart || "-" },
+        { label: "Betrag", get: (x) => euro(x.betrag) },
+        { label: "Status", get: (x) => STATUS_LABEL[x.status] || x.status },
+      ]),
+    );
+    if (data.parseErrors && data.parseErrors.length) {
+      rows.push(
+        `<h3>Fehlerhafte Zeilen (${data.parseErrors.length})</h3>
+        <p class="status">${esc(
+          data.parseErrors
+            .slice(0, 20)
+            .map((e) => `Zeile ${Number(e.index) + 2}: ${e.errors.join(", ")}`)
+            .join(" · "),
+        )}</p>`,
+      );
+    }
+
+    box.innerHTML = rows.join("");
+    box.hidden = false;
+  }
+
   function wire() {
     $("tabs").addEventListener("click", (ev) => {
       const btn = ev.target.closest(".tab-btn");
@@ -458,6 +580,15 @@
       load();
     });
     $("createBtn").addEventListener("click", createSubsidy);
+
+    $("importPreviewBtn").addEventListener("click", () => runImport(true));
+    $("importApplyBtn").addEventListener("click", () => runImport(false));
+    $("importFile").addEventListener("change", () => {
+      importBuffer = null;
+      $("importApplyBtn").disabled = true;
+      $("importResult").hidden = true;
+      $("importStatus").textContent = "";
+    });
 
     const today = new Date().toISOString().slice(0, 10);
     $("newDatum").value = today;

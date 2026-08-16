@@ -21,6 +21,7 @@ const fs = require("fs");
 const path = require("path");
 
 const model = require("./subsidyModel");
+const subsidyImport = require("./subsidyImport");
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -273,6 +274,42 @@ class SubsidyStore {
       view: "alle",
     });
     return model.summarize(records, { month: filter.month });
+  }
+
+  /**
+   * Gleicht Kandidaten aus dem Transporeon-Export gegen die Cockpit-Datensaetze
+   * ab (Bauplan §14-§20). Geldkritisch: Es wird NUR bei eindeutigem Treffer
+   * automatisch aktualisiert; mehrdeutig/ohne Treffer -> nur gemeldet, nichts
+   * geraten, nichts geloescht.
+   *
+   * @param {object[]} candidates  geparste Kandidaten (aus subsidyImport.parseRows)
+   * @param {{actor?: string, dryRun?: boolean, importId?: string, now?: string}} [ctx]
+   * @returns {{dryRun: boolean, importId: string, summary: object, applied: string[], plans: object[]}}
+   */
+  reconcile(candidates = [], ctx = {}) {
+    this._init();
+    const dryRun = !!ctx.dryRun;
+    const now = ctx.now || new Date().toISOString();
+    const importId = ctx.importId || generateId(new Date());
+
+    const records = this.list({ includeArchived: true, view: "alle" });
+    const plans = subsidyImport.planReconcileAll(candidates, records, { now });
+    const summary = subsidyImport.summarizePlans(plans);
+
+    const applied = [];
+    if (!dryRun) {
+      for (const plan of plans) {
+        if (plan.action !== "update") continue;
+        const changes = { ...plan.changes, transporeon_import_id: importId };
+        const record = this.update(plan.recordId, changes, {
+          actor: ctx.actor || "transporeon-import",
+          source: model.QUELLE.TRANSPOREON_EXCEL,
+        });
+        if (record) applied.push(record.id);
+      }
+    }
+
+    return { dryRun, importId, summary, applied, plans };
   }
 }
 

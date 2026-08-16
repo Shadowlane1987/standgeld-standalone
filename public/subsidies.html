@@ -67,6 +67,29 @@
       </section>
 
       <section class="panel">
+        <h2>Transporeon-Export abgleichen</h2>
+        <p>
+          Zuschlags-Export (.xlsx) aus Transporeon hochladen. Es wird nur bei
+          eindeutigem Treffer automatisch aktualisiert – Unklares landet in
+          „Prüfen“, nichts wird geraten oder gelöscht.
+        </p>
+        <div class="grid grid-4">
+          <label
+            >Export-Datei (.xlsx)
+            <input id="importFile" type="file" accept=".xlsx" />
+          </label>
+          <div style="align-self: end; display: flex; gap: 8px">
+            <button id="importPreviewBtn" type="button">Vorschau</button>
+            <button id="importApplyBtn" type="button" disabled>
+              Abgleich übernehmen
+            </button>
+          </div>
+        </div>
+        <p class="status" id="importStatus"></p>
+        <div id="importResult" hidden></div>
+      </section>
+
+      <section class="panel">
         <h2>Neuen Zuschlag erfassen</h2>
         <div class="grid grid-3">
           <label
