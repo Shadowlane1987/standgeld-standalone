@@ -41,6 +41,7 @@ const {
   dryRunStandgeldCheck,
 } = require("./services/transporeonSurchargeAutomation");
 const { ImportStore, normalizeScope } = require("./storage/importStore");
+const { runStartupBackup } = require("./backup/backupStore");
 
 dotenv.config();
 
@@ -3512,5 +3513,19 @@ app.post(
 );
 
 app.listen(PORT, () => {
+  // Pflicht-Backup bei jedem Start: sichert den Datenordner lokal weg.
+  try {
+    const result = runStartupBackup({ dataDir: APP_DATA_DIR });
+    if (result.skipped) {
+      console.log(`Backup übersprungen (${result.reason}).`);
+    } else {
+      const pruned = result.removed.length
+        ? `, ${result.removed.length} alte entfernt`
+        : "";
+      console.log(`Backup erstellt: ${result.path}${pruned}`);
+    }
+  } catch (error) {
+    console.error(`Backup fehlgeschlagen: ${error.message}`);
+  }
   console.log(`Standgeld Standalone läuft auf http://localhost:${PORT}`);
 });
